@@ -1,10 +1,17 @@
 import json
-import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
-from datetime import datetime, timezone
+
+from afk_runtime import (
+    git,
+    process_result,
+    repository_state,
+    run_command,
+    seal_json,
+    timestamp,
+    write_json,
+)
 
 
 USAGE = "usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY"
@@ -40,31 +47,15 @@ def main() -> int:
     stderr_path = attempt_directory / "stderr.log"
     started_at = timestamp()
 
-    with events_path.open("wb") as events, stderr_path.open("wb") as stderr:
-        timed_out = False
-        interrupted = False
-        runner_error = None
-        try:
-            process = subprocess.Popen(
-                assignment["command"],
-                cwd=workspace,
-                stdin=subprocess.DEVNULL,
-                stdout=events,
-                stderr=stderr,
-                start_new_session=True,
-            )
-        except OSError as error:
-            exit_code = None
-            runner_error = str(error)
-        else:
-            try:
-                exit_code = process.wait(timeout=assignment["timeout_seconds"])
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                exit_code = terminate(process)
-            except KeyboardInterrupt:
-                interrupted = True
-                exit_code = terminate(process)
+    execution = run_command(
+        assignment["command"],
+        workspace,
+        assignment["timeout_seconds"],
+        events_path,
+        stderr_path,
+    )
+    exit_code = execution["exit_code"]
+    runner_error = execution["error"]
 
     observation_error = None
     try:
@@ -81,9 +72,9 @@ def main() -> int:
     agent = None if runner_error else agent_result(events_path)
     outcome = (
         "interrupted"
-        if interrupted
+        if execution["interrupted"]
         else "timed_out"
-        if timed_out
+        if execution["timed_out"]
         else "succeeded"
         if (
             exit_code == 0
@@ -108,9 +99,7 @@ def main() -> int:
         },
         "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
     }
-    temporary = attempt_directory / "output.json.tmp"
-    write_json(temporary, output)
-    os.replace(temporary, attempt_directory / "output.json")
+    seal_json(attempt_directory / "output.json", output)
     return 0 if outcome == "succeeded" else 1
 
 
@@ -128,23 +117,6 @@ def validate_assignment(assignment: object) -> None:
     timeout = assignment.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("assignment timeout_seconds must be a positive integer")
-
-
-def repository_state(workspace: Path) -> dict[str, object]:
-    head = git(workspace, "rev-parse", "HEAD")
-    branch = subprocess.run(
-        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
-        cwd=workspace,
-        text=True,
-        capture_output=True,
-    )
-    status = git(workspace, "status", "--porcelain").splitlines()
-    return {
-        "head": head,
-        "branch": branch.stdout.strip() if branch.returncode == 0 else None,
-        "dirty": bool(status),
-        "status": status,
-    }
 
 
 def commits_between_heads(
@@ -190,47 +162,6 @@ def agent_result(events_path: Path) -> dict[str, str]:
     if terminal_message.get("stopReason") == "aborted":
         return {"status": "aborted"}
     return {"status": "completed"}
-
-
-def process_result(exit_code: int | None, error: str | None) -> dict[str, object]:
-    result: dict[str, object] = {
-        "exit_code": exit_code if exit_code is None or exit_code >= 0 else None,
-        "signal": signal.Signals(-exit_code).name if exit_code is not None and exit_code < 0 else None,
-    }
-    if error:
-        result["error"] = error
-    return result
-
-
-def terminate(process: subprocess.Popen[bytes]) -> int:
-    if process.poll() is not None:
-        return process.returncode
-    try:
-        os.killpg(process.pid, signal.SIGTERM)
-    except ProcessLookupError:
-        return process.wait()
-    try:
-        return process.wait(timeout=2)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-        return process.wait()
-
-
-def git(workspace: Path, *args: str) -> str:
-    return subprocess.run(
-        ["git", *args], cwd=workspace, check=True, text=True, capture_output=True
-    ).stdout.strip()
-
-
-def write_json(path: Path, value: object) -> None:
-    path.write_text(json.dumps(value, indent=2) + "\n")
-
-
-def timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 if __name__ == "__main__":
