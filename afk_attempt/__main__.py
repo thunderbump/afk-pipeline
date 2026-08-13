@@ -7,9 +7,24 @@ import sys
 from datetime import datetime, timezone
 
 
+USAGE = "usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY"
+
+HELP = f"""{USAGE}
+
+Run one AFK attempt from ASSIGNMENT_JSON and seal its artifacts in ATTEMPT_DIRECTORY.
+
+Arguments:
+  ASSIGNMENT_JSON    Path to the assignment JSON file.
+  ATTEMPT_DIRECTORY  New directory where attempt input, output, and logs are written.
+"""
+
+
 def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        print(HELP, end="")
+        return 0
     if len(sys.argv) != 3:
-        print("usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         return 2
 
     assignment_path = Path(sys.argv[1])

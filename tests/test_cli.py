@@ -13,6 +13,33 @@ ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_agent.py"
 
 
+class PublicCliTest(unittest.TestCase):
+    def test_help_exits_zero_and_describes_arguments(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "afk_attempt", "--help"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY", completed.stdout)
+        self.assertIn("assignment JSON", completed.stdout)
+        self.assertIn("ATTEMPT_DIRECTORY", completed.stdout)
+        self.assertEqual(completed.stderr, "")
+
+    def test_wrong_number_of_ordinary_arguments_exits_two(self):
+        completed = subprocess.run(
+            [sys.executable, "-m", "afk_attempt", "assignment.json"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY", completed.stderr)
+
+
 class AttemptExecutorTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
