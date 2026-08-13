@@ -1,4 +1,8 @@
-# AFK Attempt Executor
+# AFK Pipeline
+
+Small executable modules for running agent work and validating its result.
+
+## Attempt Executor
 
 Run one structured assignment in a prepared Git workspace and retain an
 inspectable Attempt Directory.
@@ -47,6 +51,42 @@ failure instead of discarding the other Attempt evidence.
 The executor terminates the runner process group on timeout or interruption.
 Exit status is `0` for success, `1` for a sealed non-success outcome, and `2`
 for invalid invocation or Assignment input.
+
+## Repository Validation
+
+Run one repository-owned validation command in a prepared Git workspace and
+retain an inspectable result directory:
+
+```sh
+python3 -m afk_validate validation.json /new/result-directory
+```
+
+The result directory must not exist. Validation input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "workspace": "/absolute/path/to/prepared/checkout",
+  "command": ["./scripts/validate"],
+  "timeout_seconds": 1800
+}
+```
+
+The workspace implicitly selects the branch or detached ref. `command` is one
+exact argv array and runs directly without a shell. The target repository owns
+everything behind that command, including any test-service container
+lifecycle.
+
+The validator writes the accepted input to `input.json`, raw command output to
+`stdout.log` and `stderr.log`, then atomically writes `output.json` last. It
+records before/after HEAD, branch, and worktree status. A zero-exit command
+passes only when HEAD remains unchanged and post-command Git observation
+succeeds; worktree dirtiness is recorded but is not itself a failure.
+
+Validation outcomes are `passed`, `failed`, `timed_out`, or `interrupted`. The
+validator terminates the command process group on timeout or interruption.
+Exit status is `0` for pass, `1` for a sealed non-success result, and `2` for
+invalid invocation or input.
 
 ## Check
 
