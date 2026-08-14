@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import os
 import signal
 import subprocess
@@ -7,7 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_agent.py"
@@ -20,10 +19,14 @@ class PublicCliTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY", completed.stdout)
+        self.assertIn(
+            "usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY",
+            completed.stdout,
+        )
         self.assertIn("assignment JSON", completed.stdout)
         self.assertIn("ATTEMPT_DIRECTORY", completed.stdout)
         self.assertEqual(completed.stderr, "")
@@ -34,10 +37,14 @@ class PublicCliTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
 
         self.assertEqual(completed.returncode, 2)
-        self.assertIn("usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY", completed.stderr)
+        self.assertIn(
+            "usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY",
+            completed.stderr,
+        )
 
 
 class AttemptExecutorTest(unittest.TestCase):
@@ -71,6 +78,7 @@ class AttemptExecutorTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
@@ -97,7 +105,9 @@ class AttemptExecutorTest(unittest.TestCase):
         output = json.loads((attempt / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
         self.assertEqual(output["process"]["exit_code"], 0)
-        self.assertEqual(output["agent"], {"status": "error", "error": "fixture agent error"})
+        self.assertEqual(
+            output["agent"], {"status": "error", "error": "fixture agent error"}
+        )
 
     def test_aborted_agent_fails_even_when_process_exits_zero(self):
         attempt, completed = self.run_attempt("agent-aborted")
@@ -122,7 +132,9 @@ class AttemptExecutorTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((attempt / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
-        self.assertEqual(output["agent"], {"status": "error", "error": "invalid agent event JSON"})
+        self.assertEqual(
+            output["agent"], {"status": "error", "error": "invalid agent event JSON"}
+        )
 
     def test_malformed_agent_shapes_and_encoding_are_sealed_as_failure(self):
         for scenario in ("invalid-event-shape", "invalid-event-encoding"):
@@ -139,7 +151,9 @@ class AttemptExecutorTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((attempt / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
-        self.assertEqual(output["agent"], {"status": "error", "error": "events follow agent_end"})
+        self.assertEqual(
+            output["agent"], {"status": "error", "error": "events follow agent_end"}
+        )
 
     def test_post_run_git_observation_failure_is_sealed(self):
         attempt, completed = self.run_attempt("damage-git")
@@ -177,6 +191,7 @@ class AttemptExecutorTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
 
         self.assertEqual(completed.returncode, 1, completed.stderr)
@@ -188,7 +203,9 @@ class AttemptExecutorTest(unittest.TestCase):
 
     def test_timeout_terminates_the_process_group_and_seals_output(self):
         marker = self.root / "descendant.pid"
-        attempt, completed = self.run_attempt("hang", timeout_seconds=1, extra_args=[str(marker)])
+        attempt, completed = self.run_attempt(
+            "hang", timeout_seconds=1, extra_args=[str(marker)]
+        )
 
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((attempt / "output.json").read_text())
@@ -223,10 +240,12 @@ class AttemptExecutorTest(unittest.TestCase):
             time.sleep(0.01)
         self.assertTrue(marker.is_file())
         executor.send_signal(signal.SIGINT)
-        stdout, stderr = executor.communicate(timeout=5)
+        _stdout, stderr = executor.communicate(timeout=5)
 
         self.assertEqual(executor.returncode, 1, stderr)
-        self.assertEqual(json.loads((attempt / "output.json").read_text())["outcome"], "interrupted")
+        self.assertEqual(
+            json.loads((attempt / "output.json").read_text())["outcome"], "interrupted"
+        )
         descendant = int(marker.read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(descendant, 0)
@@ -280,6 +299,7 @@ class AttemptExecutorTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
 
         self.assertEqual(completed.returncode, 2)
@@ -301,12 +321,17 @@ class AttemptExecutorTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
         return attempt, completed
 
     def git(self, *args):
         return subprocess.run(
-            ["git", *args], cwd=self.workspace, check=True, text=True, capture_output=True
+            ["git", *args],
+            cwd=self.workspace,
+            check=True,
+            text=True,
+            capture_output=True,
         ).stdout.strip()
 
 

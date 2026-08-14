@@ -1,10 +1,9 @@
 import json
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
-
+from pathlib import Path
 
 scenario = sys.argv[1]
 
@@ -62,7 +61,10 @@ elif scenario == "events-after-end":
     print(json.dumps({"type": "agent_start"}), flush=True)
     print(
         json.dumps(
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
         ),
         flush=True,
     )
@@ -81,11 +83,16 @@ elif scenario == "hang":
 elif scenario == "git-commit":
     Path("result.txt").write_text("fixture result\n")
     subprocess.run(["git", "add", "result.txt"], check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", "Fixture implementation"], check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Fixture implementation"], check=True
+    )
     print(json.dumps({"type": "agent_start"}), flush=True)
     print(
         json.dumps(
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
         ),
         flush=True,
     )
@@ -95,7 +102,10 @@ elif scenario == "damage-git":
     print(json.dumps({"type": "agent_start"}), flush=True)
     print(
         json.dumps(
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
         ),
         flush=True,
     )
@@ -105,14 +115,21 @@ elif scenario == "damage-history":
         ["git", "rev-parse", "HEAD"], check=True, text=True, capture_output=True
     ).stdout.strip()
     Path("result.txt").write_text("new history\n")
-    subprocess.run(["git", "checkout", "--orphan", "replacement"], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "checkout", "--orphan", "replacement"], check=True, capture_output=True
+    )
     subprocess.run(["git", "add", "result.txt"], check=True)
-    subprocess.run(["git", "commit", "--quiet", "-m", "Replacement history"], check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Replacement history"], check=True
+    )
     (Path(".git") / "objects" / before[:2] / before[2:]).unlink()
     print(json.dumps({"type": "agent_start"}), flush=True)
     print(
         json.dumps(
-            {"type": "message_end", "message": {"role": "assistant", "stopReason": "stop"}}
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
         ),
         flush=True,
     )

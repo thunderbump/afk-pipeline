@@ -1,8 +1,8 @@
 import json
-from pathlib import Path
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from afk_runtime import (
     process_result,
@@ -12,7 +12,6 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
-
 
 USAGE = "usage: python3 -m afk_validate VALIDATION_JSON RESULT_DIRECTORY"
 
@@ -92,8 +91,10 @@ def validate(validation: object) -> None:
     if not isinstance(workspace, str) or not Path(workspace).is_absolute():
         raise ValueError("validation workspace must be an absolute path")
     command = validation.get("command")
-    if not isinstance(command, list) or not command or not all(
-        isinstance(argument, str) for argument in command
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(argument, str) for argument in command)
     ):
         raise ValueError("validation command must be a non-empty argv string array")
     timeout = validation.get("timeout_seconds")
@@ -104,6 +105,11 @@ def validate(validation: object) -> None:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
+    except (
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as error:
         print(f"afk-validate: {error}", file=sys.stderr)
         raise SystemExit(2)

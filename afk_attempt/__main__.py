@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import subprocess
 import sys
+from pathlib import Path
 
 from afk_runtime import (
     git,
@@ -12,7 +12,6 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
-
 
 USAGE = "usage: python3 -m afk_attempt ASSIGNMENT_JSON ATTEMPT_DIRECTORY"
 
@@ -106,13 +105,20 @@ def main() -> int:
 def validate_assignment(assignment: object) -> None:
     if not isinstance(assignment, dict) or assignment.get("schema_version") != 1:
         raise ValueError("assignment must use schema_version 1")
-    if not isinstance(assignment.get("objective"), str) or not assignment["objective"].strip():
+    if (
+        not isinstance(assignment.get("objective"), str)
+        or not assignment["objective"].strip()
+    ):
         raise ValueError("assignment objective must be a non-empty string")
     workspace = assignment.get("workspace")
     if not isinstance(workspace, str) or not Path(workspace).is_absolute():
         raise ValueError("assignment workspace must be an absolute path")
     command = assignment.get("command")
-    if not isinstance(command, list) or not command or not all(isinstance(arg, str) for arg in command):
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(arg, str) for arg in command)
+    ):
         raise ValueError("assignment command must be a non-empty argv string array")
     timeout = assignment.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
@@ -127,7 +133,7 @@ def commits_between_heads(
     if before["head"] == after["head"]:
         return []
     return git(
-        workspace, "rev-list", "--reverse", f'{before["head"]}..{after["head"]}'
+        workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
     ).splitlines()
 
 
@@ -158,7 +164,10 @@ def agent_result(events_path: Path) -> dict[str, str]:
     if not saw_end or terminal_message is None:
         return {"status": "error", "error": "agent event stream did not complete"}
     if terminal_message.get("stopReason") == "error":
-        return {"status": "error", "error": terminal_message.get("errorMessage", "agent error")}
+        return {
+            "status": "error",
+            "error": terminal_message.get("errorMessage", "agent error"),
+        }
     if terminal_message.get("stopReason") == "aborted":
         return {"status": "aborted"}
     return {"status": "completed"}
@@ -167,6 +176,11 @@ def agent_result(events_path: Path) -> dict[str, str]:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError) as error:
+    except (
+        OSError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as error:
         print(f"afk-attempt: {error}", file=sys.stderr)
         raise SystemExit(2)

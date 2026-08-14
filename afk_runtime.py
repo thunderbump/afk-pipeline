@@ -2,10 +2,10 @@
 
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 from datetime import datetime, timezone
+from pathlib import Path
 
 
 def run_command(
@@ -55,6 +55,7 @@ def repository_state(workspace: Path) -> dict[str, object]:
         cwd=workspace,
         text=True,
         capture_output=True,
+        check=False,
     )
     status = git(workspace, "status", "--porcelain").splitlines()
     return {

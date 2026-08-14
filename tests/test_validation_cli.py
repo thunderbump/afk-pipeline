@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 import os
 import signal
 import subprocess
@@ -7,7 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
-
+from pathlib import Path
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_validation.py"
@@ -175,7 +174,7 @@ class ValidationCliTest(unittest.TestCase):
 
         try:
             validator.send_signal(signal.SIGINT)
-            stdout, stderr = validator.communicate(timeout=5)
+            _stdout, stderr = validator.communicate(timeout=5)
         finally:
             try:
                 os.killpg(processes["process"], signal.SIGKILL)
@@ -229,6 +228,7 @@ class ValidationCliTest(unittest.TestCase):
             cwd=ROOT,
             text=True,
             capture_output=True,
+            check=False,
         )
         return result, completed
 
