@@ -15,8 +15,20 @@ from afk_runtime import (
 
 USAGE = "usage: python3 -m afk_validate VALIDATION_JSON RESULT_DIRECTORY"
 
+HELP = f"""{USAGE}
+
+Run one AFK validation from VALIDATION_JSON and seal its artifacts in RESULT_DIRECTORY.
+
+Arguments:
+  VALIDATION_JSON   Path to the validation JSON file.
+  RESULT_DIRECTORY  New directory where validation input, output, and logs are written.
+"""
+
 
 def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        print(HELP, end="")
+        return 0
     if len(sys.argv) != 3:
         print(USAGE, file=sys.stderr)
         return 2
