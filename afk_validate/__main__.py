@@ -35,17 +35,22 @@ def main() -> int:
 
     input_path = Path(sys.argv[1])
     result_directory = Path(sys.argv[2])
+    progress("loading validation input")
     validation = json.loads(input_path.read_text())
     validate(validation)
+    progress("validation input accepted")
     workspace = Path(validation["workspace"])
+    progress("observing repository before validation")
     before = repository_state(workspace)
 
+    progress("preparing validation result directory")
     result_directory.mkdir()
     write_json(result_directory / "input.json", validation)
     stdout_path = result_directory / "stdout.log"
     stderr_path = result_directory / "stderr.log"
     started_at = timestamp()
     started = time.monotonic()
+    progress("starting validation child")
     execution = run_command(
         validation["command"],
         workspace,
@@ -53,9 +58,11 @@ def main() -> int:
         stdout_path,
         stderr_path,
     )
+    progress("validation child completed")
     exit_code = execution["exit_code"]
     runner_error = execution["error"]
 
+    progress("observing repository after validation")
     observation_error = None
     try:
         after = repository_state(workspace)
@@ -92,8 +99,14 @@ def main() -> int:
         },
         "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
     }
-    seal_json(result_directory / "output.json", output)
+    output_path = result_directory / "output.json"
+    seal_json(output_path, output)
+    progress(f"sealed {outcome} validation outcome at {output_path}")
     return 0 if outcome == "passed" else 1
+
+
+def progress(message: str) -> None:
+    print(f"{timestamp()} {message}", flush=True)
 
 
 def validate(validation: object) -> None:

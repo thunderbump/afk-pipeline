@@ -82,6 +82,23 @@ class AttemptExecutorTest(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        for line in completed.stdout.splitlines():
+            self.assertRegex(line, r"^\d{4}-\d{2}-\d{2}T.*Z ")
+        self.assertEqual(
+            [line.split(" ", 1)[1] for line in completed.stdout.splitlines()],
+            [
+                "loading assignment input",
+                "assignment input accepted",
+                "observing repository before attempt",
+                "preparing attempt directory",
+                "starting agent child",
+                "agent child completed",
+                "observing repository after attempt",
+                f"sealed succeeded attempt outcome at {attempt / 'output.json'}",
+            ],
+        )
+        self.assertNotIn("agent_start", completed.stdout)
         self.assertEqual(json.loads((attempt / "input.json").read_text()), assignment)
         output = json.loads((attempt / "output.json").read_text())
         self.assertEqual(output["outcome"], "succeeded")

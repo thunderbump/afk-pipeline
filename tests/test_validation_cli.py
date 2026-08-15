@@ -72,6 +72,23 @@ class ValidationCliTest(unittest.TestCase):
         result, completed = self.run_validation(validation)
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stderr, "")
+        for line in completed.stdout.splitlines():
+            self.assertRegex(line, r"^\d{4}-\d{2}-\d{2}T.*Z ")
+        self.assertEqual(
+            [line.split(" ", 1)[1] for line in completed.stdout.splitlines()],
+            [
+                "loading validation input",
+                "validation input accepted",
+                "observing repository before validation",
+                "preparing validation result directory",
+                "starting validation child",
+                "validation child completed",
+                "observing repository after validation",
+                f"sealed passed validation outcome at {result / 'output.json'}",
+            ],
+        )
+        self.assertNotIn("validation passed", completed.stdout)
         self.assertEqual(json.loads((result / "input.json").read_text()), validation)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "passed")

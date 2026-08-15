@@ -35,17 +35,22 @@ def main() -> int:
 
     assignment_path = Path(sys.argv[1])
     attempt_directory = Path(sys.argv[2])
+    progress("loading assignment input")
     assignment = json.loads(assignment_path.read_text())
     validate_assignment(assignment)
+    progress("assignment input accepted")
     workspace = Path(assignment["workspace"])
 
+    progress("observing repository before attempt")
     before = repository_state(workspace)
+    progress("preparing attempt directory")
     attempt_directory.mkdir()
     write_json(attempt_directory / "input.json", assignment)
     events_path = attempt_directory / "events.jsonl"
     stderr_path = attempt_directory / "stderr.log"
     started_at = timestamp()
 
+    progress("starting agent child")
     execution = run_command(
         assignment["command"],
         workspace,
@@ -53,9 +58,11 @@ def main() -> int:
         events_path,
         stderr_path,
     )
+    progress("agent child completed")
     exit_code = execution["exit_code"]
     runner_error = execution["error"]
 
+    progress("observing repository after attempt")
     observation_error = None
     try:
         after = repository_state(workspace)
@@ -98,8 +105,14 @@ def main() -> int:
         },
         "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
     }
-    seal_json(attempt_directory / "output.json", output)
+    output_path = attempt_directory / "output.json"
+    seal_json(output_path, output)
+    progress(f"sealed {outcome} attempt outcome at {output_path}")
     return 0 if outcome == "succeeded" else 1
+
+
+def progress(message: str) -> None:
+    print(f"{timestamp()} {message}", flush=True)
 
 
 def validate_assignment(assignment: object) -> None:

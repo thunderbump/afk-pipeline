@@ -14,6 +14,11 @@ python3 -m afk_attempt assignment.json /new/attempt-directory
 The destination must not exist. The executor creates it, records the accepted
 Assignment as `input.json`, writes the runner's JSON-lines stdout and raw stderr
 to `events.jsonl` and `stderr.log`, then atomically writes `output.json` last.
+During execution, the wrapper writes concise timestamped progress to its stdout
+and flushes each line immediately for input acceptance, repository observations,
+artifact preparation, child start and completion, and final outcome sealing.
+Normal progress is never written to
+wrapper stderr, and runner stdout/stderr stay routed only to the artifact logs.
 
 ## Assignment
 
@@ -79,9 +84,15 @@ lifecycle.
 
 The validator writes the accepted input to `input.json`, raw command output to
 `stdout.log` and `stderr.log`, then atomically writes `output.json` last. It
-records before/after HEAD, branch, and worktree status. A zero-exit command
-passes only when HEAD remains unchanged and post-command Git observation
-succeeds; worktree dirtiness is recorded but is not itself a failure.
+records before/after HEAD, branch, and worktree status. While it runs, wrapper
+stdout receives concise timestamped progress, flushed line-by-line immediately,
+for input acceptance, repository observations, result-directory preparation,
+child start and completion, and final outcome sealing. Normal progress is never
+written to wrapper stderr, and
+validation command stdout/stderr stay routed only to `stdout.log` and
+`stderr.log`. A zero-exit command passes only when HEAD remains unchanged and
+post-command Git observation succeeds; worktree dirtiness is recorded but is not
+itself a failure.
 
 Validation outcomes are `passed`, `failed`, `timed_out`, or `interrupted`. The
 validator terminates the command process group on timeout or interruption.
