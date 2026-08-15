@@ -47,8 +47,9 @@ failure instead of discarding the other Attempt evidence.
 
 ## Outcomes
 
-- `succeeded`: the command exited zero and its event stream ended with a
-  non-error assistant message plus `agent_end`.
+- `succeeded`: the command exited zero and its event stream contains a
+  non-error assistant message followed by `agent_end`; one final
+  `agent_settled` event is also accepted for current Pi.
 - `failed`: launch, process, or agent-protocol failure.
 - `timed_out`: the configured deadline expired.
 - `interrupted`: the executor received Ctrl-C while the runner was active.

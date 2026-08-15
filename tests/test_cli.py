@@ -223,6 +223,24 @@ class AttemptExecutorTest(unittest.TestCase):
             output["agent"], {"status": "error", "error": "events follow agent_end"}
         )
 
+    def test_agent_settled_may_follow_agent_end(self):
+        attempt, completed = self.run_attempt("settled-after-end")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((attempt / "output.json").read_text())
+        self.assertEqual(output["outcome"], "succeeded")
+        self.assertEqual(output["agent"], {"status": "completed"})
+
+    def test_agent_settled_must_be_once_and_after_agent_end(self):
+        for scenario in ("settled-before-end", "settled-twice-after-end"):
+            with self.subTest(scenario=scenario):
+                attempt, completed = self.run_attempt(scenario)
+
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                output = json.loads((attempt / "output.json").read_text())
+                self.assertEqual(output["outcome"], "failed")
+                self.assertEqual(output["agent"]["status"], "error")
+
     def test_post_run_git_observation_failure_is_sealed(self):
         attempt, completed = self.run_attempt("damage-git")
 

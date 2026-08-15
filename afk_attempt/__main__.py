@@ -164,20 +164,26 @@ def commits_between_heads(
 
 def agent_result(events_path: Path) -> dict[str, str]:
     saw_end = False
+    saw_settled = False
     terminal_message = None
     try:
         lines = events_path.read_bytes().decode("utf-8").splitlines()
     except UnicodeDecodeError:
         return {"status": "error", "error": "invalid agent event encoding"}
     for line in lines:
-        if saw_end:
-            return {"status": "error", "error": "events follow agent_end"}
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             return {"status": "error", "error": "invalid agent event JSON"}
         if not isinstance(event, dict):
             return {"status": "error", "error": "invalid agent event JSON"}
+        if saw_end:
+            if event.get("type") != "agent_settled" or saw_settled:
+                return {"status": "error", "error": "events follow agent_end"}
+            saw_settled = True
+            continue
+        if event.get("type") == "agent_settled":
+            return {"status": "error", "error": "agent_settled precedes agent_end"}
         if event.get("type") == "message_end":
             message = event.get("message")
             if not isinstance(message, dict):

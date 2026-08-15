@@ -70,6 +70,44 @@ elif scenario == "events-after-end":
     )
     print(json.dumps({"type": "agent_end"}), flush=True)
     print(json.dumps({"type": "queue_update"}), flush=True)
+elif scenario == "settled-after-end":
+    print(json.dumps({"type": "agent_start"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
+        ),
+        flush=True,
+    )
+    print(json.dumps({"type": "agent_end", "willRetry": False}), flush=True)
+    print(json.dumps({"type": "agent_settled"}), flush=True)
+elif scenario == "settled-before-end":
+    print(
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
+        ),
+        flush=True,
+    )
+    print(json.dumps({"type": "agent_settled"}), flush=True)
+    print(json.dumps({"type": "agent_end", "willRetry": False}), flush=True)
+elif scenario == "settled-twice-after-end":
+    print(
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
+        ),
+        flush=True,
+    )
+    print(json.dumps({"type": "agent_end", "willRetry": False}), flush=True)
+    print(json.dumps({"type": "agent_settled"}), flush=True)
+    print(json.dumps({"type": "agent_settled"}), flush=True)
 elif scenario == "hang":
     marker = Path(sys.argv[2])
     child = subprocess.Popen(
