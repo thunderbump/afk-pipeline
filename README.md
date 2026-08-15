@@ -96,9 +96,8 @@ Install the repository's Ruff commit hooks once per checkout:
 pre-commit install
 ```
 
-Run all checks explicitly:
+Run the complete repository check:
 
 ```sh
-pre-commit run --all-files
-python3 -m unittest -v
+./scripts/validate
 ```
