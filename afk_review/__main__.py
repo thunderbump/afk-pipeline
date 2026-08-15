@@ -284,8 +284,24 @@ def validate_location(
         target.relative_to(root)
     except ValueError as error:
         raise ValueError("finding location path escapes the repository") from error
+    entry = subprocess.run(
+        ["git", "--literal-pathspecs", "ls-tree", "-z", reviewed_head, "--", path],
+        cwd=workspace,
+        capture_output=True,
+        check=False,
+    )
+    if entry.returncode != 0 or not entry.stdout:
+        raise ValueError("finding location path must name a reviewed file")
+    metadata, entry_path = entry.stdout.rstrip(b"\0").split(b"\t", 1)
+    mode, object_type, object_id = metadata.split(b" ", 2)
+    if (
+        entry_path.decode("utf-8") != path
+        or object_type != b"blob"
+        or mode not in {b"100644", b"100755"}
+    ):
+        raise ValueError("finding location path must name a reviewed file")
     blob = subprocess.run(
-        ["git", "show", f"{reviewed_head}:{path}"],
+        ["git", "cat-file", "blob", object_id.decode("ascii")],
         cwd=workspace,
         capture_output=True,
         check=False,

@@ -58,7 +58,9 @@ class ReviewCliTest(unittest.TestCase):
         self.git("config", "user.name", "AFK Test")
         self.git("config", "user.email", "afk-test@example.invalid")
         (self.workspace / "README.md").write_text("before\n")
-        self.git("add", "README.md")
+        (self.workspace / "docs").mkdir()
+        (self.workspace / "docs" / "note.txt").write_text("tracked directory\n")
+        self.git("add", "README.md", "docs/note.txt")
         self.git("commit", "--quiet", "-m", "Initial state")
         self.before = self.state()
         (self.workspace / "README.md").write_text("after\n")
@@ -152,7 +154,13 @@ class ReviewCliTest(unittest.TestCase):
     def test_finding_locations_must_exist_within_the_reviewed_head(self):
         (self.workspace / ".git" / "info" / "exclude").write_text("ignored.txt\n")
         (self.workspace / "ignored.txt").write_text("not in HEAD\n")
-        for scenario in ("missing-path", "outside-path", "ignored-path", "bad-line"):
+        for scenario in (
+            "missing-path",
+            "outside-path",
+            "ignored-path",
+            "directory-path",
+            "bad-line",
+        ):
             with self.subTest(scenario=scenario):
                 result, completed = self.run_review(scenario, result_name=scenario)
                 self.assertEqual(completed.returncode, 1, completed.stderr)
