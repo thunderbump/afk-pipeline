@@ -90,7 +90,10 @@ def main() -> int:
     review_error = None
     if agent is not None and agent["status"] == "completed":
         try:
-            review = validate_review(json.loads(response["text"]), workspace)
+            reviewed_head = evidence["attempt"]["repository"]["after"]["head"]
+            review = validate_review(
+                json.loads(response["text"]), workspace, reviewed_head
+            )
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             review_error = str(error)
 
@@ -229,7 +232,9 @@ def subject_state(state: dict[str, object]) -> dict[str, object]:
     return {field: state[field] for field in ("head", "dirty", "status")}
 
 
-def validate_review(value: object, workspace: Path) -> dict[str, object]:
+def validate_review(
+    value: object, workspace: Path, reviewed_head: str
+) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("review response must be an object")
     if not isinstance(value.get("summary"), str):
@@ -238,11 +243,11 @@ def validate_review(value: object, workspace: Path) -> dict[str, object]:
     if not isinstance(findings, list):
         raise TypeError("review findings must be an array")
     for finding in findings:
-        validate_finding(finding, workspace)
+        validate_finding(finding, workspace, reviewed_head)
     return value
 
 
-def validate_finding(finding: object, workspace: Path) -> None:
+def validate_finding(finding: object, workspace: Path, reviewed_head: str) -> None:
     if not isinstance(finding, dict):
         raise TypeError("each finding must be an object")
     if finding.get("severity") not in {"high", "medium", "low"}:
@@ -267,20 +272,28 @@ def validate_finding(finding: object, workspace: Path) -> None:
             raise TypeError("finding location line must be an integer")
         if line < 1:
             raise ValueError("finding location line must be a positive integer")
-        validate_location(workspace, location["path"], line)
+        validate_location(workspace, reviewed_head, location["path"], line)
 
 
-def validate_location(workspace: Path, path: str, line: int) -> None:
+def validate_location(
+    workspace: Path, reviewed_head: str, path: str, line: int
+) -> None:
     root = workspace.resolve()
     target = (workspace / path).resolve()
     try:
         target.relative_to(root)
     except ValueError as error:
         raise ValueError("finding location path escapes the repository") from error
-    if not target.is_file():
+    blob = subprocess.run(
+        ["git", "show", f"{reviewed_head}:{path}"],
+        cwd=workspace,
+        capture_output=True,
+        check=False,
+    )
+    if blob.returncode != 0:
         raise ValueError("finding location path must name a reviewed file")
     try:
-        line_count = len(target.read_text().splitlines())
+        line_count = len(blob.stdout.decode("utf-8").splitlines())
     except UnicodeDecodeError as error:
         raise ValueError("finding location path must name a text file") from error
     if line > line_count:

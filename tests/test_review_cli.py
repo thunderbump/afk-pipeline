@@ -150,7 +150,9 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIn("line must be an integer", output["review_error"])
 
     def test_finding_locations_must_exist_within_the_reviewed_head(self):
-        for scenario in ("missing-path", "outside-path", "bad-line"):
+        (self.workspace / ".git" / "info" / "exclude").write_text("ignored.txt\n")
+        (self.workspace / "ignored.txt").write_text("not in HEAD\n")
+        for scenario in ("missing-path", "outside-path", "ignored-path", "bad-line"):
             with self.subTest(scenario=scenario):
                 result, completed = self.run_review(scenario, result_name=scenario)
                 self.assertEqual(completed.returncode, 1, completed.stderr)

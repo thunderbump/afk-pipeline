@@ -32,6 +32,7 @@ elif scenario in (
     "missing-line",
     "missing-path",
     "outside-path",
+    "ignored-path",
     "bad-line",
 ):
     location = {"path": "README.md", "line": 1}
@@ -41,6 +42,8 @@ elif scenario in (
         location["path"] = "missing.py"
     elif scenario == "outside-path":
         location["path"] = "../outside.py"
+    elif scenario == "ignored-path":
+        location["path"] = "ignored.txt"
     elif scenario == "bad-line":
         location["line"] = 999
     review = {
