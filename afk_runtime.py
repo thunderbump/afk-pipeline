@@ -4,6 +4,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -115,3 +116,15 @@ def seal_json(path: Path, value: object) -> None:
 
 def timestamp() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def progress(message: str) -> None:
+    """Emit best-effort wrapper progress without making sealing depend on stdout."""
+    try:
+        print(f"{timestamp()} {message}", flush=True)
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
+        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")

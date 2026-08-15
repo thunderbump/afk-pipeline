@@ -122,24 +122,26 @@ Review input is structured JSON:
 }
 ```
 
-The prepared workspace must have the same `HEAD`, dirty state, and status as
-the implementation Attempt and Validation. Its branch is implicit and may be
-detached. Before creating the result directory, Review rejects failed or
-mismatched evidence.
+The prepared workspace must be clean and have the same `HEAD` and status as the
+implementation Attempt and Validation. Its branch is implicit and may be
+detached. Before creating the result directory, Review rejects failed, dirty,
+or mismatched evidence.
 
-The default adapter invokes Pi with `gpt-5.6-sol` in read-only JSON mode and
-inherits authentication from the environment. A deployment or deterministic
-test may replace the adapter outside the durable input by setting
+The wrapper records the complete commit diff as `diff.patch`. The default
+adapter invokes Pi with `gpt-5.6-sol`, gives it only read-oriented tools, and
+points it at that artifact and the prepared workspace. Authentication is
+inherited from the environment. A deployment or deterministic test may replace
+the adapter outside the durable input by setting
 `AFK_REVIEW_AGENT_COMMAND` to a JSON argv array; Review appends its generated
 prompt as the final argument. Do not put credentials in this configuration or
 the Review input.
 
-Review retains `input.json`, raw `events.jsonl`, raw `stderr.log`, and an
-atomically sealed `output.json`. A completed response contains a summary and a
-possibly empty findings array. Every finding requires severity, title, details,
-and at least one repository-relative path with a positive 1-based line number
-in the reviewed `HEAD`. Findings do not make execution fail and do not authorize
-repair or GitHub posting.
+Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
+and an atomically sealed `output.json`. A completed response contains a summary
+and a possibly empty findings array. Every finding requires severity, title,
+details, and at least one repository-relative path with a positive 1-based line
+number that exists in a text file under the reviewed `HEAD`. Findings do not
+make execution fail and do not authorize repair or GitHub posting.
 
 Review outcomes are `completed`, `failed`, `timed_out`, or `interrupted`. A
 review completes only when the child exits zero, the Pi event stream and

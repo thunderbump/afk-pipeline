@@ -7,7 +7,9 @@ from pathlib import Path
 
 from afk_agent import agent_response
 from afk_runtime import (
+    git,
     process_result,
+    progress,
     repository_state,
     run_command,
     seal_json,
@@ -53,6 +55,8 @@ def main() -> int:
     progress("preparing review result directory")
     result_directory.mkdir()
     write_json(result_directory / "input.json", review_input)
+    diff_path = result_directory / "diff.patch"
+    write_diff(diff_path, workspace, evidence)
     events_path = result_directory / "events.jsonl"
     stderr_path = result_directory / "stderr.log"
     started_at = timestamp()
@@ -63,7 +67,7 @@ def main() -> int:
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
     execution = run_command(
-        [*command_prefix, prompt(review_input, evidence)],
+        [*command_prefix, prompt(review_input, evidence, diff_path)],
         workspace,
         review_input["timeout_seconds"],
         events_path,
@@ -86,7 +90,7 @@ def main() -> int:
     review_error = None
     if agent is not None and agent["status"] == "completed":
         try:
-            review = validate_review(json.loads(response["text"]))
+            review = validate_review(json.loads(response["text"]), workspace)
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             review_error = str(error)
 
@@ -122,7 +126,11 @@ def main() -> int:
             "unchanged": unchanged,
             **({"observation_error": observation_error} if observation_error else {}),
         },
-        "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+        "artifacts": {
+            "diff": "diff.patch",
+            "events": "events.jsonl",
+            "stderr": "stderr.log",
+        },
     }
     output_path = result_directory / "output.json"
     seal_json(output_path, output)
@@ -169,14 +177,14 @@ def agent_command() -> list[str]:
         "--print",
         "--no-session",
         "--tools",
-        "read,bash,grep,find,ls",
+        "read,grep,find,ls",
         "--no-extensions",
         "--no-skills",
         "--no-prompt-templates",
         "--no-themes",
         "--no-context-files",
         "--system-prompt",
-        "You are a read-only implementation reviewer. Inspect only the prepared workspace and the two named evidence directories. Do not modify files, create commits, access Beads, or change Git configuration. Your response must satisfy the JSON contract in the user prompt.",
+        "You are a read-only implementation reviewer. Inspect only the prepared workspace and the named diff and evidence paths. Your response must satisfy the JSON contract in the user prompt.",
     ]
 
 
@@ -213,13 +221,15 @@ def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> No
         raise ValueError("Attempt and Validation must identify one repository state")
     if subject_state(before) != attempt_state:
         raise ValueError("workspace must match the validated Attempt repository state")
+    if attempt_state["dirty"] or attempt_state["status"]:
+        raise ValueError("Review requires a clean committed state")
 
 
 def subject_state(state: dict[str, object]) -> dict[str, object]:
     return {field: state[field] for field in ("head", "dirty", "status")}
 
 
-def validate_review(value: object) -> dict[str, object]:
+def validate_review(value: object, workspace: Path) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("review response must be an object")
     if not isinstance(value.get("summary"), str):
@@ -228,11 +238,11 @@ def validate_review(value: object) -> dict[str, object]:
     if not isinstance(findings, list):
         raise TypeError("review findings must be an array")
     for finding in findings:
-        validate_finding(finding)
+        validate_finding(finding, workspace)
     return value
 
 
-def validate_finding(finding: object) -> None:
+def validate_finding(finding: object, workspace: Path) -> None:
     if not isinstance(finding, dict):
         raise TypeError("each finding must be an object")
     if finding.get("severity") not in {"high", "medium", "low"}:
@@ -257,9 +267,46 @@ def validate_finding(finding: object) -> None:
             raise TypeError("finding location line must be an integer")
         if line < 1:
             raise ValueError("finding location line must be a positive integer")
+        validate_location(workspace, location["path"], line)
 
 
-def prompt(review_input: dict[str, object], evidence: dict[str, object]) -> str:
+def validate_location(workspace: Path, path: str, line: int) -> None:
+    root = workspace.resolve()
+    target = (workspace / path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as error:
+        raise ValueError("finding location path escapes the repository") from error
+    if not target.is_file():
+        raise ValueError("finding location path must name a reviewed file")
+    try:
+        line_count = len(target.read_text().splitlines())
+    except UnicodeDecodeError as error:
+        raise ValueError("finding location path must name a text file") from error
+    if line > line_count:
+        raise ValueError("finding location line must exist in the reviewed file")
+
+
+def write_diff(diff_path: Path, workspace: Path, evidence: dict[str, object]) -> None:
+    attempt = evidence["attempt"]
+    before = attempt["repository"]["before"]["head"]
+    after = attempt["repository"]["after"]["head"]
+    diff = git(
+        workspace,
+        "diff",
+        "--no-ext-diff",
+        "--binary",
+        f"{before}..{after}",
+        "--",
+    )
+    diff_path.write_text(diff + ("\n" if diff else ""))
+
+
+def prompt(
+    review_input: dict[str, object],
+    evidence: dict[str, object],
+    diff_path: Path,
+) -> str:
     attempt = evidence["attempt"]
     assignment = evidence["assignment"]
     before = attempt["repository"]["before"]["head"]
@@ -267,7 +314,8 @@ def prompt(review_input: dict[str, object], evidence: dict[str, object]) -> str:
     return f"""Review the implementation described below. Do not modify the workspace.
 
 Objective: {assignment["objective"]}
-Review exactly: git diff {before}..{after}
+Reviewed commits: {before}..{after}
+Read the complete reviewed diff from: {diff_path}
 Attempt evidence: {review_input["attempt_directory"]}
 Validation evidence: {review_input["validation_directory"]}
 
@@ -287,17 +335,6 @@ Return only one JSON object with this exact shape:
 }}
 
 Every finding must have at least one location. Each location uses a repository-relative path and a positive 1-based line number in the reviewed HEAD. Use an empty findings array when you find no actionable problem. Do not wrap the JSON in Markdown."""
-
-
-def progress(message: str) -> None:
-    try:
-        print(f"{timestamp()} {message}", flush=True)
-    except BrokenPipeError:
-        try:
-            sys.stdout.close()
-        except BrokenPipeError:
-            pass
-        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")
 
 
 def read_json(path: Path) -> dict[str, object]:

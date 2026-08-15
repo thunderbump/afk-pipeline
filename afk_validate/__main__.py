@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 import time
@@ -7,6 +6,7 @@ from pathlib import Path
 
 from afk_runtime import (
     process_result,
+    progress,
     repository_state,
     run_command,
     seal_json,
@@ -108,17 +108,6 @@ def main() -> int:
     seal_json(output_path, output)
     progress(f"sealed {outcome} validation outcome at {output_path}")
     return 0 if outcome == "passed" else 1
-
-
-def progress(message: str) -> None:
-    try:
-        print(f"{timestamp()} {message}", flush=True)
-    except BrokenPipeError:
-        try:
-            sys.stdout.close()
-        except BrokenPipeError:
-            pass
-        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")
 
 
 def validate(validation: object) -> None:

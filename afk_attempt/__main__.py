@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,6 +7,7 @@ from afk_agent import agent_response
 from afk_runtime import (
     git,
     process_result,
+    progress,
     repository_state,
     run_command,
     seal_json,
@@ -115,17 +115,6 @@ def main() -> int:
     seal_json(output_path, output)
     progress(f"sealed {outcome} attempt outcome at {output_path}")
     return 0 if outcome == "succeeded" else 1
-
-
-def progress(message: str) -> None:
-    try:
-        print(f"{timestamp()} {message}", flush=True)
-    except BrokenPipeError:
-        try:
-            sys.stdout.close()
-        except BrokenPipeError:
-            pass
-        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")
 
 
 def validate_assignment(assignment: object) -> None:

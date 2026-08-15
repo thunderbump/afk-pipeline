@@ -122,6 +122,10 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(output["repository"]["before"], self.after)
         self.assertEqual(output["repository"]["after"], self.after)
         self.assertTrue(output["repository"]["unchanged"])
+        self.assertEqual(output["artifacts"]["diff"], "diff.patch")
+        diff = (result / "diff.patch").read_text()
+        self.assertIn("-before", diff)
+        self.assertIn("+after", diff)
         self.assertTrue((result / "events.jsonl").is_file())
         self.assertEqual((result / "stderr.log").read_text(), "")
         self.assertFalse((result / "output.json.tmp").exists())
@@ -145,6 +149,16 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIsNone(output["review"])
         self.assertIn("line must be an integer", output["review_error"])
 
+    def test_finding_locations_must_exist_within_the_reviewed_head(self):
+        for scenario in ("missing-path", "outside-path", "bad-line"):
+            with self.subTest(scenario=scenario):
+                result, completed = self.run_review(scenario, result_name=scenario)
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(output["outcome"], "failed")
+                self.assertIsNone(output["review"])
+                self.assertIn("finding location", output["review_error"])
+
     def test_workspace_must_match_the_validated_attempt_before_review(self):
         (self.workspace / "unreviewed.txt").write_text("different state\n")
 
@@ -153,6 +167,22 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
         self.assertIn("workspace must match", completed.stderr)
+
+    def test_dirty_implementation_evidence_is_refused_before_review(self):
+        (self.workspace / "uncommitted.txt").write_text("not committed\n")
+        dirty = self.state()
+        attempt = json.loads((self.attempt / "output.json").read_text())
+        attempt["repository"]["after"] = dirty
+        self.write_json(self.attempt / "output.json", attempt)
+        validation = json.loads((self.validation / "output.json").read_text())
+        validation["repository"]["after"] = dirty
+        self.write_json(self.validation / "output.json", validation)
+
+        result, completed = self.run_review("no-findings")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("clean committed state", completed.stderr)
 
     def test_detached_workspace_at_the_validated_head_is_reviewable(self):
         self.git("checkout", "--quiet", "--detach")

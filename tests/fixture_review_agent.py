@@ -27,10 +27,22 @@ elif scenario in ("no-findings", "delayed-no-findings"):
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
     review = {"summary": "No actionable defects found.", "findings": []}
-elif scenario in ("findings", "missing-line"):
+elif scenario in (
+    "findings",
+    "missing-line",
+    "missing-path",
+    "outside-path",
+    "bad-line",
+):
     location = {"path": "README.md", "line": 1}
     if scenario == "missing-line":
         location.pop("line")
+    elif scenario == "missing-path":
+        location["path"] = "missing.py"
+    elif scenario == "outside-path":
+        location["path"] = "../outside.py"
+    elif scenario == "bad-line":
+        location["line"] = 999
     review = {
         "summary": "One actionable defect found.",
         "findings": [
