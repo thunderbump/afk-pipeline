@@ -149,6 +149,48 @@ structured response are valid, and the workspace remains unchanged. Exit
 status is `0` for completed, `1` for a sealed non-success result, and `2` for
 invalid invocation, configuration, input, or evidence.
 
+## Finding Assessment
+
+Assess whether every finding from one completed Review is worth addressing:
+
+```sh
+python3 -m afk_assess assessment.json /new/result-directory
+```
+
+Assessment input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "workspace": "/absolute/path/to/the/reviewed/checkout",
+  "review_directory": "/absolute/path/to/a/completed/review",
+  "timeout_seconds": 900
+}
+```
+
+The prepared workspace must match the completed Review's clean committed state.
+Before creating the result directory, Finding Assessment validates that Review's
+structured findings against the exact reviewed Git object. The branch remains
+implicit and may be detached.
+
+The default adapter invokes Pi with `gpt-5.6-sol` and read-oriented tools.
+Authentication is inherited from the environment. A deployment or deterministic
+test may set `AFK_ASSESS_AGENT_COMMAND` to a JSON argv array; Finding Assessment
+appends its generated prompt as the final argument.
+
+The result directory contains `input.json`, raw `events.jsonl`, raw
+`stderr.log`, and an atomically sealed `output.json`. A completed assessment has
+a summary and exactly one decision for every immutable Review finding. Each
+decision contains its zero-based `finding_index`, boolean `worth_addressing`,
+and non-empty `rationale`. A Review with no findings requires an empty decisions
+array. Findings may not be skipped or duplicated.
+
+Assessment outcomes are `completed`, `failed`, `timed_out`, or `interrupted`.
+Completion is separate from the boolean decisions and does not authorize repair,
+aggregate routing, or GitHub posting. The workspace must remain unchanged. Exit
+status is `0` for completed, `1` for sealed non-success, and `2` for invalid
+invocation, configuration, input, or Review evidence.
+
 ## Check
 
 Install the repository's Ruff commit hooks once per checkout:

@@ -1,0 +1,309 @@
+import json
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+from afk_agent import agent_response
+from afk_review.contract import validate_review
+from afk_runtime import (
+    process_result,
+    progress,
+    repository_state,
+    run_command,
+    seal_json,
+    timestamp,
+    write_json,
+)
+
+USAGE = "usage: python3 -m afk_assess ASSESSMENT_JSON RESULT_DIRECTORY"
+
+HELP = f"""{USAGE}
+
+Assess one completed AFK Review from ASSESSMENT_JSON and seal its artifacts in RESULT_DIRECTORY.
+
+Arguments:
+  ASSESSMENT_JSON  Path to the finding-assessment JSON file.
+  RESULT_DIRECTORY New directory where assessment input, output, and logs are written.
+"""
+
+
+def main() -> int:
+    if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
+        print(HELP, end="")
+        return 0
+    if len(sys.argv) != 3:
+        print(USAGE, file=sys.stderr)
+        return 2
+
+    input_path = Path(sys.argv[1])
+    result_directory = Path(sys.argv[2])
+    progress("loading finding-assessment input")
+    assessment_input = json.loads(input_path.read_text())
+    validate_input(assessment_input)
+    command_prefix = agent_command()
+    progress("finding-assessment input accepted")
+
+    progress("loading completed Review evidence")
+    evidence = load_evidence(assessment_input)
+    workspace = Path(assessment_input["workspace"])
+    progress("observing reviewed repository")
+    before = repository_state(workspace)
+    review = verify_subject(assessment_input, before, evidence)
+
+    progress("preparing finding-assessment result directory")
+    result_directory.mkdir()
+    write_json(result_directory / "input.json", assessment_input)
+    events_path = result_directory / "events.jsonl"
+    stderr_path = result_directory / "stderr.log"
+    started_at = timestamp()
+    started = time.monotonic()
+    progress(
+        "starting finding-assessment agent "
+        f"(timeout={assessment_input['timeout_seconds']}s; "
+        f"artifacts: events={events_path}, stderr={stderr_path})"
+    )
+    execution = run_command(
+        [*command_prefix, prompt(assessment_input, review)],
+        workspace,
+        assessment_input["timeout_seconds"],
+        events_path,
+        stderr_path,
+    )
+    progress("finding-assessment agent completed")
+
+    progress("observing repository after finding assessment")
+    observation_error = None
+    try:
+        after = repository_state(workspace)
+    except (OSError, subprocess.SubprocessError) as error:
+        after = None
+        observation_error = str(error)
+    unchanged = None if after is None else before == after
+
+    response = None if execution["error"] else agent_response(events_path)
+    agent = None if response is None else response["agent"]
+    assessment = None
+    assessment_error = None
+    if agent is not None and agent["status"] == "completed":
+        try:
+            assessment = validate_assessment(review, json.loads(response["text"]))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            assessment_error = str(error)
+
+    outcome = (
+        "interrupted"
+        if execution["interrupted"]
+        else "timed_out"
+        if execution["timed_out"]
+        else "completed"
+        if (
+            execution["exit_code"] == 0
+            and agent is not None
+            and agent["status"] == "completed"
+            and assessment is not None
+            and unchanged is True
+            and observation_error is None
+        )
+        else "failed"
+    )
+    output = {
+        "schema_version": 1,
+        "outcome": outcome,
+        "started_at": started_at,
+        "finished_at": timestamp(),
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "process": process_result(execution["exit_code"], execution["error"]),
+        "agent": agent,
+        "assessment": assessment,
+        **({"assessment_error": assessment_error} if assessment_error else {}),
+        "repository": {
+            "before": before,
+            "after": after,
+            "unchanged": unchanged,
+            **({"observation_error": observation_error} if observation_error else {}),
+        },
+        "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+    }
+    output_path = result_directory / "output.json"
+    seal_json(output_path, output)
+    progress(f"sealed {outcome} finding-assessment outcome at {output_path}")
+    return 0 if outcome == "completed" else 1
+
+
+def validate_input(value: object) -> None:
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("finding assessment must use schema_version 1")
+    for field in ("workspace", "review_directory"):
+        path = value.get(field)
+        if not isinstance(path, str) or not Path(path).is_absolute():
+            raise ValueError(f"finding assessment {field} must be an absolute path")
+    timeout = value.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+        raise ValueError(
+            "finding assessment timeout_seconds must be a positive integer"
+        )
+
+
+def agent_command() -> list[str]:
+    configured = os.environ.get("AFK_ASSESS_AGENT_COMMAND")
+    if configured is not None:
+        command = json.loads(configured)
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(argument, str) for argument in command)
+        ):
+            raise ValueError("AFK_ASSESS_AGENT_COMMAND must be a JSON argv array")
+        return command
+    return [
+        "/usr/bin/env",
+        "PI_TELEMETRY=0",
+        "PI_SKIP_VERSION_CHECK=1",
+        "pi",
+        "--provider",
+        "openai-codex",
+        "--model",
+        "gpt-5.6-sol",
+        "--thinking",
+        "medium",
+        "--mode",
+        "json",
+        "--print",
+        "--no-session",
+        "--tools",
+        "read,grep,find,ls",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--system-prompt",
+        "You are a read-only finding assessor. Inspect only the prepared workspace and named Review evidence. Decide whether each reported finding is worth addressing. Do not modify files or prescribe a repair. Your response must satisfy the JSON contract in the user prompt.",
+    ]
+
+
+def load_evidence(assessment_input: dict[str, object]) -> dict[str, object]:
+    review_directory = Path(assessment_input["review_directory"])
+    return {
+        "input": read_json(review_directory / "input.json"),
+        "output": read_json(review_directory / "output.json"),
+    }
+
+
+def verify_subject(
+    assessment_input: dict[str, object],
+    before: dict[str, object],
+    evidence: dict[str, object],
+) -> dict[str, object]:
+    try:
+        review_input = evidence["input"]
+        review_output = evidence["output"]
+        review_workspace = review_input["workspace"]
+        review_state = review_output["repository"]["after"]
+        reviewed_head = review_state["head"]
+        review = review_output["review"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("invalid Review evidence") from error
+    if review_output.get("outcome") != "completed":
+        raise ValueError("finding assessment requires a completed Review")
+    if review_output["repository"].get("unchanged") is not True:
+        raise ValueError("completed Review must identify an unchanged repository")
+    if (
+        not isinstance(review_workspace, str)
+        or not Path(review_workspace).is_absolute()
+    ):
+        raise ValueError("invalid Review evidence")
+    if (
+        Path(review_workspace).resolve()
+        != Path(assessment_input["workspace"]).resolve()
+    ):
+        raise ValueError("workspace must match the completed Review input")
+    if subject_state(before) != subject_state(review_state):
+        raise ValueError("workspace must match the completed Review repository state")
+    if review_state["dirty"] or review_state["status"]:
+        raise ValueError("finding assessment requires a clean committed state")
+    return validate_review(review, Path(assessment_input["workspace"]), reviewed_head)
+
+
+def subject_state(state: dict[str, object]) -> dict[str, object]:
+    return {field: state[field] for field in ("head", "dirty", "status")}
+
+
+def validate_assessment(review: dict[str, object], value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError("assessment response must be an object")
+    if not isinstance(value.get("summary"), str) or not value["summary"].strip():
+        raise ValueError("assessment summary must be a non-empty string")
+    decisions = value.get("decisions")
+    if not isinstance(decisions, list):
+        raise TypeError("assessment decisions must be an array")
+    expected = set(range(len(review["findings"])))
+    seen = set()
+    for decision in decisions:
+        validate_decision(decision, expected, seen)
+    if seen != expected:
+        raise ValueError("each Review finding must have one decision")
+    return value
+
+
+def validate_decision(decision: object, expected: set[int], seen: set[int]) -> None:
+    if not isinstance(decision, dict):
+        raise TypeError("each assessment decision must be an object")
+    index = decision.get("finding_index")
+    if not isinstance(index, int) or isinstance(index, bool):
+        raise TypeError("decision finding_index must be an integer")
+    if index not in expected or index in seen:
+        raise ValueError("each Review finding must have one decision")
+    if not isinstance(decision.get("worth_addressing"), bool):
+        raise TypeError("decision worth_addressing must be a boolean")
+    rationale = decision.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("decision rationale must be a non-empty string")
+    seen.add(index)
+
+
+def prompt(assessment_input: dict[str, object], review: dict[str, object]) -> str:
+    review_directory = Path(assessment_input["review_directory"])
+    return f"""Assess whether every finding in this completed Review is worth addressing. Do not modify the workspace and do not prescribe repairs.
+
+Review findings:
+{json.dumps(review["findings"], indent=2)}
+
+Review evidence: {review_directory}
+Reviewed diff: {review_directory / "diff.patch"}
+
+For each finding, inspect the reviewed code and evidence. Mark worth_addressing true only when the reported problem is concrete, reachable, and relevant to the implementation objective. Use the immutable zero-based array position as finding_index.
+
+Return only one JSON object with this exact shape:
+{{
+  "summary": "concise assessment conclusion",
+  "decisions": [
+    {{
+      "finding_index": 0,
+      "worth_addressing": true,
+      "rationale": "why the finding is or is not worth addressing"
+    }}
+  ]
+}}
+
+Return exactly one decision for every finding, with no duplicate or omitted indices. Use an empty decisions array when the Review has no findings. Do not wrap the JSON in Markdown."""
+
+
+def read_json(path: Path) -> dict[str, object]:
+    return json.loads(path.read_text())
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+        subprocess.SubprocessError,
+    ) as error:
+        print(f"afk-assess: {error}", file=sys.stderr)
+        raise SystemExit(2)
