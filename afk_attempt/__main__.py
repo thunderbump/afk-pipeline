@@ -4,6 +4,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+from afk_agent import agent_response
 from afk_runtime import (
     git,
     process_result,
@@ -80,7 +81,7 @@ def main() -> int:
             commits = commits_between_heads(workspace, before, after)
         except (OSError, subprocess.SubprocessError) as error:
             observation_error = str(error)
-    agent = None if runner_error else agent_result(events_path)
+    agent = None if runner_error else agent_response(events_path)["agent"]
     outcome = (
         "interrupted"
         if execution["interrupted"]
@@ -160,48 +161,6 @@ def commits_between_heads(
     return git(
         workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
     ).splitlines()
-
-
-def agent_result(events_path: Path) -> dict[str, str]:
-    saw_end = False
-    saw_settled = False
-    terminal_message = None
-    try:
-        lines = events_path.read_bytes().decode("utf-8").splitlines()
-    except UnicodeDecodeError:
-        return {"status": "error", "error": "invalid agent event encoding"}
-    for line in lines:
-        try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            return {"status": "error", "error": "invalid agent event JSON"}
-        if not isinstance(event, dict):
-            return {"status": "error", "error": "invalid agent event JSON"}
-        if saw_end:
-            if event.get("type") != "agent_settled" or saw_settled:
-                return {"status": "error", "error": "events follow agent_end"}
-            saw_settled = True
-            continue
-        if event.get("type") == "agent_settled":
-            return {"status": "error", "error": "agent_settled precedes agent_end"}
-        if event.get("type") == "message_end":
-            message = event.get("message")
-            if not isinstance(message, dict):
-                return {"status": "error", "error": "invalid agent event JSON"}
-            if message.get("role") == "assistant":
-                terminal_message = message
-        if event.get("type") == "agent_end":
-            saw_end = True
-    if not saw_end or terminal_message is None:
-        return {"status": "error", "error": "agent event stream did not complete"}
-    if terminal_message.get("stopReason") == "error":
-        return {
-            "status": "error",
-            "error": terminal_message.get("errorMessage", "agent error"),
-        }
-    if terminal_message.get("stopReason") == "aborted":
-        return {"status": "aborted"}
-    return {"status": "completed"}
 
 
 if __name__ == "__main__":

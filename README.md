@@ -1,6 +1,7 @@
 # AFK Pipeline
 
-Small executable modules for running agent work and validating its result.
+Small executable modules for running agent work, validating its result, and
+reviewing one validated implementation.
 
 ## Attempt Executor
 
@@ -99,6 +100,52 @@ Validation outcomes are `passed`, `failed`, `timed_out`, or `interrupted`. The
 validator terminates the command process group on timeout or interruption.
 Exit status is `0` for pass, `1` for a sealed non-success result, and `2` for
 invalid invocation or input.
+
+## Review
+
+Run one agent review of a successful implementation Attempt and its passed
+Validation:
+
+```sh
+python3 -m afk_review review.json /new/result-directory
+```
+
+Review input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "workspace": "/absolute/path/to/prepared/checkout",
+  "attempt_directory": "/absolute/path/to/succeeded/attempt",
+  "validation_directory": "/absolute/path/to/passed/validation",
+  "timeout_seconds": 900
+}
+```
+
+The prepared workspace must have the same `HEAD`, dirty state, and status as
+the implementation Attempt and Validation. Its branch is implicit and may be
+detached. Before creating the result directory, Review rejects failed or
+mismatched evidence.
+
+The default adapter invokes Pi with `gpt-5.6-sol` in read-only JSON mode and
+inherits authentication from the environment. A deployment or deterministic
+test may replace the adapter outside the durable input by setting
+`AFK_REVIEW_AGENT_COMMAND` to a JSON argv array; Review appends its generated
+prompt as the final argument. Do not put credentials in this configuration or
+the Review input.
+
+Review retains `input.json`, raw `events.jsonl`, raw `stderr.log`, and an
+atomically sealed `output.json`. A completed response contains a summary and a
+possibly empty findings array. Every finding requires severity, title, details,
+and at least one repository-relative path with a positive 1-based line number
+in the reviewed `HEAD`. Findings do not make execution fail and do not authorize
+repair or GitHub posting.
+
+Review outcomes are `completed`, `failed`, `timed_out`, or `interrupted`. A
+review completes only when the child exits zero, the Pi event stream and
+structured response are valid, and the workspace remains unchanged. Exit
+status is `0` for completed, `1` for a sealed non-success result, and `2` for
+invalid invocation, configuration, input, or evidence.
 
 ## Check
 
