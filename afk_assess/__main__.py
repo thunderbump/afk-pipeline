@@ -1,11 +1,10 @@
 import json
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from afk_agent import agent_response
+from afk_agent import agent_response, read_only_pi_command
 from afk_review.contract import validate_review
 from afk_runtime import (
     process_result,
@@ -42,7 +41,10 @@ def main() -> int:
     progress("loading finding-assessment input")
     assessment_input = json.loads(input_path.read_text())
     validate_input(assessment_input)
-    command_prefix = agent_command()
+    command_prefix = read_only_pi_command(
+        "AFK_ASSESS_AGENT_COMMAND",
+        "You are a read-only finding assessor. Inspect only the prepared workspace and named Review evidence. Decide whether each reported finding is worth addressing. Do not modify files or prescribe a repair. Your response must satisfy the JSON contract in the user prompt.",
+    )
     progress("finding-assessment input accepted")
 
     progress("loading completed Review evidence")
@@ -50,7 +52,7 @@ def main() -> int:
     workspace = Path(assessment_input["workspace"])
     progress("observing reviewed repository")
     before = repository_state(workspace)
-    review = verify_subject(assessment_input, before, evidence)
+    review, objective = verify_subject(assessment_input, before, evidence)
 
     progress("preparing finding-assessment result directory")
     result_directory.mkdir()
@@ -65,7 +67,7 @@ def main() -> int:
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
     execution = run_command(
-        [*command_prefix, prompt(assessment_input, review)],
+        [*command_prefix, prompt(assessment_input, review, objective)],
         workspace,
         assessment_input["timeout_seconds"],
         events_path,
@@ -146,49 +148,21 @@ def validate_input(value: object) -> None:
         )
 
 
-def agent_command() -> list[str]:
-    configured = os.environ.get("AFK_ASSESS_AGENT_COMMAND")
-    if configured is not None:
-        command = json.loads(configured)
-        if (
-            not isinstance(command, list)
-            or not command
-            or not all(isinstance(argument, str) for argument in command)
-        ):
-            raise ValueError("AFK_ASSESS_AGENT_COMMAND must be a JSON argv array")
-        return command
-    return [
-        "/usr/bin/env",
-        "PI_TELEMETRY=0",
-        "PI_SKIP_VERSION_CHECK=1",
-        "pi",
-        "--provider",
-        "openai-codex",
-        "--model",
-        "gpt-5.6-sol",
-        "--thinking",
-        "medium",
-        "--mode",
-        "json",
-        "--print",
-        "--no-session",
-        "--tools",
-        "read,grep,find,ls",
-        "--no-extensions",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-themes",
-        "--no-context-files",
-        "--system-prompt",
-        "You are a read-only finding assessor. Inspect only the prepared workspace and named Review evidence. Decide whether each reported finding is worth addressing. Do not modify files or prescribe a repair. Your response must satisfy the JSON contract in the user prompt.",
-    ]
-
-
 def load_evidence(assessment_input: dict[str, object]) -> dict[str, object]:
     review_directory = Path(assessment_input["review_directory"])
+    review_input = read_json(review_directory / "input.json")
+    if not isinstance(review_input, dict):
+        raise TypeError("invalid Review evidence")
+    attempt_directory = review_input.get("attempt_directory")
+    if (
+        not isinstance(attempt_directory, str)
+        or not Path(attempt_directory).is_absolute()
+    ):
+        raise ValueError("invalid Review evidence attempt_directory")
     return {
-        "input": read_json(review_directory / "input.json"),
+        "input": review_input,
         "output": read_json(review_directory / "output.json"),
+        "assignment": read_json(Path(attempt_directory) / "input.json"),
     }
 
 
@@ -196,19 +170,28 @@ def verify_subject(
     assessment_input: dict[str, object],
     before: dict[str, object],
     evidence: dict[str, object],
-) -> dict[str, object]:
+) -> tuple[dict[str, object], str]:
     try:
         review_input = evidence["input"]
         review_output = evidence["output"]
+        assignment = evidence["assignment"]
         review_workspace = review_input["workspace"]
-        review_state = review_output["repository"]["after"]
+        review_before = subject_state(review_output["repository"]["before"])
+        review_state = subject_state(review_output["repository"]["after"])
         reviewed_head = review_state["head"]
         review = review_output["review"]
     except (KeyError, TypeError) as error:
         raise ValueError("invalid Review evidence") from error
+    if not isinstance(assignment, dict):
+        raise TypeError("invalid Review evidence assignment")
+    objective = assignment.get("objective")
+    if not isinstance(objective, str) or not objective.strip():
+        raise ValueError("invalid Review evidence objective")
     if review_output.get("outcome") != "completed":
         raise ValueError("finding assessment requires a completed Review")
     if review_output["repository"].get("unchanged") is not True:
+        raise ValueError("completed Review must identify an unchanged repository")
+    if review_before != review_state:
         raise ValueError("completed Review must identify an unchanged repository")
     if (
         not isinstance(review_workspace, str)
@@ -220,15 +203,32 @@ def verify_subject(
         != Path(assessment_input["workspace"]).resolve()
     ):
         raise ValueError("workspace must match the completed Review input")
-    if subject_state(before) != subject_state(review_state):
+    if subject_state(before) != review_state:
         raise ValueError("workspace must match the completed Review repository state")
     if review_state["dirty"] or review_state["status"]:
         raise ValueError("finding assessment requires a clean committed state")
-    return validate_review(review, Path(assessment_input["workspace"]), reviewed_head)
+    return (
+        validate_review(review, Path(assessment_input["workspace"]), reviewed_head),
+        objective,
+    )
 
 
 def subject_state(state: dict[str, object]) -> dict[str, object]:
-    return {field: state[field] for field in ("head", "dirty", "status")}
+    if not isinstance(state, dict):
+        raise TypeError("invalid Review evidence repository state")
+    try:
+        subject = {field: state[field] for field in ("head", "dirty", "status")}
+    except KeyError as error:
+        raise ValueError("invalid Review evidence repository state") from error
+    if (
+        not isinstance(subject["head"], str)
+        or not subject["head"]
+        or not isinstance(subject["dirty"], bool)
+        or not isinstance(subject["status"], list)
+        or not all(isinstance(line, str) for line in subject["status"])
+    ):
+        raise ValueError("invalid Review evidence repository state")
+    return subject
 
 
 def validate_assessment(review: dict[str, object], value: object) -> dict[str, object]:
@@ -264,13 +264,16 @@ def validate_decision(decision: object, expected: set[int], seen: set[int]) -> N
     seen.add(index)
 
 
-def prompt(assessment_input: dict[str, object], review: dict[str, object]) -> str:
+def prompt(
+    assessment_input: dict[str, object], review: dict[str, object], objective: str
+) -> str:
     review_directory = Path(assessment_input["review_directory"])
     return f"""Assess whether every finding in this completed Review is worth addressing. Do not modify the workspace and do not prescribe repairs.
 
 Review findings:
 {json.dumps(review["findings"], indent=2)}
 
+Implementation objective: {objective}
 Review evidence: {review_directory}
 Reviewed diff: {review_directory / "diff.patch"}
 

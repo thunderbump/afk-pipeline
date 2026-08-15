@@ -53,6 +53,12 @@ class AssessmentCliTest(unittest.TestCase):
         (self.workspace / "README.md").write_text("reviewed code\n")
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Reviewed state")
+        self.attempt = self.root / "attempt"
+        self.attempt.mkdir()
+        self.write_json(
+            self.attempt / "input.json",
+            {"objective": "Make the reviewed implementation correct."},
+        )
         self.review = self.root / "review"
         self.review.mkdir()
         self.write_json(
@@ -60,7 +66,7 @@ class AssessmentCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "workspace": str(self.workspace),
-                "attempt_directory": str(self.root / "attempt"),
+                "attempt_directory": str(self.attempt),
                 "validation_directory": str(self.root / "validation"),
                 "timeout_seconds": 5,
             },
@@ -214,6 +220,48 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
         self.assertIn("invalid Review evidence", completed.stderr)
+
+    def test_assignment_objective_is_required_and_given_to_the_assessor(self):
+        marker = self.root / "prompt.txt"
+        input_path, result, environment = self.prepare_assessment(
+            "capture-prompt",
+            command=[
+                sys.executable,
+                str(FIXTURE),
+                "capture-prompt",
+                str(marker),
+            ],
+        )
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("Make the reviewed implementation correct.", marker.read_text())
+
+        self.write_json(self.attempt / "input.json", {})
+        result, completed = self.run_assessment(
+            "address", result_name="missing-objective"
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("objective", completed.stderr)
+
+    def test_malformed_review_repository_state_is_refused_without_traceback(self):
+        original = json.loads((self.review / "output.json").read_text())
+        for field in ("head", "dirty", "status"):
+            with self.subTest(field=field):
+                malformed = json.loads(json.dumps(original))
+                malformed["repository"]["after"].pop(field)
+                self.write_json(self.review / "output.json", malformed)
+
+                result, completed = self.run_assessment(
+                    "address", result_name=f"missing-{field}"
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertFalse(result.exists())
+                self.assertNotIn("Traceback", completed.stderr)
+                self.assertIn("invalid Review evidence", completed.stderr)
 
     def test_agent_and_structured_protocol_failures_are_sealed(self):
         for scenario in ("invalid-events", "invalid-json"):

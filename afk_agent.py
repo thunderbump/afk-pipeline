@@ -1,7 +1,46 @@
 """Interpret the durable JSON event protocol emitted by AFK agent adapters."""
 
 import json
+import os
 from pathlib import Path
+
+
+def read_only_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
+    configured = os.environ.get(configuration_name)
+    if configured is not None:
+        command = json.loads(configured)
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(argument, str) for argument in command)
+        ):
+            raise ValueError(f"{configuration_name} must be a JSON argv array")
+        return command
+    return [
+        "/usr/bin/env",
+        "PI_TELEMETRY=0",
+        "PI_SKIP_VERSION_CHECK=1",
+        "pi",
+        "--provider",
+        "openai-codex",
+        "--model",
+        "gpt-5.6-sol",
+        "--thinking",
+        "medium",
+        "--mode",
+        "json",
+        "--print",
+        "--no-session",
+        "--tools",
+        "read,grep,find,ls",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--system-prompt",
+        system_prompt,
+    ]
 
 
 def agent_response(events_path: Path) -> dict[str, object]:

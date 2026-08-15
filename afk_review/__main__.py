@@ -1,11 +1,10 @@
 import json
-import os
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from afk_agent import agent_response
+from afk_agent import agent_response, read_only_pi_command
 from afk_review.contract import validate_review
 from afk_runtime import (
     git,
@@ -43,7 +42,10 @@ def main() -> int:
     progress("loading review input")
     review_input = json.loads(input_path.read_text())
     validate_input(review_input)
-    command_prefix = agent_command()
+    command_prefix = read_only_pi_command(
+        "AFK_REVIEW_AGENT_COMMAND",
+        "You are a read-only implementation reviewer. Inspect only the prepared workspace and the named diff and evidence paths. Your response must satisfy the JSON contract in the user prompt.",
+    )
     progress("review input accepted")
 
     progress("loading Attempt and Validation evidence")
@@ -152,44 +154,6 @@ def validate_input(value: object) -> None:
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("review timeout_seconds must be a positive integer")
-
-
-def agent_command() -> list[str]:
-    configured = os.environ.get("AFK_REVIEW_AGENT_COMMAND")
-    if configured is not None:
-        command = json.loads(configured)
-        if (
-            not isinstance(command, list)
-            or not command
-            or not all(isinstance(argument, str) for argument in command)
-        ):
-            raise ValueError("AFK_REVIEW_AGENT_COMMAND must be a JSON argv array")
-        return command
-    return [
-        "/usr/bin/env",
-        "PI_TELEMETRY=0",
-        "PI_SKIP_VERSION_CHECK=1",
-        "pi",
-        "--provider",
-        "openai-codex",
-        "--model",
-        "gpt-5.6-sol",
-        "--thinking",
-        "medium",
-        "--mode",
-        "json",
-        "--print",
-        "--no-session",
-        "--tools",
-        "read,grep,find,ls",
-        "--no-extensions",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-themes",
-        "--no-context-files",
-        "--system-prompt",
-        "You are a read-only implementation reviewer. Inspect only the prepared workspace and the named diff and evidence paths. Your response must satisfy the JSON contract in the user prompt.",
-    ]
 
 
 def load_evidence(review_input: dict[str, object]) -> dict[str, object]:

@@ -32,9 +32,11 @@ elif scenario in ("mutate-workspace", "damage-git"):
         Path("assessor-change.txt").write_text("assessor changed the workspace\n")
     else:
         Path(".git").rename(".git-damaged")
-elif scenario in ("address", "delayed-address"):
+elif scenario in ("address", "capture-prompt", "delayed-address"):
     if scenario == "delayed-address":
         time.sleep(0.2)
+    elif scenario == "capture-prompt":
+        Path(sys.argv[2]).write_text(sys.argv[-1])
     assessment = {
         "summary": "The finding should be addressed.",
         "decisions": [
