@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -50,7 +51,11 @@ def main() -> int:
     stderr_path = attempt_directory / "stderr.log"
     started_at = timestamp()
 
-    progress("starting agent child")
+    progress(
+        "starting agent child "
+        f"(timeout={assignment['timeout_seconds']}s; "
+        f"artifacts: events={events_path}, stderr={stderr_path})"
+    )
     execution = run_command(
         assignment["command"],
         workspace,
@@ -112,7 +117,14 @@ def main() -> int:
 
 
 def progress(message: str) -> None:
-    print(f"{timestamp()} {message}", flush=True)
+    try:
+        print(f"{timestamp()} {message}", flush=True)
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
+        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")
 
 
 def validate_assignment(assignment: object) -> None:

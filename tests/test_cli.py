@@ -92,7 +92,11 @@ class AttemptExecutorTest(unittest.TestCase):
                 "assignment input accepted",
                 "observing repository before attempt",
                 "preparing attempt directory",
-                "starting agent child",
+                (
+                    "starting agent child "
+                    f"(timeout=5s; artifacts: events={attempt / 'events.jsonl'}, "
+                    f"stderr={attempt / 'stderr.log'})"
+                ),
                 "agent child completed",
                 "observing repository after attempt",
                 f"sealed succeeded attempt outcome at {attempt / 'output.json'}",
@@ -113,6 +117,53 @@ class AttemptExecutorTest(unittest.TestCase):
         self.assertGreaterEqual(
             (attempt / "output.json").stat().st_mtime_ns,
             (attempt / "events.jsonl").stat().st_mtime_ns,
+        )
+
+    def test_closed_progress_stdout_after_child_start_does_not_prevent_sealing(self):
+        assignment = {
+            "schema_version": 1,
+            "objective": "Exercise closed progress stdout.",
+            "workspace": str(self.workspace),
+            "command": [
+                sys.executable,
+                "-c",
+                (
+                    "import json, time; time.sleep(0.2); "
+                    "print(json.dumps({'type': 'message_end', 'message': "
+                    "{'role': 'assistant', 'stopReason': 'end_turn'}})); "
+                    "print(json.dumps({'type': 'agent_end'}))"
+                ),
+            ],
+            "timeout_seconds": 5,
+        }
+        assignment_path = self.root / "closed-stdout.json"
+        assignment_path.write_text(json.dumps(assignment))
+        attempt = self.root / "attempt-closed-stdout"
+        executor = subprocess.Popen(
+            [sys.executable, "-m", "afk_attempt", str(assignment_path), str(attempt)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert executor.stdout is not None
+        saw_start = False
+        for line in executor.stdout:
+            if "starting agent child" in line:
+                saw_start = True
+                self.assertIn("timeout=5s", line)
+                self.assertIn(f"events={attempt / 'events.jsonl'}", line)
+                self.assertIn(f"stderr={attempt / 'stderr.log'}", line)
+                break
+        self.assertTrue(saw_start)
+        executor.stdout.close()
+        assert executor.stderr is not None
+        stderr = executor.stderr.read()
+        executor.stderr.close()
+        self.assertEqual(executor.wait(timeout=5), 0, stderr)
+        self.assertEqual(stderr, "")
+        self.assertEqual(
+            json.loads((attempt / "output.json").read_text())["outcome"], "succeeded"
         )
 
     def test_agent_error_fails_even_when_process_exits_zero(self):

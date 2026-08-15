@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 import time
@@ -50,7 +51,11 @@ def main() -> int:
     stderr_path = result_directory / "stderr.log"
     started_at = timestamp()
     started = time.monotonic()
-    progress("starting validation child")
+    progress(
+        "starting validation child "
+        f"(timeout={validation['timeout_seconds']}s; "
+        f"artifacts: stdout={stdout_path}, stderr={stderr_path})"
+    )
     execution = run_command(
         validation["command"],
         workspace,
@@ -106,7 +111,14 @@ def main() -> int:
 
 
 def progress(message: str) -> None:
-    print(f"{timestamp()} {message}", flush=True)
+    try:
+        print(f"{timestamp()} {message}", flush=True)
+    except BrokenPipeError:
+        try:
+            sys.stdout.close()
+        except BrokenPipeError:
+            pass
+        sys.stdout = os.fdopen(os.open(os.devnull, os.O_WRONLY), "w")
 
 
 def validate(validation: object) -> None:

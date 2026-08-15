@@ -82,7 +82,11 @@ class ValidationCliTest(unittest.TestCase):
                 "validation input accepted",
                 "observing repository before validation",
                 "preparing validation result directory",
-                "starting validation child",
+                (
+                    "starting validation child "
+                    f"(timeout=5s; artifacts: stdout={result / 'stdout.log'}, "
+                    f"stderr={result / 'stderr.log'})"
+                ),
                 "validation child completed",
                 "observing repository after validation",
                 f"sealed passed validation outcome at {result / 'output.json'}",
@@ -99,6 +103,44 @@ class ValidationCliTest(unittest.TestCase):
         self.assertEqual((result / "stderr.log").read_text(), "")
         self.assertFalse((result / "output.json.tmp").exists())
         self.assertGreaterEqual(output["duration_seconds"], 0)
+
+    def test_closed_progress_stdout_after_child_start_does_not_prevent_sealing(self):
+        validation = self.validation(
+            [
+                sys.executable,
+                "-c",
+                "import time; time.sleep(0.2); print('validation passed')",
+            ]
+        )
+        input_path = self.root / "closed-stdout-validation.json"
+        input_path.write_text(json.dumps(validation))
+        result = self.root / "closed-stdout-result"
+        validator = subprocess.Popen(
+            [sys.executable, "-m", "afk_validate", str(input_path), str(result)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        assert validator.stdout is not None
+        saw_start = False
+        for line in validator.stdout:
+            if "starting validation child" in line:
+                saw_start = True
+                self.assertIn("timeout=5s", line)
+                self.assertIn(f"stdout={result / 'stdout.log'}", line)
+                self.assertIn(f"stderr={result / 'stderr.log'}", line)
+                break
+        self.assertTrue(saw_start)
+        validator.stdout.close()
+        assert validator.stderr is not None
+        stderr = validator.stderr.read()
+        validator.stderr.close()
+        self.assertEqual(validator.wait(timeout=5), 0, stderr)
+        self.assertEqual(stderr, "")
+        self.assertEqual(
+            json.loads((result / "output.json").read_text())["outcome"], "passed"
+        )
 
     def test_nonzero_command_is_a_sealed_failure(self):
         validation = self.validation(
