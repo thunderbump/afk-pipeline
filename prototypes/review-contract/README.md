@@ -31,7 +31,10 @@ Proposed input:
 The prototype checks that the workspace, Attempt, and Validation all identify
 the same reviewed `HEAD`. A completed reviewer returns a `summary` and a
 possibly empty `findings` array in `output.json`. Findings do not change the
-top-level execution outcome and do not authorize repair.
+top-level execution outcome and do not authorize repair. Every finding requires
+at least one repository-relative path and positive 1-based line number in the
+reviewed `HEAD`, leaving a later publisher enough information to attempt an
+inline diff comment without coupling Review to GitHub.
 
 The prototype adapter invokes the locally installed Pi (0.84.2 in this proof)
 with `gpt-5.6-sol`. That adapter is not part of the proposed input contract.

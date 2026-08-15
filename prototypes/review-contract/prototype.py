@@ -134,7 +134,7 @@ Return only one JSON object with this exact shape:
   ]
 }}
 
-Use an empty findings array when you find no actionable problem. Do not wrap the JSON in Markdown."""
+Every finding must have at least one location. Each location uses a repository-relative path and a positive 1-based line number in the reviewed HEAD. Use an empty findings array when you find no actionable problem. Do not wrap the JSON in Markdown."""
 
 
 def pi_command(user_prompt: str) -> list[str]:

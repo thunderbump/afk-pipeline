@@ -29,11 +29,15 @@ def validate_finding(finding: object) -> None:
     locations = finding.get("locations")
     if not isinstance(locations, list):
         raise TypeError("finding locations must be an array")
+    if not locations:
+        raise ValueError("finding locations must not be empty")
     for location in locations:
         if not isinstance(location, dict) or not isinstance(location.get("path"), str):
             raise TypeError("each finding location needs a path")
+        if not location["path"].strip() or location["path"].startswith("/"):
+            raise ValueError("finding location path must be repository-relative")
         line = location.get("line")
-        if line is not None and (not isinstance(line, int) or isinstance(line, bool)):
+        if not isinstance(line, int) or isinstance(line, bool):
             raise TypeError("finding location line must be an integer")
-        if line is not None and line < 1:
-            raise ValueError("finding location line must be null or a positive integer")
+        if line < 1:
+            raise ValueError("finding location line must be a positive integer")
