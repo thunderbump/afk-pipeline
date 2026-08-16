@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 from afk_agent import agent_response, read_only_pi_command
-from afk_change.contract import validate_change_output
+from afk_change.contract import validate_change_output, validate_git_transition
 from afk_review.contract import validate_review
 from afk_runtime import (
     git,
@@ -191,6 +191,9 @@ def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> No
         )
     if subject_state(before) != change_after:
         raise ValueError("workspace must match the validated Committed Change state")
+    validate_git_transition(
+        workspace, change["repository"]["before"], change["repository"]["after"]
+    )
     evidence["change"] = change
 
 

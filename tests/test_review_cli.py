@@ -424,6 +424,25 @@ class ReviewCliTest(unittest.TestCase):
                 self.assertIn(error, completed.stderr)
                 self.assertFalse(result.exists())
 
+    def test_noncanonical_or_missing_change_heads_are_refused_before_results(self):
+        original = json.loads((self.change / "output.json").read_text())
+        for name, head in (
+            ("symbolic", "HEAD~1"),
+            ("missing", "0000000000000000000000000000000000000000"),
+        ):
+            with self.subTest(name=name):
+                change = json.loads(json.dumps(original))
+                change["change"]["repository"]["before"]["head"] = head
+                self.write_json(self.change / "output.json", change)
+
+                result, completed = self.run_review(
+                    "no-findings", result_name=f"review-{name}-head"
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("canonical commit object IDs", completed.stderr)
+                self.assertFalse(result.exists())
+
     def test_malformed_evidence_is_refused_before_result_creation(self):
         self.write_json(self.change / "output.json", {"outcome": "completed"})
 

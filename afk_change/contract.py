@@ -1,6 +1,9 @@
 """Validate the durable Committed Change record shared by AFK modules."""
 
+import subprocess
 from pathlib import Path
+
+from afk_runtime import git
 
 
 def validate_change_output(value: object) -> dict[str, object]:
@@ -59,3 +62,31 @@ def validate_repository_state(value: object) -> dict[str, object]:
     ):
         raise TypeError("Committed Change repository status must be a string array")
     return {"head": head, "branch": branch, "dirty": dirty, "status": status}
+
+
+def validate_git_transition(workspace, before, after):
+    for revision in (before["head"], after["head"]):
+        require_canonical_commit(workspace, revision)
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", before["head"], after["head"]],
+        cwd=workspace,
+        check=False,
+        capture_output=True,
+    )
+    if ancestry.returncode not in (0, 1):
+        raise subprocess.CalledProcessError(ancestry.returncode, ancestry.args)
+    if ancestry.returncode != 0:
+        raise ValueError("Committed Change after head must descend from before head")
+
+
+def require_canonical_commit(workspace, revision):
+    try:
+        canonical = git(workspace, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    except subprocess.CalledProcessError as error:
+        raise ValueError(
+            "Committed Change revisions must be canonical commit object IDs"
+        ) from error
+    if revision != canonical:
+        raise ValueError(
+            "Committed Change revisions must be canonical commit object IDs"
+        )

@@ -5,7 +5,12 @@ from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
 from afk_attempt.contract import validate_assignment
-from afk_change.contract import validate_change_output
+from afk_change.contract import (
+    require_canonical_commit,
+    validate_change_output,
+    validate_git_transition,
+    validate_repository_state,
+)
 from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import (
     validate_input as validate_response_input,
@@ -91,7 +96,7 @@ def validate_attempt(value: object) -> tuple[dict[str, object], dict[str, object
     repository = value.get("repository")
     if not isinstance(repository, dict):
         raise TypeError("invalid Attempt repository evidence")
-    return validate_state(repository.get("before")), validate_state(
+    return clean_repository_state(repository.get("before")), clean_repository_state(
         repository.get("after")
     )
 
@@ -121,8 +126,8 @@ def committed_response(source_directory, visited=None):
     response_repository = response_output.get("repository")
     if not isinstance(response_repository, dict):
         raise TypeError("invalid Feedback Response repository evidence")
-    before = validate_state(response_repository.get("before"))
-    after = validate_state(response_repository.get("after"))
+    before = clean_repository_state(response_repository.get("before"))
+    after = clean_repository_state(response_repository.get("after"))
 
     assessment_directory = Path(response_input["assessment_directory"])
     assessment_input = read_object(
@@ -194,31 +199,15 @@ def remember_evidence(visited, kind, directory):
     visited.add(evidence)
 
 
-def validate_state(value: object) -> dict[str, object]:
-    if not isinstance(value, dict):
-        raise TypeError("repository state must be an object")
-    head = value.get("head")
-    branch = value.get("branch")
-    dirty = value.get("dirty")
-    status = value.get("status")
-    if not isinstance(head, str) or not head:
-        raise ValueError("repository state head must be a non-empty string")
-    if branch is not None and not isinstance(branch, str):
-        raise TypeError("repository state branch must be a string or null")
-    if not isinstance(dirty, bool):
-        raise TypeError("repository state dirty must be a boolean")
-    if not isinstance(status, list) or not all(
-        isinstance(line, str) for line in status
-    ):
-        raise TypeError("repository state status must be a string array")
-    if dirty or status:
+def clean_repository_state(value: object) -> dict[str, object]:
+    state = validate_repository_state(value)
+    if state["dirty"] or state["status"]:
         raise ValueError("committed change requires clean repository states")
-    return {"head": head, "branch": branch, "dirty": dirty, "status": status}
+    return state
 
 
 def validate_transition(workspace, before, after, repository):
-    for revision in (before["head"], after["head"]):
-        require_canonical_commit(workspace, revision)
+    validate_git_transition(workspace, before, after)
     if before["head"] == after["head"]:
         raise ValueError("committed change requires distinct repository heads")
     recorded = repository.get("commits_between_heads")
@@ -235,22 +224,6 @@ def validate_transition(workspace, before, after, repository):
     ).splitlines()
     if recorded != actual:
         raise ValueError("recorded commit range does not match the repository")
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", before["head"], after["head"]],
-        cwd=workspace,
-        check=False,
-        capture_output=True,
-    )
-    if ancestry.returncode not in (0, 1):
-        raise subprocess.CalledProcessError(ancestry.returncode, ancestry.args)
-    if ancestry.returncode != 0:
-        raise ValueError("committed change after head must descend from before head")
-
-
-def require_canonical_commit(workspace, revision):
-    canonical = git(workspace, "rev-parse", "--verify", f"{revision}^{{commit}}")
-    if revision != canonical:
-        raise ValueError("repository revisions must be canonical commit object IDs")
 
 
 def validate_result_location(result_directory, workspace, source_directory):
