@@ -70,9 +70,18 @@ def main() -> int:
     if not selected:
         events_path.touch()
         stderr_path.touch()
+        progress("observing repository after no-action feedback response")
+        observation_error = None
+        try:
+            after = repository_state(workspace)
+        except (OSError, subprocess.SubprocessError) as error:
+            after = None
+            observation_error = str(error)
+        unchanged = after == before if after is not None else None
+        outcome = "completed" if unchanged is True else "failed"
         output = {
             "schema_version": 1,
-            "outcome": "completed",
+            "outcome": outcome,
             "started_at": started_at,
             "finished_at": timestamp(),
             "duration_seconds": round(time.monotonic() - started, 3),
@@ -84,16 +93,22 @@ def main() -> int:
             },
             "repository": {
                 "before": before,
-                "after": before,
+                "after": after,
+                "unchanged": unchanged,
                 "commits_between_heads": [],
                 "descends_from_before": False,
+                **(
+                    {"observation_error": observation_error}
+                    if observation_error
+                    else {}
+                ),
             },
             "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
         }
         output_path = result_directory / "output.json"
         seal_json(output_path, output)
-        progress(f"sealed completed feedback-response outcome at {output_path}")
-        return 0
+        progress(f"sealed {outcome} feedback-response outcome at {output_path}")
+        return 0 if outcome == "completed" else 1
 
     progress(
         "starting feedback-response agent "

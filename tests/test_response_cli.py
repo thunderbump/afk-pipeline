@@ -173,6 +173,21 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual((result / "events.jsonl").read_text(), "")
         self.assertEqual((result / "stderr.log").read_text(), "")
 
+    def test_no_action_reobserves_the_workspace_before_sealing(self):
+        assessment = json.loads((self.assessment / "output.json").read_text())
+        assessment["assessment"]["decisions"][0]["worth_addressing"] = False
+        self.write_json(self.assessment / "output.json", assessment)
+        input_path, _result, environment = self.prepare_response("unused")
+        result = self.workspace / "response-evidence"
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "failed")
+        self.assertTrue(output["repository"]["after"]["dirty"])
+        self.assertFalse(output["repository"]["unchanged"])
+
     def test_only_actionable_findings_are_required_and_given_to_the_agent(self):
         self.set_findings_and_decisions(
             [self.finding("Actionable finding"), self.finding("Dismissed finding")],
