@@ -153,9 +153,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertFalse((result / "output.json.tmp").exists())
 
     def test_no_action_completes_without_launching_an_agent(self):
-        assessment = json.loads((self.assessment / "output.json").read_text())
-        assessment["assessment"]["decisions"][0]["worth_addressing"] = False
-        self.write_json(self.assessment / "output.json", assessment)
+        self.make_no_action()
         before = self.state()
 
         result, completed = self.run_response(
@@ -174,9 +172,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual((result / "stderr.log").read_text(), "")
 
     def test_no_action_reobserves_the_workspace_before_sealing(self):
-        assessment = json.loads((self.assessment / "output.json").read_text())
-        assessment["assessment"]["decisions"][0]["worth_addressing"] = False
-        self.write_json(self.assessment / "output.json", assessment)
+        self.make_no_action()
         input_path, _result, environment = self.prepare_response("unused")
         result = self.workspace / "response-evidence"
 
@@ -187,6 +183,39 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(output["outcome"], "failed")
         self.assertTrue(output["repository"]["after"]["dirty"])
         self.assertFalse(output["repository"]["unchanged"])
+
+    def test_no_action_records_a_concurrent_commit(self):
+        self.make_no_action()
+        input_path, result, environment = self.prepare_response("unused")
+        self.wrap_git(environment, "commit")
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        repository = output["repository"]
+        self.assertEqual(output["outcome"], "failed")
+        self.assertNotEqual(repository["after"]["head"], repository["before"]["head"])
+        self.assertEqual(
+            repository["commits_between_heads"], [repository["after"]["head"]]
+        )
+        self.assertTrue(repository["descends_from_before"])
+
+    def test_no_action_records_unknown_facts_when_final_observation_fails(self):
+        self.make_no_action()
+        input_path, result, environment = self.prepare_response("unused")
+        self.wrap_git(environment, "fail")
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        repository = output["repository"]
+        self.assertEqual(output["outcome"], "failed")
+        self.assertIsNone(repository["after"])
+        self.assertIsNone(repository["commits_between_heads"])
+        self.assertIsNone(repository["descends_from_before"])
+        self.assertIn("observation_error", repository)
 
     def test_only_actionable_findings_are_required_and_given_to_the_agent(self):
         self.set_findings_and_decisions(
@@ -408,6 +437,37 @@ class ResponseCliTest(unittest.TestCase):
             for index, value in enumerate(worth_addressing)
         ]
         self.write_json(self.assessment / "output.json", assessment)
+
+    def make_no_action(self):
+        assessment = json.loads((self.assessment / "output.json").read_text())
+        assessment["assessment"]["decisions"][0]["worth_addressing"] = False
+        self.write_json(self.assessment / "output.json", assessment)
+
+    def wrap_git(self, environment, mode):
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        wrapper = bin_directory / "git"
+        wrapper.write_text(
+            """#!/bin/sh
+count=$(($(cat "$AFK_TEST_GIT_COUNT" 2>/dev/null || echo 0) + 1))
+printf '%s' "$count" > "$AFK_TEST_GIT_COUNT"
+if [ "$count" -eq 6 ]; then
+  if [ "$AFK_TEST_GIT_MODE" = commit ]; then
+    printf 'concurrent change\\n' > "$AFK_TEST_WORKSPACE/concurrent.txt"
+    /usr/bin/git -C "$AFK_TEST_WORKSPACE" add concurrent.txt
+    /usr/bin/git -C "$AFK_TEST_WORKSPACE" commit --quiet -m 'Concurrent change'
+  else
+    exit 1
+  fi
+fi
+exec /usr/bin/git "$@"
+"""
+        )
+        wrapper.chmod(0o755)
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
+        environment["AFK_TEST_GIT_COUNT"] = str(self.root / "git-count")
+        environment["AFK_TEST_GIT_MODE"] = mode
+        environment["AFK_TEST_WORKSPACE"] = str(self.workspace)
 
     def run_response(self, scenario, result_name="response", command=None):
         input_path, result, environment = self.prepare_response(

@@ -71,14 +71,13 @@ def main() -> int:
         events_path.touch()
         stderr_path.touch()
         progress("observing repository after no-action feedback response")
-        observation_error = None
-        try:
-            after = repository_state(workspace)
-        except (OSError, subprocess.SubprocessError) as error:
-            after = None
-            observation_error = str(error)
+        after, commits, descends_from_before, observation_error = (
+            observe_repository_transition(workspace, before)
+        )
         unchanged = after == before if after is not None else None
-        outcome = "completed" if unchanged is True else "failed"
+        outcome = (
+            "completed" if unchanged is True and observation_error is None else "failed"
+        )
         output = {
             "schema_version": 1,
             "outcome": outcome,
@@ -95,8 +94,8 @@ def main() -> int:
                 "before": before,
                 "after": after,
                 "unchanged": unchanged,
-                "commits_between_heads": [],
-                "descends_from_before": False,
+                "commits_between_heads": commits,
+                "descends_from_before": descends_from_before,
                 **(
                     {"observation_error": observation_error}
                     if observation_error
@@ -125,20 +124,9 @@ def main() -> int:
     progress("feedback-response agent completed")
 
     progress("observing repository after feedback response")
-    observation_error = None
-    after = None
-    commits = None
-    descends_from_before = None
-    try:
-        after = repository_state(workspace)
-    except (OSError, subprocess.SubprocessError) as error:
-        observation_error = str(error)
-    if after is not None:
-        try:
-            commits = commits_between_heads(workspace, before, after)
-            descends_from_before = head_descends_from(workspace, before, after)
-        except (OSError, subprocess.SubprocessError) as error:
-            observation_error = str(error)
+    after, commits, descends_from_before, observation_error = (
+        observe_repository_transition(workspace, before)
+    )
 
     parsed = None if execution["error"] else agent_response(events_path)
     agent = None if parsed is None else parsed["agent"]
@@ -337,6 +325,24 @@ def head_descends_from(workspace, before, after):
     if completed.returncode not in (0, 1):
         raise subprocess.CalledProcessError(completed.returncode, completed.args)
     return completed.returncode == 0 and before["head"] != after["head"]
+
+
+def observe_repository_transition(workspace, before):
+    after = None
+    commits = None
+    descends_from_before = None
+    observation_error = None
+    try:
+        after = repository_state(workspace)
+    except (OSError, subprocess.SubprocessError) as error:
+        observation_error = str(error)
+    if after is not None:
+        try:
+            commits = commits_between_heads(workspace, before, after)
+            descends_from_before = head_descends_from(workspace, before, after)
+        except (OSError, subprocess.SubprocessError) as error:
+            observation_error = str(error)
+    return after, commits, descends_from_before, observation_error
 
 
 def prompt(response_input, selected, objective):
