@@ -263,18 +263,20 @@ actionable Feedback Response:
 `source.kind` is `attempt` or `feedback_response`. Before creating the result
 directory, Committed Change validates the source's complete durable evidence
 chain. Both source repository states must be clean and have distinct heads; the
-recorded commits must exactly match Git's descendant commit range. A Feedback
-Response must additionally match its completed read-only Assessment and Review,
-the structured actionable findings and responses, and the original Assignment
-workspace and objective.
+heads and recorded commits must be immutable commit object IDs, and the recorded
+commits must exactly match Git's descendant commit range. A Feedback Response
+must additionally match its completed read-only Assessment and Review, the
+structured actionable findings and responses, and the originating succeeded
+Attempt's workspace, final state, and objective.
 
 The result contains the accepted `input.json` and an atomically sealed
 `output.json`. A completed output exposes one `change` object with the frozen
 Assignment `objective`, `workspace`, full `before` and `after` repository
 states, and source provenance. Exit status is `0` for completion and `2` for
 invalid invocation, input, or source evidence; refused input never creates a
-result directory. This deterministic adapter runs no agent, mutates no Git
-state, does not require the workspace still to be checked out at the final
+result directory. The result must be outside both the source workspace and
+source evidence directory. This deterministic adapter runs no agent, mutates no
+Git state, does not require the workspace still to be checked out at the final
 head, and does not run Validation or Review.
 
 ## Check

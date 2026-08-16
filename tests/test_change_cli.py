@@ -168,6 +168,52 @@ class ChangeCliTest(unittest.TestCase):
         self.assertIn("workspaces must match", completed.stderr)
         self.assertFalse(result.exists())
 
+    def test_rejects_a_feedback_response_with_a_failed_originating_attempt(self):
+        response = self.make_feedback_response()
+        attempt_output = json.loads((self.attempt / "output.json").read_text())
+        attempt_output["outcome"] = "failed"
+        self.write_json(self.attempt / "output.json", attempt_output)
+
+        result, completed = self.run_change("feedback_response", response)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("requires a succeeded Attempt", completed.stderr)
+        self.assertFalse(result.exists())
+
+    def test_rejects_symbolic_heads_instead_of_context_dependent_names(self):
+        attempt_output = json.loads((self.attempt / "output.json").read_text())
+        attempt_output["repository"]["before"]["head"] = "HEAD~1"
+        attempt_output["repository"]["after"]["head"] = "HEAD"
+        self.write_json(self.attempt / "output.json", attempt_output)
+
+        result, completed = self.run_change("attempt", self.attempt)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("canonical commit object IDs", completed.stderr)
+        self.assertFalse(result.exists())
+
+    def test_rejects_a_result_directory_inside_the_source_workspace(self):
+        source = {
+            "schema_version": 1,
+            "source": {"kind": "attempt", "directory": str(self.attempt)},
+        }
+        input_path = self.root / "source.json"
+        self.write_json(input_path, source)
+        result = self.workspace / "03-committed-change"
+
+        completed = subprocess.run(
+            [sys.executable, "-m", "afk_change", str(input_path), str(result)],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("outside the source workspace", completed.stderr)
+        self.assertFalse(result.exists())
+        self.assertFalse(self.state()["dirty"])
+
     def test_invalid_input_and_existing_result_do_not_replace_evidence(self):
         result, invalid = self.run_change("unknown", self.attempt)
         self.assertEqual(invalid.returncode, 2)

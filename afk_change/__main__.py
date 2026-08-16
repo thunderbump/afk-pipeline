@@ -45,6 +45,10 @@ def main() -> int:
     else:
         assignment, before, after = committed_response(source_directory)
 
+    validate_result_location(
+        result_directory, Path(assignment["workspace"]), source_directory
+    )
+
     output = {
         "schema_version": 1,
         "outcome": "completed",
@@ -128,13 +132,18 @@ def committed_response(source_directory):
     review_input = read_object(review_directory / "input.json", "Review input")
     review_output = read_object(review_directory / "output.json", "Review output")
     attempt_directory = absolute_evidence_path(review_input, "attempt_directory")
-    assignment = validate_assignment(read_json(attempt_directory / "input.json"))
+    assignment, _attempt_before, attempt_after = committed_attempt(attempt_directory)
 
     workspace = Path(response_input["workspace"])
     require_same_workspace(workspace, assignment, assessment_input, review_input)
     assessed_state = validate_read_only_stage(assessment_output, "Finding Assessment")
     reviewed_state = validate_read_only_stage(review_output, "Review")
-    if assessed_state != reviewed_state or assessed_state != subject_state(before):
+    if not (
+        assessed_state
+        == reviewed_state
+        == subject_state(attempt_after)
+        == subject_state(before)
+    ):
         raise ValueError("Feedback Response evidence must identify one source state")
     try:
         review_value = review_output["review"]
@@ -177,6 +186,8 @@ def validate_state(value: object) -> dict[str, object]:
 
 
 def validate_transition(workspace, before, after, repository):
+    for revision in (before["head"], after["head"]):
+        require_canonical_commit(workspace, revision)
     if before["head"] == after["head"]:
         raise ValueError("committed change requires distinct repository heads")
     recorded = repository.get("commits_between_heads")
@@ -186,6 +197,8 @@ def validate_transition(workspace, before, after, repository):
         or not all(isinstance(commit, str) and commit for commit in recorded)
     ):
         raise ValueError("committed change requires a recorded commit range")
+    for revision in recorded:
+        require_canonical_commit(workspace, revision)
     actual = git(
         workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
     ).splitlines()
@@ -201,6 +214,25 @@ def validate_transition(workspace, before, after, repository):
         raise subprocess.CalledProcessError(ancestry.returncode, ancestry.args)
     if ancestry.returncode != 0:
         raise ValueError("committed change after head must descend from before head")
+
+
+def require_canonical_commit(workspace, revision):
+    canonical = git(workspace, "rev-parse", "--verify", f"{revision}^{{commit}}")
+    if revision != canonical:
+        raise ValueError("repository revisions must be canonical commit object IDs")
+
+
+def validate_result_location(result_directory, workspace, source_directory):
+    result = result_directory.resolve()
+    for protected, message in (
+        (workspace.resolve(), "result directory must be outside the source workspace"),
+        (
+            source_directory.resolve(),
+            "result directory must be outside the source evidence directory",
+        ),
+    ):
+        if result == protected or protected in result.parents:
+            raise ValueError(message)
 
 
 def validate_read_only_stage(value, name):
