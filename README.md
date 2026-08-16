@@ -191,6 +191,53 @@ aggregate routing, or GitHub posting. The workspace must remain unchanged. Exit
 status is `0` for completed, `1` for sealed non-success, and `2` for invalid
 invocation, configuration, input, or Review evidence.
 
+## Feedback Response
+
+Respond to every actionable decision from one completed Finding Assessment:
+
+```sh
+python3 -m afk_respond response.json /new/result-directory
+```
+
+Feedback Response input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "workspace": "/absolute/path/to/the/assessed/checkout",
+  "assessment_directory": "/absolute/path/to/a/completed/assessment",
+  "timeout_seconds": 900
+}
+```
+
+Before creating the result directory, Feedback Response verifies the complete
+Assessment-to-Review-to-Attempt evidence chain and requires the prepared
+workspace to be at its exact clean assessed `HEAD`. The branch remains implicit
+and may be detached. Stale, malformed, failed, dirty, or mismatched evidence is
+refused with exit status `2`.
+
+One invocation selects all and only Assessment decisions whose
+`worth_addressing` value is true. The default adapter invokes Pi with
+`gpt-5.6-sol` and workspace-writing tools, and requires it to create a clean Git
+commit. Authentication is inherited from the environment. A deployment or
+deterministic test may set `AFK_RESPOND_AGENT_COMMAND` to a JSON argv array;
+Feedback Response appends its generated prompt as the final argument.
+
+The result directory contains `input.json`, raw `events.jsonl`, raw
+`stderr.log`, and an atomically sealed `output.json`. A completed agent response
+contains a summary and exactly one non-empty response for every selected
+immutable `finding_index`. Completion also requires a clean final workspace at
+a new descendant `HEAD`; the wrapper records the exact commits between the two
+heads. When no findings are actionable, Feedback Response completes without
+starting an agent, leaves `HEAD` unchanged, and writes empty raw logs.
+
+Outcomes are `completed`, `failed`, `timed_out`, or `interrupted`. Exit status is
+`0` for completion, `1` for sealed non-success, and `2` for invalid invocation,
+configuration, input, or evidence. The component does not run deterministic
+validation, re-review its commit, publish feedback, watch for later events,
+retry, or decide iteration limits. A caller may invoke it again for a later
+independent feedback set.
+
 ## Check
 
 Install the repository's Ruff commit hooks once per checkout:

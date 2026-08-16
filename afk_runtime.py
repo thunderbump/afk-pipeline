@@ -67,6 +67,18 @@ def repository_state(workspace: Path) -> dict[str, object]:
     }
 
 
+def commits_between_heads(
+    workspace: Path, before: dict[str, object], after: dict[str, object] | None
+) -> list[str] | None:
+    if after is None:
+        return None
+    if before["head"] == after["head"]:
+        return []
+    return git(
+        workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
+    ).splitlines()
+
+
 def process_result(exit_code: int | None, error: str | None) -> dict[str, object]:
     result: dict[str, object] = {
         "exit_code": exit_code if exit_code is None or exit_code >= 0 else None,

@@ -6,6 +6,16 @@ from pathlib import Path
 
 
 def read_only_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
+    return pi_command(configuration_name, system_prompt, "read,grep,find,ls")
+
+
+def write_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
+    return pi_command(
+        configuration_name, system_prompt, "read,bash,edit,write,grep,find,ls"
+    )
+
+
+def pi_command(configuration_name: str, system_prompt: str, tools: str) -> list[str]:
     configured = os.environ.get(configuration_name)
     if configured is not None:
         command = json.loads(configured)
@@ -32,7 +42,7 @@ def read_only_pi_command(configuration_name: str, system_prompt: str) -> list[st
         "--print",
         "--no-session",
         "--tools",
-        "read,grep,find,ls",
+        tools,
         "--no-extensions",
         "--no-skills",
         "--no-prompt-templates",

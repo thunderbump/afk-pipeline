@@ -5,7 +5,7 @@ from pathlib import Path
 
 from afk_agent import agent_response
 from afk_runtime import (
-    git,
+    commits_between_heads,
     process_result,
     progress,
     repository_state,
@@ -138,18 +138,6 @@ def validate_assignment(assignment: object) -> None:
     timeout = assignment.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("assignment timeout_seconds must be a positive integer")
-
-
-def commits_between_heads(
-    workspace: Path, before: dict[str, object], after: dict[str, object] | None
-) -> list[str] | None:
-    if after is None:
-        return None
-    if before["head"] == after["head"]:
-        return []
-    return git(
-        workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
-    ).splitlines()
 
 
 if __name__ == "__main__":
