@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
-from afk_change.__main__ import committed_change
+from afk_change.evidence import verify_change_lineage
 from afk_review.contract import validate_review
 from afk_runtime import progress, seal_json, write_json
 
@@ -35,8 +35,10 @@ def main():
     progress("iteration-policy input accepted")
     assessment_directory = Path(policy_input["assessment_directory"])
     progress("loading and verifying Finding Assessment evidence")
-    assessment, change_directory = verified_assessment(assessment_directory)
-    completed_responses = response_count(change_directory)
+    assessment, lineage, protected_directories = verified_assessment(
+        assessment_directory
+    )
+    completed_responses = lineage.response_count
     actionable_findings = sum(
         decision["worth_addressing"] for decision in assessment["decisions"]
     )
@@ -45,7 +47,11 @@ def main():
         completed_responses,
         policy_input["max_responses"],
     )
-    validate_result_location(result_directory, assessment_directory)
+    validate_result_location(
+        result_directory,
+        Path(lineage.assignment["workspace"]),
+        protected_directories,
+    )
 
     progress("preparing iteration-policy result directory")
     result_directory.mkdir()
@@ -71,13 +77,14 @@ def validate_input(value):
     return value
 
 
-def validate_result_location(result_directory, assessment_directory):
+def validate_result_location(result_directory, workspace, evidence_directories):
     result = result_directory.resolve()
-    assessment = assessment_directory.resolve()
-    if result == assessment or assessment in result.parents:
-        raise ValueError(
-            "result directory must be outside the Finding Assessment evidence"
-        )
+    protected_directories = {workspace.resolve(), *evidence_directories}
+    if any(
+        result == protected or protected in result.parents
+        for protected in protected_directories
+    ):
+        raise ValueError("result directory must be outside the workspace and evidence")
 
 
 def verified_assessment(assessment_directory):
@@ -101,7 +108,8 @@ def verified_assessment(assessment_directory):
     )
     review_output = read_object(review_directory / "output.json", "Review output")
     change_directory = Path(review_input["change_directory"])
-    assignment, _before, change_after = committed_change(change_directory, set())
+    lineage = verify_change_lineage(change_directory)
+    change_after = lineage.after
 
     try:
         repository = assessment_output["repository"]
@@ -128,13 +136,19 @@ def verified_assessment(assessment_directory):
         raise ValueError("iteration evidence must identify one clean reviewed state")
     workspace = Path(workspace_value)
     if not (
-        Path(assignment["workspace"]).resolve()
+        Path(lineage.assignment["workspace"]).resolve()
         == workspace.resolve()
         == Path(review_input.get("workspace", "")).resolve()
     ):
         raise ValueError("iteration evidence workspaces must match")
     review = validate_review(review_value, workspace, review_after["head"])
-    return validate_assessment(review, assessment_value), change_directory
+    evidence_directories = {
+        assessment_directory.resolve(),
+        review_directory.resolve(),
+        Path(review_input["validation_directory"]).resolve(),
+        *lineage.evidence_directories,
+    }
+    return validate_assessment(review, assessment_value), lineage, evidence_directories
 
 
 def validate_stage_input(value, name, *evidence_fields):
@@ -148,29 +162,6 @@ def validate_stage_input(value, name, *evidence_fields):
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError(f"invalid {name} input timeout_seconds")
     return value
-
-
-def response_count(change_directory, visited=None):
-    visited = set() if visited is None else visited
-    change_directory = change_directory.resolve()
-    if change_directory in visited:
-        raise ValueError("iteration evidence chain contains a cycle")
-    visited.add(change_directory)
-    change_output = read_object(change_directory / "output.json", "Committed Change")
-    source = change_output["change"]["source"]
-    if source["kind"] == "attempt":
-        return 0
-    response_directory = Path(source["directory"])
-    response_input = read_object(
-        response_directory / "input.json", "Feedback Response input"
-    )
-    prior_assessment = Path(response_input["assessment_directory"])
-    prior_assessment_input = read_object(
-        prior_assessment / "input.json", "Finding Assessment input"
-    )
-    prior_review = Path(prior_assessment_input["review_directory"])
-    prior_review_input = read_object(prior_review / "input.json", "Review input")
-    return 1 + response_count(Path(prior_review_input["change_directory"]), visited)
 
 
 def decide(actionable_findings, completed_responses, max_responses):

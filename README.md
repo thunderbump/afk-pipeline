@@ -316,7 +316,8 @@ counts, the configured limit, a reason, and one deterministic decision:
 
 Exit status is `0` after a completed decision and `2` for invalid invocation,
 input, or evidence. Refusal happens before result creation, existing results are
-not replaced, and the result must be outside the named Assessment evidence.
+not replaced, and the result must be outside the source workspace and every
+traversed evidence directory.
 The component runs no agent or other AFK component and stores no mutable
 aggregate state. Resuming or changing the response limit is a new invocation
 over the same evidence and leaves every prior sealed result unchanged.

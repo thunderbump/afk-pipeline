@@ -53,6 +53,7 @@ class IterationPolicyCliTest(unittest.TestCase):
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Implementation")
         self.implementation = self.state()
+        (self.root / "02-validation").mkdir()
         self.assessment = self.make_assessment(worth_addressing=False)
 
     def test_no_actionable_findings_stop_without_using_remaining_budget(self):
@@ -207,7 +208,8 @@ class IterationPolicyCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
 
-    def test_result_directory_cannot_modify_the_named_assessment_evidence(self):
+    def test_result_directory_cannot_modify_workspace_or_lineage_evidence(self):
+        self.assessment = self.make_response_assessment(worth_addressing=True)
         value = {
             "schema_version": 1,
             "assessment_directory": str(self.assessment),
@@ -215,19 +217,38 @@ class IterationPolicyCliTest(unittest.TestCase):
         }
         input_path = self.root / "policy-protected.json"
         self.write_json(input_path, value)
-        result = self.assessment / "iteration-policy"
-
-        completed = subprocess.run(
-            [sys.executable, "-m", "afk_iterate", str(input_path), str(result)],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-        self.assertEqual(completed.returncode, 2)
-        self.assertIn("outside the Finding Assessment evidence", completed.stderr)
-        self.assertFalse(result.exists())
+        protected = [
+            self.workspace,
+            self.assessment,
+            self.root / "09-review",
+            self.root / "08-change",
+            self.root / "07-validation",
+            self.root / "06-response",
+            self.root / "05-assessment",
+            self.root / "04-review",
+            self.root / "03-change",
+            self.root / "02-validation",
+            self.root / "01-attempt",
+        ]
+        for index, directory in enumerate(protected):
+            with self.subTest(directory=directory):
+                result = directory / f"iteration-policy-{index}"
+                completed = subprocess.run(
+                    [
+                        sys.executable,
+                        "-m",
+                        "afk_iterate",
+                        str(input_path),
+                        str(result),
+                    ],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn("outside the workspace and evidence", completed.stderr)
+                self.assertFalse(result.exists())
 
     def test_existing_result_directory_is_not_replaced(self):
         result = self.root / "result-1"
@@ -301,6 +322,7 @@ class IterationPolicyCliTest(unittest.TestCase):
                 },
             },
         )
+        (self.root / "07-validation").mkdir()
         review = self.root / "09-review"
         review.mkdir()
         self.write_json(
