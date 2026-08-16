@@ -1,7 +1,7 @@
 # AFK Pipeline
 
-Small executable modules for running agent work, validating its result, and
-reviewing one validated implementation.
+Small executable modules for running agent work, validating and reviewing its
+result, responding to feedback, and coordinating the accepted sequence.
 
 ## Attempt Executor
 
@@ -321,6 +321,60 @@ traversed evidence directory.
 The component runs no agent or other AFK component and stores no mutable
 aggregate state. Resuming or changing the response limit is a new invocation
 over the same evidence and leaves every prior sealed result unchanged.
+
+## Coordinator
+
+Create or resume one synchronous run across the seven existing modules:
+
+```sh
+python3 -m afk_coordinate run.json /new-or-existing/run-directory
+```
+
+Coordinator input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "assignment_path": "/absolute/path/to/assignment.json",
+  "validation": {
+    "command": ["./scripts/validate"],
+    "timeout_seconds": 1800
+  },
+  "agent_timeout_seconds": 900,
+  "max_responses": 2
+}
+```
+
+On first invocation, the run directory must not exist and must be outside the
+Assignment workspace. The coordinator freezes accepted input as `input.json`
+and the Assignment as `assignment.json`, then invokes the existing modules in
+zero-padded directories. It atomically replaces `state.json` before and after
+each invocation. The checkpoint exposes run status, next sequence and module,
+an optional active invocation, ordered history, and terminal facts.
+
+The same command resumes an existing run. If an active module has sealed its
+`output.json`, the coordinator consumes it and continues without repeating the
+module. If no sealed output exists, the coordinator exits `1` without changing
+state because it cannot infer whether the worker is alive. After an operator or
+execution substrate confirms that worker is gone, run:
+
+```sh
+python3 -m afk_coordinate run.json /existing/run-directory --abandon-active
+```
+
+The abandoned invocation remains in history and the retry receives a new
+numbered directory. This flag is an external liveness assertion; the
+coordinator does not inspect or terminate the old process.
+
+`stop` and `exhausted` Iteration Policy decisions atomically seal terminal
+`output.json` with `outcome: completed`. A sealed non-success from any module
+seals `outcome: failed`. Exit status is `0` for a completed run, `1` for a
+failed run or unresolved active invocation, and `2` for invalid invocation,
+input, checkpoint, or evidence. Re-invoking a terminal run is idempotent.
+
+The coordinator does not access Beads, prepare a workspace, choose a branch,
+infer worker liveness, retry component failures, publish feedback, manage
+containers, or implement a scheduler or general state-machine framework.
 
 ## Check
 

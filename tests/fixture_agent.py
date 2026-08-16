@@ -1,4 +1,5 @@
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -118,6 +119,29 @@ elif scenario == "hang":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     while True:
         time.sleep(1)
+elif scenario == "hang-once":
+    marker = Path(sys.argv[2])
+    if not marker.exists():
+        marker.write_text(json.dumps({"agent": os.getpid(), "wrapper": os.getppid()}))
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
+        while True:
+            time.sleep(1)
+    Path("result.txt").write_text("fixture result\n")
+    subprocess.run(["git", "add", "result.txt"], check=True)
+    subprocess.run(
+        ["git", "commit", "--quiet", "-m", "Fixture implementation"], check=True
+    )
+    print(json.dumps({"type": "agent_start"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {"role": "assistant", "stopReason": "stop"},
+            }
+        ),
+        flush=True,
+    )
+    print(json.dumps({"type": "agent_end"}), flush=True)
 elif scenario == "git-commit":
     Path("result.txt").write_text("fixture result\n")
     subprocess.run(["git", "add", "result.txt"], check=True)
