@@ -279,6 +279,48 @@ source evidence directory. This deterministic adapter runs no agent, mutates no
 Git state, does not require the workspace still to be checked out at the final
 head, and does not run Validation or Review.
 
+## Iteration Policy
+
+Decide whether one reviewed and assessed lineage should stop, continue with
+another Feedback Response, or stop because its response budget is exhausted:
+
+```sh
+python3 -m afk_iterate policy.json /new/result-directory
+```
+
+Iteration Policy input is structured JSON:
+
+```json
+{
+  "schema_version": 1,
+  "assessment_directory": "/absolute/path/to/latest/completed-assessment",
+  "max_responses": 2
+}
+```
+
+`max_responses` is a nonnegative limit on Feedback Response executions; it does
+not count the initial implementation Attempt. Before creating the result
+directory, the component verifies the completed Finding Assessment, Review,
+Committed Change, and recursive source evidence, then derives the number of
+prior Feedback Responses from that immutable lineage.
+
+The result contains accepted `input.json` and an atomically sealed `output.json`.
+Its completed `policy` records the derived response and actionable-finding
+counts, the configured limit, a reason, and one deterministic decision:
+
+- `stop` when the latest Assessment has no actionable findings, regardless of
+  remaining budget.
+- `exhausted` when actionable findings remain and the response limit has been
+  reached.
+- `continue` otherwise; only this decision includes `next_response_number`.
+
+Exit status is `0` after a completed decision and `2` for invalid invocation,
+input, or evidence. Refusal happens before result creation, existing results are
+not replaced, and the result must be outside the named Assessment evidence.
+The component runs no agent or other AFK component and stores no mutable
+aggregate state. Resuming or changing the response limit is a new invocation
+over the same evidence and leaves every prior sealed result unchanged.
+
 ## Check
 
 Install the repository's Ruff commit hooks once per checkout:
