@@ -78,6 +78,24 @@ class ChangeCliTest(unittest.TestCase):
                 },
             },
         )
+        self.prior_change = self.root / "03-source-change"
+        self.prior_change.mkdir()
+        self.write_json(
+            self.prior_change / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "completed",
+                "change": {
+                    "objective": "Make the implementation correct.",
+                    "workspace": str(self.workspace),
+                    "repository": {
+                        "before": self.before,
+                        "after": self.implementation,
+                    },
+                    "source": {"kind": "attempt", "directory": str(self.attempt)},
+                },
+            },
+        )
 
     def test_succeeded_attempt_projects_one_committed_change(self):
         result, completed = self.run_change("attempt", self.attempt)
@@ -235,7 +253,7 @@ class ChangeCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "workspace": str(self.workspace),
-                "attempt_directory": str(self.attempt),
+                "change_directory": str(self.prior_change),
                 "validation_directory": str(self.root / "02-validation"),
                 "timeout_seconds": 60,
             },

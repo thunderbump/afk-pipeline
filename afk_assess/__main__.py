@@ -6,6 +6,7 @@ from pathlib import Path
 
 from afk_agent import agent_response, read_only_pi_command
 from afk_assess.contract import subject_state, validate_assessment
+from afk_change.contract import validate_change_output
 from afk_review.contract import validate_review
 from afk_runtime import (
     process_result,
@@ -154,16 +155,16 @@ def load_evidence(assessment_input: dict[str, object]) -> dict[str, object]:
     review_input = read_json(review_directory / "input.json")
     if not isinstance(review_input, dict):
         raise TypeError("invalid Review evidence")
-    attempt_directory = review_input.get("attempt_directory")
+    change_directory = review_input.get("change_directory")
     if (
-        not isinstance(attempt_directory, str)
-        or not Path(attempt_directory).is_absolute()
+        not isinstance(change_directory, str)
+        or not Path(change_directory).is_absolute()
     ):
-        raise ValueError("invalid Review evidence attempt_directory")
+        raise ValueError("invalid Review evidence change_directory")
     return {
         "input": review_input,
         "output": read_json(review_directory / "output.json"),
-        "assignment": read_json(Path(attempt_directory) / "input.json"),
+        "change_output": read_json(Path(change_directory) / "output.json"),
     }
 
 
@@ -175,19 +176,17 @@ def verify_subject(
     try:
         review_input = evidence["input"]
         review_output = evidence["output"]
-        assignment = evidence["assignment"]
+        change = validate_change_output(evidence["change_output"])
         review_workspace = review_input["workspace"]
+        change_workspace = change["workspace"]
+        change_state = subject_state(change["repository"]["after"])
         review_before = subject_state(review_output["repository"]["before"])
         review_state = subject_state(review_output["repository"]["after"])
         reviewed_head = review_state["head"]
         review = review_output["review"]
     except (KeyError, TypeError) as error:
         raise ValueError("invalid Review evidence") from error
-    if not isinstance(assignment, dict):
-        raise TypeError("invalid Review evidence assignment")
-    objective = assignment.get("objective")
-    if not isinstance(objective, str) or not objective.strip():
-        raise ValueError("invalid Review evidence objective")
+    objective = change["objective"]
     if review_output.get("outcome") != "completed":
         raise ValueError("finding assessment requires a completed Review")
     if review_output["repository"].get("unchanged") is not True:
@@ -204,6 +203,10 @@ def verify_subject(
         != Path(assessment_input["workspace"]).resolve()
     ):
         raise ValueError("workspace must match the completed Review input")
+    if Path(change_workspace).resolve() != Path(review_workspace).resolve():
+        raise ValueError("workspace must match the reviewed Committed Change")
+    if change_state != review_state:
+        raise ValueError("Review must match its Committed Change repository state")
     if subject_state(before) != review_state:
         raise ValueError("workspace must match the completed Review repository state")
     if review_state["dirty"] or review_state["status"]:

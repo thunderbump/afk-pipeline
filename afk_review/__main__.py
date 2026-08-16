@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from afk_agent import agent_response, read_only_pi_command
+from afk_change.contract import validate_change_output
 from afk_review.contract import validate_review
 from afk_runtime import (
     git,
@@ -48,7 +49,7 @@ def main() -> int:
     )
     progress("review input accepted")
 
-    progress("loading Attempt and Validation evidence")
+    progress("loading Committed Change and Validation evidence")
     evidence = load_evidence(review_input)
     workspace = Path(review_input["workspace"])
     progress("observing reviewed repository")
@@ -93,7 +94,7 @@ def main() -> int:
     review_error = None
     if agent is not None and agent["status"] == "completed":
         try:
-            reviewed_head = evidence["attempt"]["repository"]["after"]["head"]
+            reviewed_head = evidence["change"]["repository"]["after"]["head"]
             review = validate_review(
                 json.loads(response["text"]), workspace, reviewed_head
             )
@@ -147,7 +148,7 @@ def main() -> int:
 def validate_input(value: object) -> None:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("review must use schema_version 1")
-    for field in ("workspace", "attempt_directory", "validation_directory"):
+    for field in ("workspace", "change_directory", "validation_directory"):
         path = value.get(field)
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError(f"review {field} must be an absolute path")
@@ -157,50 +158,61 @@ def validate_input(value: object) -> None:
 
 
 def load_evidence(review_input: dict[str, object]) -> dict[str, object]:
-    attempt = Path(review_input["attempt_directory"])
+    change = Path(review_input["change_directory"])
     validation = Path(review_input["validation_directory"])
     return {
-        "assignment": read_json(attempt / "input.json"),
-        "attempt": read_json(attempt / "output.json"),
+        "workspace": review_input["workspace"],
+        "change_output": read_json(change / "output.json"),
         "validation": read_json(validation / "output.json"),
     }
 
 
 def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> None:
     try:
-        assignment = evidence["assignment"]
-        attempt = evidence["attempt"]
+        change_output = evidence["change_output"]
+        change = validate_change_output(change_output)
         validation = evidence["validation"]
-        objective = assignment["objective"]
-        attempt_state = subject_state(attempt["repository"]["after"])
+        change_workspace = change["workspace"]
+        change_after = subject_state(change["repository"]["after"])
+        validation_before = subject_state(validation["repository"]["before"])
         validation_state = subject_state(validation["repository"]["after"])
-        base_head = attempt["repository"]["before"]["head"]
     except (KeyError, TypeError) as error:
         raise ValueError("invalid Review evidence") from error
-    if not isinstance(objective, str) or not objective.strip():
-        raise ValueError("invalid Review evidence objective")
-    if not isinstance(base_head, str) or not base_head:
-        raise ValueError("invalid Review evidence base HEAD")
-    if attempt.get("outcome") != "succeeded":
-        raise ValueError("review Attempt must have succeeded")
+    if validation.get("schema_version") != 1:
+        raise ValueError("Review Validation must use schema_version 1")
+    workspace = Path(change_workspace)
+    if workspace.resolve() != Path(evidence["workspace"]).resolve():
+        raise ValueError("Review workspace must match Committed Change")
     if validation.get("outcome") != "passed":
         raise ValueError("review Validation must have passed")
-    if attempt_state != validation_state:
-        raise ValueError("Attempt and Validation must identify one repository state")
-    if subject_state(before) != attempt_state:
-        raise ValueError("workspace must match the validated Attempt repository state")
-    if attempt_state["dirty"] or attempt_state["status"]:
-        raise ValueError("Review requires a clean committed state")
+    if not (change_after == validation_before == validation_state):
+        raise ValueError(
+            "Committed Change and Validation must identify one repository state"
+        )
+    if subject_state(before) != change_after:
+        raise ValueError("workspace must match the validated Committed Change state")
+    evidence["change"] = change
 
 
 def subject_state(state: dict[str, object]) -> dict[str, object]:
-    return {field: state[field] for field in ("head", "dirty", "status")}
+    if not isinstance(state, dict):
+        raise TypeError("repository state must be an object")
+    subject = {field: state[field] for field in ("head", "dirty", "status")}
+    if (
+        not isinstance(subject["head"], str)
+        or not subject["head"]
+        or not isinstance(subject["dirty"], bool)
+        or not isinstance(subject["status"], list)
+        or not all(isinstance(line, str) for line in subject["status"])
+    ):
+        raise ValueError("invalid Review evidence repository state")
+    return subject
 
 
 def write_diff(diff_path: Path, workspace: Path, evidence: dict[str, object]) -> None:
-    attempt = evidence["attempt"]
-    before = attempt["repository"]["before"]["head"]
-    after = attempt["repository"]["after"]["head"]
+    change = evidence["change"]
+    before = change["repository"]["before"]["head"]
+    after = change["repository"]["after"]["head"]
     diff = git(
         workspace,
         "diff",
@@ -217,16 +229,15 @@ def prompt(
     evidence: dict[str, object],
     diff_path: Path,
 ) -> str:
-    attempt = evidence["attempt"]
-    assignment = evidence["assignment"]
-    before = attempt["repository"]["before"]["head"]
-    after = attempt["repository"]["after"]["head"]
+    change = evidence["change"]
+    before = change["repository"]["before"]["head"]
+    after = change["repository"]["after"]["head"]
     return f"""Review the implementation described below. Do not modify the workspace.
 
-Objective: {assignment["objective"]}
+Objective: {change["objective"]}
 Reviewed commits: {before}..{after}
 Read the complete reviewed diff from: {diff_path}
-Attempt evidence: {review_input["attempt_directory"]}
+Committed Change evidence: {review_input["change_directory"]}
 Validation evidence: {review_input["validation_directory"]}
 
 Look for concrete correctness defects, regressions, missing necessary tests, and violations of the stated objective. Validation passing is evidence, not proof of correctness. Do not propose or perform repairs.

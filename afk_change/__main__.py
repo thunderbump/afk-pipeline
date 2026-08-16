@@ -5,6 +5,7 @@ from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
 from afk_attempt.contract import validate_assignment
+from afk_change.contract import validate_change_output
 from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import (
     validate_input as validate_response_input,
@@ -105,7 +106,9 @@ def committed_attempt(source_directory):
     return assignment, before, after
 
 
-def committed_response(source_directory):
+def committed_response(source_directory, visited=None):
+    visited = set() if visited is None else visited
+    remember_evidence(visited, "feedback_response", source_directory)
     response_input = validate_response_input(read_json(source_directory / "input.json"))
     response_output = read_json(source_directory / "output.json")
     if (
@@ -131,8 +134,10 @@ def committed_response(source_directory):
     review_directory = absolute_evidence_path(assessment_input, "review_directory")
     review_input = read_object(review_directory / "input.json", "Review input")
     review_output = read_object(review_directory / "output.json", "Review output")
-    attempt_directory = absolute_evidence_path(review_input, "attempt_directory")
-    assignment, _attempt_before, attempt_after = committed_attempt(attempt_directory)
+    change_directory = absolute_evidence_path(review_input, "change_directory")
+    assignment, _source_before, source_after = committed_change(
+        change_directory, visited
+    )
 
     workspace = Path(response_input["workspace"])
     require_same_workspace(workspace, assignment, assessment_input, review_input)
@@ -141,7 +146,7 @@ def committed_response(source_directory):
     if not (
         assessed_state
         == reviewed_state
-        == subject_state(attempt_after)
+        == subject_state(source_after)
         == subject_state(before)
     ):
         raise ValueError("Feedback Response evidence must identify one source state")
@@ -161,6 +166,32 @@ def committed_response(source_directory):
         raise ValueError("Feedback Response must record descendant commits")
     validate_transition(workspace, before, after, response_repository)
     return assignment, before, after
+
+
+def committed_change(change_directory, visited):
+    remember_evidence(visited, "committed_change", change_directory)
+    recorded = validate_change_output(read_json(change_directory / "output.json"))
+    source = recorded["source"]
+    source_directory = Path(source["directory"])
+    if source["kind"] == "attempt":
+        assignment, before, after = committed_attempt(source_directory)
+    else:
+        assignment, before, after = committed_response(source_directory, visited)
+    if (
+        recorded["objective"] != assignment["objective"]
+        or Path(recorded["workspace"]).resolve()
+        != Path(assignment["workspace"]).resolve()
+        or recorded["repository"] != {"before": before, "after": after}
+    ):
+        raise ValueError("Committed Change does not match its source evidence")
+    return assignment, before, after
+
+
+def remember_evidence(visited, kind, directory):
+    evidence = (kind, directory.resolve())
+    if evidence in visited:
+        raise ValueError("Feedback Response evidence chain contains a cycle")
+    visited.add(evidence)
 
 
 def validate_state(value: object) -> dict[str, object]:

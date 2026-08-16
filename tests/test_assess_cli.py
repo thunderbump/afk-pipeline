@@ -50,14 +50,31 @@ class AssessmentCliTest(unittest.TestCase):
         self.git("init", "--quiet", "--initial-branch", "main")
         self.git("config", "user.name", "AFK Test")
         self.git("config", "user.email", "afk-test@example.invalid")
+        (self.workspace / "README.md").write_text("before review\n")
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", "Before implementation")
+        before = self.state()
         (self.workspace / "README.md").write_text("reviewed code\n")
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Reviewed state")
-        self.attempt = self.root / "attempt"
-        self.attempt.mkdir()
+        state = self.state()
+        self.change = self.root / "committed-change"
+        self.change.mkdir()
         self.write_json(
-            self.attempt / "input.json",
-            {"objective": "Make the reviewed implementation correct."},
+            self.change / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "completed",
+                "change": {
+                    "objective": "Make the reviewed implementation correct.",
+                    "workspace": str(self.workspace),
+                    "repository": {"before": before, "after": state},
+                    "source": {
+                        "kind": "attempt",
+                        "directory": str(self.root / "attempt"),
+                    },
+                },
+            },
         )
         self.review = self.root / "review"
         self.review.mkdir()
@@ -66,12 +83,11 @@ class AssessmentCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "workspace": str(self.workspace),
-                "attempt_directory": str(self.attempt),
+                "change_directory": str(self.change),
                 "validation_directory": str(self.root / "validation"),
                 "timeout_seconds": 5,
             },
         )
-        state = self.state()
         self.write_json(
             self.review / "output.json",
             {
@@ -221,7 +237,7 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertFalse(result.exists())
         self.assertIn("invalid Review evidence", completed.stderr)
 
-    def test_assignment_objective_is_required_and_given_to_the_assessor(self):
+    def test_change_objective_is_required_and_given_to_the_assessor(self):
         marker = self.root / "prompt.txt"
         input_path, result, environment = self.prepare_assessment(
             "capture-prompt",
@@ -238,7 +254,9 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("Make the reviewed implementation correct.", marker.read_text())
 
-        self.write_json(self.attempt / "input.json", {})
+        change = json.loads((self.change / "output.json").read_text())
+        change["change"]["objective"] = ""
+        self.write_json(self.change / "output.json", change)
         result, completed = self.run_assessment(
             "address", result_name="missing-objective"
         )

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from afk_agent import agent_response, write_pi_command
 from afk_assess.contract import subject_state, validate_assessment
+from afk_change.contract import validate_change_output
 from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
 from afk_runtime import (
@@ -202,18 +203,18 @@ def load_evidence(response_input: dict[str, object]) -> dict[str, object]:
     review_input = read_json(Path(review_directory) / "input.json")
     if not isinstance(review_input, dict):
         raise TypeError("invalid Feedback Response evidence")
-    attempt_directory = review_input.get("attempt_directory")
+    change_directory = review_input.get("change_directory")
     if (
-        not isinstance(attempt_directory, str)
-        or not Path(attempt_directory).is_absolute()
+        not isinstance(change_directory, str)
+        or not Path(change_directory).is_absolute()
     ):
-        raise ValueError("invalid Feedback Response evidence attempt_directory")
+        raise ValueError("invalid Feedback Response evidence change_directory")
     return {
         "assessment_input": assessment_input,
         "assessment_output": read_json(assessment_directory / "output.json"),
         "review_input": review_input,
         "review_output": read_json(Path(review_directory) / "output.json"),
-        "assignment": read_json(Path(attempt_directory) / "input.json"),
+        "change_output": read_json(Path(change_directory) / "output.json"),
     }
 
 
@@ -223,7 +224,7 @@ def verify_subject(response_input, before, evidence):
         assessment_output = evidence["assessment_output"]
         review_input = evidence["review_input"]
         review_output = evidence["review_output"]
-        assignment = evidence["assignment"]
+        change = validate_change_output(evidence["change_output"])
         assessment_before = subject_state(assessment_output["repository"]["before"])
         assessment_state = subject_state(assessment_output["repository"]["after"])
         review_before = subject_state(review_output["repository"]["before"])
@@ -232,11 +233,8 @@ def verify_subject(response_input, before, evidence):
         assessment = assessment_output["assessment"]
     except (KeyError, TypeError) as error:
         raise ValueError("invalid Feedback Response evidence") from error
-    if not isinstance(assignment, dict):
-        raise TypeError("invalid Feedback Response evidence assignment")
-    objective = assignment.get("objective")
-    if not isinstance(objective, str) or not objective.strip():
-        raise ValueError("invalid Feedback Response evidence objective")
+    objective = change["objective"]
+    change_state = subject_state(change["repository"]["after"])
     if assessment_output.get("outcome") != "completed":
         raise ValueError("feedback response requires a completed Finding Assessment")
     if review_output.get("outcome") != "completed":
@@ -245,10 +243,17 @@ def verify_subject(response_input, before, evidence):
         raise ValueError("completed Finding Assessment must be read-only")
     if review_output["repository"].get("unchanged") is not True:
         raise ValueError("completed Review must be read-only")
-    if not (assessment_before == assessment_state == review_before == review_state):
+    if not (
+        assessment_before
+        == assessment_state
+        == review_before
+        == review_state
+        == change_state
+    ):
         raise ValueError("Review and Finding Assessment must identify one Git state")
     workspace = Path(response_input["workspace"]).resolve()
     for evidence_workspace in (
+        change.get("workspace"),
         assessment_input.get("workspace"),
         review_input.get("workspace"),
     ):

@@ -103,8 +103,7 @@ invalid invocation or input.
 
 ## Review
 
-Run one agent review of a successful implementation Attempt and its passed
-Validation:
+Run one agent review of a completed Committed Change and its passed Validation:
 
 ```sh
 python3 -m afk_review review.json /new/result-directory
@@ -116,16 +115,17 @@ Review input is structured JSON:
 {
   "schema_version": 1,
   "workspace": "/absolute/path/to/prepared/checkout",
-  "attempt_directory": "/absolute/path/to/succeeded/attempt",
+  "change_directory": "/absolute/path/to/completed/committed-change",
   "validation_directory": "/absolute/path/to/passed/validation",
   "timeout_seconds": 900
 }
 ```
 
 The prepared workspace must be clean and have the same `HEAD` and status as the
-implementation Attempt and Validation. Its branch is implicit and may be
-detached. Before creating the result directory, Review rejects failed, dirty,
-or mismatched evidence.
+Committed Change's final state and both Validation observations. Its branch is
+implicit and may be detached. Before creating the result directory, Review
+rejects failed, dirty, stale, malformed, or mismatched evidence. The old
+`attempt_directory` input is not supported.
 
 The wrapper records the complete commit diff as `diff.patch`. The default
 adapter invokes Pi with `gpt-5.6-sol`, gives it only read-oriented tools, and
@@ -211,7 +211,7 @@ Feedback Response input is structured JSON:
 ```
 
 Before creating the result directory, Feedback Response verifies the complete
-Assessment-to-Review-to-Attempt evidence chain and requires the prepared
+Assessment-to-Review-to-Committed-Change evidence chain and requires the prepared
 workspace to be at its exact clean assessed `HEAD`. The branch remains implicit
 and may be detached. Stale, malformed, failed, dirty, or mismatched evidence is
 refused with exit status `2`.

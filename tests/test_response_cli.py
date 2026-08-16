@@ -50,16 +50,32 @@ class ResponseCliTest(unittest.TestCase):
         self.git("init", "--quiet", "--initial-branch", "main")
         self.git("config", "user.name", "AFK Test")
         self.git("config", "user.email", "afk-test@example.invalid")
+        (self.workspace / "README.md").write_text("before review\n")
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", "Before implementation")
+        before = self.state()
         (self.workspace / "README.md").write_text("reviewed code\n")
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Reviewed state")
         state = self.state()
 
-        self.attempt = self.root / "attempt"
-        self.attempt.mkdir()
+        self.change = self.root / "committed-change"
+        self.change.mkdir()
         self.write_json(
-            self.attempt / "input.json",
-            {"objective": "Make the reviewed implementation correct."},
+            self.change / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "completed",
+                "change": {
+                    "objective": "Make the reviewed implementation correct.",
+                    "workspace": str(self.workspace),
+                    "repository": {"before": before, "after": state},
+                    "source": {
+                        "kind": "attempt",
+                        "directory": str(self.root / "attempt"),
+                    },
+                },
+            },
         )
         self.review = self.root / "review"
         self.review.mkdir()
@@ -68,7 +84,7 @@ class ResponseCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "workspace": str(self.workspace),
-                "attempt_directory": str(self.attempt),
+                "change_directory": str(self.change),
                 "validation_directory": str(self.root / "validation"),
                 "timeout_seconds": 5,
             },

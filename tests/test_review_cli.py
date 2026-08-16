@@ -67,24 +67,43 @@ class ReviewCliTest(unittest.TestCase):
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Implementation")
         self.after = self.state()
-        self.attempt = self.root / "attempt"
-        self.attempt.mkdir()
+        self.change = self.root / "committed-change"
+        self.change.mkdir()
         self.write_json(
-            self.attempt / "input.json",
-            {"objective": "Change before to after."},
+            self.change / "input.json",
+            {
+                "schema_version": 1,
+                "source": {
+                    "kind": "attempt",
+                    "directory": str(self.root / "attempt"),
+                },
+            },
         )
         self.write_json(
-            self.attempt / "output.json",
+            self.change / "output.json",
             {
-                "outcome": "succeeded",
-                "repository": {"before": self.before, "after": self.after},
+                "schema_version": 1,
+                "outcome": "completed",
+                "change": {
+                    "objective": "Change before to after.",
+                    "workspace": str(self.workspace),
+                    "repository": {"before": self.before, "after": self.after},
+                    "source": {
+                        "kind": "attempt",
+                        "directory": str(self.root / "attempt"),
+                    },
+                },
             },
         )
         self.validation = self.root / "validation"
         self.validation.mkdir()
         self.write_json(
             self.validation / "output.json",
-            {"outcome": "passed", "repository": {"after": self.after}},
+            {
+                "schema_version": 1,
+                "outcome": "passed",
+                "repository": {"before": self.after, "after": self.after},
+            },
         )
 
     def test_completed_review_seals_structured_output_and_raw_artifacts(self):
@@ -99,7 +118,7 @@ class ReviewCliTest(unittest.TestCase):
             [
                 "loading review input",
                 "review input accepted",
-                "loading Attempt and Validation evidence",
+                "loading Committed Change and Validation evidence",
                 "observing reviewed repository",
                 "preparing review result directory",
                 (
@@ -131,6 +150,23 @@ class ReviewCliTest(unittest.TestCase):
         self.assertTrue((result / "events.jsonl").is_file())
         self.assertEqual((result / "stderr.log").read_text(), "")
         self.assertFalse((result / "output.json.tmp").exists())
+
+    def test_feedback_response_change_uses_the_same_review_interface(self):
+        change = json.loads((self.change / "output.json").read_text())
+        change["change"]["source"] = {
+            "kind": "feedback_response",
+            "directory": str(self.root / "response"),
+        }
+        self.write_json(self.change / "output.json", change)
+
+        result, completed = self.run_review("no-findings")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads((result / "input.json").read_text())["change_directory"],
+            str(self.change),
+        )
+        self.assertIn("-before", (result / "diff.patch").read_text())
 
     def test_findings_are_completed_and_require_line_anchors(self):
         result, completed = self.run_review("findings")
@@ -169,7 +205,7 @@ class ReviewCliTest(unittest.TestCase):
                 self.assertIsNone(output["review"])
                 self.assertIn("finding location", output["review_error"])
 
-    def test_workspace_must_match_the_validated_attempt_before_review(self):
+    def test_workspace_must_match_the_validated_change_before_review(self):
         (self.workspace / "unreviewed.txt").write_text("different state\n")
 
         result, completed = self.run_review("no-findings")
@@ -181,10 +217,11 @@ class ReviewCliTest(unittest.TestCase):
     def test_dirty_implementation_evidence_is_refused_before_review(self):
         (self.workspace / "uncommitted.txt").write_text("not committed\n")
         dirty = self.state()
-        attempt = json.loads((self.attempt / "output.json").read_text())
-        attempt["repository"]["after"] = dirty
-        self.write_json(self.attempt / "output.json", attempt)
+        change = json.loads((self.change / "output.json").read_text())
+        change["change"]["repository"]["after"] = dirty
+        self.write_json(self.change / "output.json", change)
         validation = json.loads((self.validation / "output.json").read_text())
+        validation["repository"]["before"] = dirty
         validation["repository"]["after"] = dirty
         self.write_json(self.validation / "output.json", validation)
 
@@ -192,7 +229,7 @@ class ReviewCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
-        self.assertIn("clean committed state", completed.stderr)
+        self.assertIn("repository states must be clean", completed.stderr)
 
     def test_detached_workspace_at_the_validated_head_is_reviewable(self):
         self.git("checkout", "--quiet", "--detach")
@@ -334,14 +371,89 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertEqual([sentinel], list(result.iterdir()))
 
+    def test_attempt_directory_is_not_a_supported_review_input(self):
+        input_path, result, environment = self.prepare_review("no-findings")
+        value = json.loads(input_path.read_text())
+        value["attempt_directory"] = value.pop("change_directory")
+        self.write_json(input_path, value)
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("change_directory", completed.stderr)
+        self.assertFalse(result.exists())
+
+    def test_failed_and_mismatched_change_or_validation_are_refused(self):
+        original_change = json.loads((self.change / "output.json").read_text())
+        original_validation = json.loads((self.validation / "output.json").read_text())
+        cases = {
+            "failed-change": (
+                lambda change, _validation: change.update(outcome="failed"),
+                "Committed Change must have completed",
+            ),
+            "failed-validation": (
+                lambda _change, validation: validation.update(outcome="failed"),
+                "Validation must have passed",
+            ),
+            "wrong-validation-before": (
+                lambda _change, validation: validation["repository"].update(
+                    before=self.before
+                ),
+                "identify one repository state",
+            ),
+            "dirty-change-before": (
+                lambda change, _validation: change["change"]["repository"][
+                    "before"
+                ].update(dirty=True, status=[" M README.md"]),
+                "repository states must be clean",
+            ),
+        }
+        for name, (mutate, error) in cases.items():
+            with self.subTest(name=name):
+                change = json.loads(json.dumps(original_change))
+                validation = json.loads(json.dumps(original_validation))
+                mutate(change, validation)
+                self.write_json(self.change / "output.json", change)
+                self.write_json(self.validation / "output.json", validation)
+
+                result, completed = self.run_review(
+                    "no-findings", result_name=f"review-{name}"
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertIn(error, completed.stderr)
+                self.assertFalse(result.exists())
+
     def test_malformed_evidence_is_refused_before_result_creation(self):
-        self.write_json(self.attempt / "output.json", {"outcome": "succeeded"})
+        self.write_json(self.change / "output.json", {"outcome": "completed"})
 
         result, completed = self.run_review("no-findings")
 
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
-        self.assertIn("invalid Review evidence", completed.stderr)
+        self.assertIn("Committed Change must use schema_version 1", completed.stderr)
+
+    def test_committed_change_provenance_is_required(self):
+        change = json.loads((self.change / "output.json").read_text())
+        del change["change"]["source"]
+        self.write_json(self.change / "output.json", change)
+
+        result, completed = self.run_review("no-findings")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("Committed Change source is invalid", completed.stderr)
+
+    def test_validation_schema_is_required(self):
+        validation = json.loads((self.validation / "output.json").read_text())
+        del validation["schema_version"]
+        self.write_json(self.validation / "output.json", validation)
+
+        result, completed = self.run_review("no-findings")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("Validation must use schema_version 1", completed.stderr)
 
     def run_review(
         self,
@@ -371,7 +483,7 @@ class ReviewCliTest(unittest.TestCase):
         review = {
             "schema_version": 1,
             "workspace": str(self.workspace),
-            "attempt_directory": str(self.attempt),
+            "change_directory": str(self.change),
             "validation_directory": str(self.validation),
             "timeout_seconds": timeout_seconds,
         }
