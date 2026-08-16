@@ -238,6 +238,45 @@ validation, re-review its commit, publish feedback, watch for later events,
 retry, or decide iteration limits. A caller may invoke it again for a later
 independent feedback set.
 
+## Committed Change
+
+Project one successful write-capable component into a small, common description
+of its committed change:
+
+```sh
+python3 -m afk_change source.json /new/result-directory
+```
+
+The structured source input names either a succeeded Attempt or a completed,
+actionable Feedback Response:
+
+```json
+{
+  "schema_version": 1,
+  "source": {
+    "kind": "attempt",
+    "directory": "/absolute/path/to/source-evidence"
+  }
+}
+```
+
+`source.kind` is `attempt` or `feedback_response`. Before creating the result
+directory, Committed Change validates the source's complete durable evidence
+chain. Both source repository states must be clean and have distinct heads; the
+recorded commits must exactly match Git's descendant commit range. A Feedback
+Response must additionally match its completed read-only Assessment and Review,
+the structured actionable findings and responses, and the original Assignment
+workspace and objective.
+
+The result contains the accepted `input.json` and an atomically sealed
+`output.json`. A completed output exposes one `change` object with the frozen
+Assignment `objective`, `workspace`, full `before` and `after` repository
+states, and source provenance. Exit status is `0` for completion and `2` for
+invalid invocation, input, or source evidence; refused input never creates a
+result directory. This deterministic adapter runs no agent, mutates no Git
+state, does not require the workspace still to be checked out at the final
+head, and does not run Validation or Review.
+
 ## Check
 
 Install the repository's Ruff commit hooks once per checkout:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from afk_agent import agent_response, write_pi_command
 from afk_assess.contract import subject_state, validate_assessment
+from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
 from afk_runtime import (
     commits_between_heads,
@@ -187,18 +188,6 @@ def main() -> int:
     return 0 if outcome == "completed" else 1
 
 
-def validate_input(value: object) -> None:
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise ValueError("feedback response must use schema_version 1")
-    for field in ("workspace", "assessment_directory"):
-        path = value.get(field)
-        if not isinstance(path, str) or not Path(path).is_absolute():
-            raise ValueError(f"feedback response {field} must be an absolute path")
-    timeout = value.get("timeout_seconds")
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-        raise ValueError("feedback response timeout_seconds must be a positive integer")
-
-
 def load_evidence(response_input: dict[str, object]) -> dict[str, object]:
     assessment_directory = Path(response_input["assessment_directory"])
     assessment_input = read_json(assessment_directory / "input.json")
@@ -275,44 +264,6 @@ def verify_subject(response_input, before, evidence):
     reviewed = validate_review(review, workspace, assessment_state["head"])
     assessed = validate_assessment(reviewed, assessment)
     return reviewed, assessed, objective
-
-
-def actionable_findings(review, assessment):
-    return [
-        {
-            "finding_index": decision["finding_index"],
-            "finding": review["findings"][decision["finding_index"]],
-            "assessment_rationale": decision["rationale"],
-        }
-        for decision in assessment["decisions"]
-        if decision["worth_addressing"]
-    ]
-
-
-def validate_response(selected, value):
-    if not isinstance(value, dict):
-        raise TypeError("feedback response must be an object")
-    if not isinstance(value.get("summary"), str) or not value["summary"].strip():
-        raise ValueError("feedback response summary must be a non-empty string")
-    responses = value.get("finding_responses")
-    if not isinstance(responses, list):
-        raise TypeError("finding_responses must be an array")
-    expected = {item["finding_index"] for item in selected}
-    seen = set()
-    for item in responses:
-        if not isinstance(item, dict):
-            raise TypeError("each finding response must be an object")
-        index = item.get("finding_index")
-        if not isinstance(index, int) or isinstance(index, bool):
-            raise TypeError("response finding_index must be an integer")
-        if index not in expected or index in seen:
-            raise ValueError("each actionable finding must have one response")
-        if not isinstance(item.get("response"), str) or not item["response"].strip():
-            raise ValueError("finding response must be a non-empty string")
-        seen.add(index)
-    if seen != expected:
-        raise ValueError("each actionable finding must have one response")
-    return value
 
 
 def head_descends_from(workspace, before, after):
