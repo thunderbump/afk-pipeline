@@ -1,0 +1,288 @@
+"""Validation contract for sealed Coordinator terminal output."""
+
+# These are the topology facts needed to prove that terminal history could have
+# been produced by the Coordinator. Runtime module selection and input building
+# deliberately remain in the CLI.
+COMPONENT_TOPOLOGY = {
+    "attempt": {
+        "success": "succeeded",
+        "outcomes": {"succeeded", "failed", "timed_out", "interrupted"},
+        "next": "validation",
+    },
+    "validation": {
+        "success": "passed",
+        "outcomes": {"passed", "failed", "timed_out", "interrupted"},
+        "next": "change",
+    },
+    "change": {
+        "success": "completed",
+        "outcomes": {"completed"},
+        "next": "review",
+    },
+    "review": {
+        "success": "completed",
+        "outcomes": {"completed", "failed", "timed_out", "interrupted"},
+        "next": "assessment",
+    },
+    "assessment": {
+        "success": "completed",
+        "outcomes": {"completed", "failed", "timed_out", "interrupted"},
+        "next": "iteration",
+    },
+    "iteration": {
+        "success": "completed",
+        "outcomes": {"completed"},
+        "next": "response",
+    },
+    "response": {
+        "success": "completed",
+        "outcomes": {"completed", "failed", "timed_out", "interrupted"},
+        "next": "validation",
+    },
+}
+
+
+def validate_checkpoint(state):
+    """Validate Coordinator checkpoint shape and invocation topology."""
+    expected = {
+        "schema_version",
+        "status",
+        "next_sequence",
+        "next_component",
+        "active_invocation",
+        "history",
+        "terminal",
+    }
+    if (
+        not isinstance(state, dict)
+        or set(state) != expected
+        or state.get("schema_version") != 1
+        or state.get("status") not in {"running", "completed", "failed"}
+    ):
+        raise ValueError("invalid coordinator checkpoint")
+    sequence = state.get("next_sequence")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
+        raise ValueError("invalid coordinator checkpoint")
+    component = state.get("next_component")
+    if component is not None and component not in COMPONENT_TOPOLOGY:
+        raise ValueError("invalid coordinator checkpoint")
+    history = state.get("history")
+    if not isinstance(history, list):
+        raise TypeError("invalid coordinator checkpoint")
+    prior_sequence = 0
+    for record in history:
+        if not valid_invocation_record(record, terminal=True):
+            raise ValueError("invalid coordinator checkpoint")
+        if record["sequence"] <= prior_sequence or record["sequence"] >= sequence:
+            raise ValueError("invalid coordinator checkpoint")
+        prior_sequence = record["sequence"]
+    active = state.get("active_invocation")
+    if active is not None and (
+        not valid_invocation_record(active, terminal=False)
+        or active["sequence"] != sequence - 1
+        or active["sequence"] <= prior_sequence
+        or active["component"] != component
+    ):
+        raise ValueError("invalid coordinator checkpoint")
+    if state["status"] == "running":
+        if component is None or state["terminal"] is not None:
+            raise ValueError("invalid coordinator checkpoint")
+    elif active is not None or component is not None:
+        raise ValueError("invalid coordinator checkpoint")
+    validate_terminal(state["status"], state["terminal"])
+    validate_terminal_history(state)
+    validate_history_position(state)
+    return state
+
+
+def valid_invocation_record(record, terminal):
+    fields = {"sequence", "component", "directory", "input_from"}
+    if terminal:
+        fields.add("outcome")
+    if not isinstance(record, dict) or set(record) != fields:
+        return False
+    sequence = record.get("sequence")
+    component = record.get("component")
+    if (
+        not isinstance(sequence, int)
+        or isinstance(sequence, bool)
+        or sequence < 1
+        or component not in COMPONENT_TOPOLOGY
+        or record.get("directory") != f"{sequence:02d}-{component}"
+        or not valid_input_sources(record.get("input_from"))
+    ):
+        return False
+    if not terminal:
+        return True
+    return record.get("outcome") in {
+        *COMPONENT_TOPOLOGY[component]["outcomes"],
+        "abandoned",
+    }
+
+
+def valid_input_sources(value):
+    return (
+        isinstance(value, dict)
+        and bool(value)
+        and all(
+            isinstance(name, str) and name and isinstance(source, str) and source
+            for name, source in value.items()
+        )
+    )
+
+
+def validate_terminal(status, terminal):
+    if status == "running":
+        if terminal is not None:
+            raise ValueError("invalid coordinator checkpoint")
+        return
+    if status == "completed":
+        if (
+            not isinstance(terminal, dict)
+            or set(terminal) != {"decision"}
+            or terminal["decision"] not in {"stop", "exhausted"}
+        ):
+            raise ValueError("invalid coordinator checkpoint")
+        return
+    if (
+        not isinstance(terminal, dict)
+        or set(terminal) != {"failed_component", "component_outcome", "exit_code"}
+        or terminal["failed_component"] not in COMPONENT_TOPOLOGY
+        or not isinstance(terminal["component_outcome"], str)
+        or (
+            terminal["exit_code"] is not None
+            and (
+                not isinstance(terminal["exit_code"], int)
+                or isinstance(terminal["exit_code"], bool)
+            )
+        )
+    ):
+        raise ValueError("invalid coordinator checkpoint")
+
+
+def validate_terminal_history(state):
+    if state["status"] == "running":
+        return
+    if not state["history"]:
+        raise ValueError("invalid coordinator checkpoint")
+    last = state["history"][-1]
+    if state["status"] == "completed":
+        if last["component"] != "iteration" or last["outcome"] != "completed":
+            raise ValueError("invalid coordinator checkpoint")
+        return
+    terminal = state["terminal"]
+    if (
+        last["component"] != terminal["failed_component"]
+        or last["outcome"] != terminal["component_outcome"]
+        or last["outcome"] == COMPONENT_TOPOLOGY[last["component"]]["success"]
+    ):
+        raise ValueError("invalid coordinator checkpoint")
+
+
+def validate_history_position(state):
+    expected_component = "attempt"
+    prior = []
+    for expected_sequence, record in enumerate(state["history"], start=1):
+        if (
+            record["sequence"] != expected_sequence
+            or record["component"] != expected_component
+            or record["input_from"] != expected_input_sources(expected_component, prior)
+        ):
+            raise ValueError("invalid coordinator checkpoint")
+        prior.append(record)
+        if record["outcome"] == "abandoned":
+            continue
+        if record["outcome"] != COMPONENT_TOPOLOGY[expected_component]["success"]:
+            expected_component = None
+        else:
+            expected_component = COMPONENT_TOPOLOGY[expected_component]["next"]
+
+    active = state["active_invocation"]
+    if active is not None:
+        if (
+            active["sequence"] != len(prior) + 1
+            or active["component"] != expected_component
+            or active["input_from"] != expected_input_sources(expected_component, prior)
+            or state["next_sequence"] != active["sequence"] + 1
+            or state["next_component"] != expected_component
+        ):
+            raise ValueError("invalid coordinator checkpoint")
+        return
+
+    if state["next_sequence"] != len(prior) + 1:
+        raise ValueError("invalid coordinator checkpoint")
+    if state["status"] == "running" and state["next_component"] != expected_component:
+        raise ValueError("invalid coordinator checkpoint")
+
+
+def expected_input_sources(component, history):
+    if component == "attempt":
+        return {"assignment": "assignment.json"}
+    if component in {"validation", "change"}:
+        source = latest_record(history, "attempt", "response")["directory"]
+        if component == "validation":
+            return {"workspace": "assignment.json", "change": source}
+        return {"source": source}
+    if component == "review":
+        return {
+            "change": latest_record(history, "change")["directory"],
+            "validation": latest_record(history, "validation")["directory"],
+        }
+    if component == "assessment":
+        return {"review": latest_record(history, "review")["directory"]}
+    if component in {"iteration", "response"}:
+        return {"assessment": latest_record(history, "assessment")["directory"]}
+    raise ValueError("invalid coordinator checkpoint")
+
+
+def latest_record(history, *components):
+    for record in reversed(history):
+        if (
+            record["component"] in components
+            and record["outcome"] == COMPONENT_TOPOLOGY[record["component"]]["success"]
+        ):
+            return record
+    raise ValueError("invalid coordinator checkpoint")
+
+
+def validate_output(output):
+    """Validate a sealed terminal output against the Coordinator contract."""
+    if not isinstance(output, dict):
+        raise TypeError("invalid coordinator output")
+    outcome = output.get("outcome")
+    if outcome == "completed":
+        expected = {"schema_version", "outcome", "decision", "history"}
+        terminal = {"decision": output.get("decision")}
+        status = "completed"
+    elif outcome == "failed":
+        expected = {
+            "schema_version",
+            "outcome",
+            "failed_component",
+            "component_outcome",
+            "exit_code",
+            "history",
+        }
+        terminal = {
+            "failed_component": output.get("failed_component"),
+            "component_outcome": output.get("component_outcome"),
+            "exit_code": output.get("exit_code"),
+        }
+        status = "failed"
+    else:
+        raise ValueError("invalid coordinator output")
+    history = output.get("history")
+    if set(output) != expected or not isinstance(history, list):
+        raise ValueError("invalid coordinator output")
+    validate_checkpoint(
+        {
+            "schema_version": output.get("schema_version"),
+            "status": status,
+            "next_sequence": len(history) + 1,
+            "next_component": None,
+            "active_invocation": None,
+            "history": history,
+            "terminal": terminal,
+        }
+    )
+    return output

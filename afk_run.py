@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from afk_coordinate.__main__ import validate_output as validate_coordinator_output
+from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_runtime import progress, seal_json, timestamp, write_json
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
