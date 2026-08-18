@@ -200,6 +200,75 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("artifact parent", symlinked.stderr)
         self.assertEqual(list(redirected.iterdir()), [])
 
+    def test_computed_destination_inside_repository_is_rejected_before_mutation(self):
+        run_root = self.root / "nested-runs"
+        nested_repository = run_root / self.bead["id"]
+        nested_repository.mkdir(parents=True)
+        subprocess.run(["git", "init", "--quiet"], cwd=nested_repository, check=True)
+        (nested_repository / "base").write_text("fixture\n")
+        subprocess.run(["git", "add", "base"], cwd=nested_repository, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "user.name=AFK Test",
+                "-c",
+                "user.email=afk-test@example.invalid",
+                "commit",
+                "--quiet",
+                "-m",
+                "base",
+            ],
+            cwd=nested_repository,
+            check=True,
+        )
+        config = json.loads(self.config.read_text())
+        config["run_root"] = str(run_root)
+        config["projects"]["fixture"]["repository"] = str(nested_repository)
+        self.config.write_text(json.dumps(config))
+
+        before = sorted(path.name for path in nested_repository.iterdir())
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("artifact destination", result.stderr)
+        self.assertIn("inside the selected repository", result.stderr)
+        self.assertEqual(
+            sorted(path.name for path in nested_repository.iterdir()), before
+        )
+
+    def test_artifact_creation_race_does_not_overwrite_foreign_destination(self):
+        run_id = "fixed-run"
+        artifact = self.root / "runs" / self.bead["id"] / run_id
+        original_mkdir = Path.mkdir
+        raced = False
+
+        def mkdir_with_race(path, *args, **kwargs):
+            nonlocal raced
+            if path == artifact and not raced:
+                raced = True
+                original_mkdir(path, parents=True)
+                (path / "preparation.json").write_text("foreign evidence\n")
+                (path / "foreign").write_text("preserve me\n")
+            return original_mkdir(path, *args, **kwargs)
+
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("afk_run.new_run_id", return_value=run_id),
+            mock.patch("pathlib.Path.mkdir", new=mkdir_with_race),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+
+        self.assertEqual(code, 2)
+        self.assertTrue(raced)
+        self.assertEqual(
+            (artifact / "preparation.json").read_text(), "foreign evidence\n"
+        )
+        self.assertEqual((artifact / "foreign").read_text(), "preserve me\n")
+        self.assertFalse((artifact / "coordinator").exists())
+
     def test_missing_bead_is_reported_without_leaking_reader_secret(self):
         self.write_bd(exit_code=1, stderr="TOP_SECRET database password")
         result = self.invoke("run", "central-missing", "--config", str(self.config))

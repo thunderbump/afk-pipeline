@@ -38,6 +38,7 @@ def main(argv=None):
 
 def run(bead_id, config_path):
     artifact = None
+    artifact_owned = False
     preparation = None
     try:
         if not SAFE_ID.fullmatch(bead_id):
@@ -117,10 +118,17 @@ def run(bead_id, config_path):
             },
             "errors": [],
         }
-        # Make the authoritative record and required directory the first contents of
-        # a published artifact root.  In particular, payload write failures can now
-        # always be categorized and sealed by the outer handlers.
-        artifact.mkdir(parents=True)
+        # Publish the final directory with an exclusive mkdir.  Once that succeeds,
+        # outer handlers may safely seal failures there; before it succeeds, they
+        # must not touch a destination that a concurrent actor may own.
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            artifact.mkdir()
+        except FileExistsError as error:
+            raise PreparationError(
+                f"Bead {bead_id} artifact destination {artifact} already exists"
+            ) from error
+        artifact_owned = True
         (artifact / "coordinator").mkdir()
         seal_json(artifact / "preparation.json", preparation)
         write_json(artifact / "bead.json", source_record)
@@ -199,7 +207,7 @@ def run(bead_id, config_path):
         print(f"artifact root: {artifact}", flush=True)
         return code
     except PreparationError as error:
-        if artifact is not None:
+        if artifact_owned:
             if (
                 preparation is not None
                 and preparation["preparation_status"] == "preparing"
@@ -211,7 +219,7 @@ def run(bead_id, config_path):
         print(f"afk run: Bead {bead_id}: {error}", file=sys.stderr)
         return 2
     except OSError:
-        if artifact is not None and preparation is not None:
+        if artifact_owned and preparation is not None:
             try:
                 (artifact / "coordinator").mkdir(exist_ok=True)
             except OSError:
@@ -231,7 +239,7 @@ def run(bead_id, config_path):
         )
         return 2
     except KeyboardInterrupt:
-        if artifact is not None and preparation is not None:
+        if artifact_owned and preparation is not None:
             try:
                 (artifact / "coordinator").mkdir(exist_ok=True)
             except OSError:
@@ -508,6 +516,10 @@ def ensure_destinations(bead_id, config, repository, artifact, worktree):
         if root == repository or repository in root.parents:
             raise PreparationError(
                 f"Bead {bead_id} {fact} root {root} is inside the selected repository"
+            )
+        if path == repository or repository in path.parents:
+            raise PreparationError(
+                f"Bead {bead_id} {fact} destination {path} is inside the selected repository"
             )
         bead_parent = path.parent
         if os.path.lexists(bead_parent) and (

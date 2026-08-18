@@ -57,9 +57,10 @@ artifact root. It contains value-safe `bead.json`, `assignment.json`,
 `coordinator-request.json`, versioned `preparation.json`, and `coordinator/`.
 Progress includes the artifact root and terminal Coordinator outcome. The JSON
 evidence is authoritative. Preparation failures after artifact creation are
-sealed with categorized errors; worktree-creation failure is rolled back.
-Coordinator exit status is propagated, while preparation/input refusal exits
-`2`.
+sealed with categorized errors. If worktree creation fails, any state left by
+Git at the worktree destination is preserved for inspection rather than being
+automatically removed. Coordinator exit status is propagated, while
+preparation/input refusal exits `2`.
 
 The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator
