@@ -8,6 +8,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+TERMINATION_GRACE_SECONDS = 2
+REAP_GRACE_SECONDS = 2
+
+
+class ProcessReapTimeout(RuntimeError):
+    """Raised when a killed child does not become waitable within the reap bound."""
+
 
 def run_command(
     command: list[str],
@@ -37,10 +44,18 @@ def run_command(
                 exit_code = process.wait(timeout=timeout_seconds)
             except subprocess.TimeoutExpired:
                 timed_out = True
-                exit_code = terminate(process)
+                try:
+                    exit_code = terminate(process)
+                except ProcessReapTimeout as reap_error:
+                    exit_code = None
+                    error = str(reap_error)
             except KeyboardInterrupt:
                 interrupted = True
-                exit_code = terminate(process)
+                try:
+                    exit_code = terminate(process)
+                except ProcessReapTimeout as reap_error:
+                    exit_code = None
+                    error = str(reap_error)
     return {
         "exit_code": exit_code,
         "error": error,
@@ -99,15 +114,24 @@ def terminate(process: subprocess.Popen[bytes]) -> int:
     try:
         os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
-        return process.wait()
+        return reap(process, "after SIGTERM")
     try:
-        return process.wait(timeout=2)
+        return process.wait(timeout=TERMINATION_GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
-        return process.wait()
+        return reap(process, "after SIGKILL")
+
+
+def reap(process: subprocess.Popen[bytes], stage: str) -> int:
+    try:
+        return process.wait(timeout=REAP_GRACE_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise ProcessReapTimeout(
+            f"child did not become waitable {stage} within {REAP_GRACE_SECONDS} seconds"
+        ) from error
 
 
 def git(workspace: Path, *arguments: str) -> str:

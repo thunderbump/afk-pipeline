@@ -146,6 +146,15 @@ failure instead of discarding the other Attempt evidence.
 - `interrupted`: the executor received Ctrl-C while the runner was active.
 
 The executor terminates the runner process group on timeout or interruption.
+`timeout_seconds` is the child execution deadline, not a wall-clock cap on the
+wrapper. All components that run children share the same bounded shutdown: they
+send SIGTERM and wait up to 2 seconds, then send SIGKILL and wait up to 2 more
+seconds for the child to become waitable. Thus a timeout can take up to 4
+additional seconds of shutdown grace, plus ordinary wrapper overhead. If the
+child still cannot be reaped, the component records a process error and
+continues sealing its `timed_out` or `interrupted` outcome rather than waiting
+indefinitely.
+
 Exit status is `0` for success, `1` for a sealed non-success outcome, and `2`
 for invalid invocation or Assignment input.
 
