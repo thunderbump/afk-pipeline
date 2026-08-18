@@ -65,12 +65,16 @@ keeping Beads lookup in the trusted preparer.
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
 `coordinator-request.json`, versioned `preparation.json`, and `coordinator/`.
-Progress includes the artifact root and terminal Coordinator outcome. The JSON
-evidence is authoritative. Preparation failures after artifact creation are
-sealed with categorized errors. If worktree creation fails, any state left by
-Git at the worktree destination is preserved for inspection rather than being
-automatically removed. Coordinator exit status is propagated, while
-preparation/input refusal exits `2`.
+Progress includes the artifact root and terminal Coordinator decision. For a
+validated sealed Coordinator output, `preparation.json` records `stop` or
+`exhausted` in `coordinator.decision`; failed or malformed output leaves that
+field null. The JSON evidence is authoritative. Preparation failures after
+artifact creation are sealed with categorized errors. If worktree creation
+fails, any state left by Git at the worktree destination is preserved for
+inspection rather than being automatically removed. An accepted `stop` exits
+zero, while `exhausted` exits `1` so actionable findings are visible to command
+line callers. Nonzero Coordinator exits are propagated, a zero exit without a
+valid completed output becomes `1`, and preparation/input refusal exits `2`.
 
 Run and worktree roots, their existing ancestors, and the repository are trusted
 local-host infrastructure. The preparer takes advisory directory locks to

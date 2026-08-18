@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from afk_coordinate.__main__ import validate_output as validate_coordinator_output
 from afk_runtime import progress, seal_json, timestamp, write_json
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
@@ -132,6 +133,7 @@ def run(bead_id, config_path):
                 "status": "not_started",
                 "exit_code": None,
                 "outcome": None,
+                "decision": None,
             },
             "errors": [],
         }
@@ -210,7 +212,7 @@ def run(bead_id, config_path):
         except OSError:
             (artifact_io / "coordinator").mkdir(exist_ok=True)
             preparation["coordinator"].update(
-                status="failed", exit_code=None, outcome=None
+                status="failed", exit_code=None, outcome=None, decision=None
             )
             preparation["timestamps"]["finished_at"] = timestamp()
             preparation["errors"].append(
@@ -225,26 +227,21 @@ def run(bead_id, config_path):
             )
         code = completed.returncode if completed.returncode >= 0 else 1
         output_path = artifact / "coordinator" / "output.json"
-        outcome = None
-        if output_path.is_file():
-            try:
-                value = json.loads(output_path.read_text())
-                if isinstance(value, dict) and isinstance(value.get("outcome"), str):
-                    outcome = value["outcome"]
-            except (OSError, json.JSONDecodeError):
-                pass
+        outcome, decision = coordinator_terminal(output_path)
         preparation["coordinator"].update(
-            status="completed" if code == 0 else "failed",
+            status=("completed" if code == 0 and outcome == "completed" else "failed"),
             exit_code=code,
             outcome=outcome,
+            decision=decision,
         )
         preparation["timestamps"]["finished_at"] = timestamp()
         seal_json(artifact_io / "preparation.json", preparation)
         progress(
-            f"coordinator terminal outcome for Bead {bead_id}: {outcome or 'unsealed failure'}"
+            f"coordinator terminal decision for Bead {bead_id}: "
+            f"{decision or 'unavailable'}"
         )
         print(f"artifact root: {artifact}", flush=True)
-        return code
+        return terminal_exit_code(code, outcome, decision)
     except PreparationError as error:
         if artifact_owned:
             if (
@@ -294,6 +291,25 @@ def run(bead_id, config_path):
         return 130
     finally:
         close_resources(open_fds, leases)
+
+
+def coordinator_terminal(output_path):
+    """Return only value-safe terminal facts from a valid sealed output."""
+    try:
+        output = validate_coordinator_output(json.loads(output_path.read_text()))
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None, None
+    decision = output.get("decision") if output["outcome"] == "completed" else None
+    return output["outcome"], decision
+
+
+def terminal_exit_code(coordinator_code, outcome, decision):
+    """Treat exhausted work and invalid successful output as unsuccessful runs."""
+    if coordinator_code != 0:
+        return coordinator_code
+    if outcome == "completed" and decision == "stop":
+        return 0
+    return 1
 
 
 def load_config(path):

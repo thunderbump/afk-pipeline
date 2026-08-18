@@ -1,9 +1,11 @@
+import io
 import json
 import os
 import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
@@ -70,6 +72,7 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["preparation_status"], "prepared")
         self.assertEqual(preparation["coordinator"]["exit_code"], 1)
         self.assertEqual(preparation["coordinator"]["outcome"], "failed")
+        self.assertIsNone(preparation["coordinator"]["decision"])
         self.assertTrue(Path(assignment["workspace"]).is_dir())
         self.assertEqual(
             json.loads(
@@ -392,6 +395,95 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("central-missing", result.stderr)
         self.assertIn("not found", result.stderr)
         self.assertNotIn("TOP_SECRET", result.stderr + result.stdout)
+
+    def test_terminal_decision_is_recorded_printed_and_controls_exit(self):
+        for decision, expected_exit in (("stop", 0), ("exhausted", 1)):
+            with self.subTest(decision=decision):
+                code, stdout, artifact = self.run_with_coordinator_output(
+                    self.completed_output(decision), 0
+                )
+                self.assertEqual(code, expected_exit)
+                preparation = json.loads((artifact / "preparation.json").read_text())
+                self.assertEqual(preparation["coordinator"]["status"], "completed")
+                self.assertEqual(preparation["coordinator"]["outcome"], "completed")
+                self.assertEqual(preparation["coordinator"]["decision"], decision)
+                self.assertIn(
+                    f"coordinator terminal decision for Bead central-123: {decision}",
+                    stdout,
+                )
+
+    def test_malformed_terminal_output_is_value_safe_and_cannot_exit_zero(self):
+        malformed = self.completed_output("continue")
+        code, stdout, artifact = self.run_with_coordinator_output(malformed, 0)
+
+        self.assertEqual(code, 1)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(preparation["coordinator"]["status"], "failed")
+        self.assertEqual(preparation["coordinator"]["exit_code"], 0)
+        self.assertIsNone(preparation["coordinator"]["outcome"])
+        self.assertIsNone(preparation["coordinator"]["decision"])
+        self.assertIn(
+            "coordinator terminal decision for Bead central-123: unavailable", stdout
+        )
+        self.assertNotIn("continue", stdout)
+
+    def completed_output(self, decision):
+        components = (
+            ("attempt", "succeeded", {"assignment": "assignment.json"}),
+            (
+                "validation",
+                "passed",
+                {"workspace": "assignment.json", "change": "01-attempt"},
+            ),
+            ("change", "completed", {"source": "01-attempt"}),
+            (
+                "review",
+                "completed",
+                {"change": "03-change", "validation": "02-validation"},
+            ),
+            ("assessment", "completed", {"review": "04-review"}),
+            ("iteration", "completed", {"assessment": "05-assessment"}),
+        )
+        return {
+            "schema_version": 1,
+            "outcome": "completed",
+            "decision": decision,
+            "history": [
+                {
+                    "sequence": sequence,
+                    "component": component,
+                    "directory": f"{sequence:02d}-{component}",
+                    "input_from": input_from,
+                    "outcome": outcome,
+                }
+                for sequence, (component, outcome, input_from) in enumerate(
+                    components, start=1
+                )
+            ],
+        }
+
+    def run_with_coordinator_output(self, output, exit_code):
+        original_run = subprocess.run
+
+        def run(command, *args, **kwargs):
+            if command[:3] == [sys.executable, "-m", "afk_coordinate"]:
+                coordinator = Path(command[4])
+                coordinator.mkdir()
+                (coordinator / "output.json").write_text(json.dumps(output))
+                return subprocess.CompletedProcess(command, exit_code)
+            return original_run(command, *args, **kwargs)
+
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("afk_run.subprocess.run", side_effect=run),
+            redirect_stdout(stdout),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+        artifact = self.artifact_from(stdout.getvalue())
+        return code, stdout.getvalue(), artifact
 
     def write_config(self):
         value = {

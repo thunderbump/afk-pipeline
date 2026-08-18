@@ -567,6 +567,49 @@ COMPONENTS = {
 }
 
 
+def validate_output(output):
+    """Validate a sealed terminal output against the Coordinator contract."""
+    if not isinstance(output, dict):
+        raise TypeError("invalid coordinator output")
+    outcome = output.get("outcome")
+    if outcome == "completed":
+        expected = {"schema_version", "outcome", "decision", "history"}
+        terminal = {"decision": output.get("decision")}
+        status = "completed"
+    elif outcome == "failed":
+        expected = {
+            "schema_version",
+            "outcome",
+            "failed_component",
+            "component_outcome",
+            "exit_code",
+            "history",
+        }
+        terminal = {
+            "failed_component": output.get("failed_component"),
+            "component_outcome": output.get("component_outcome"),
+            "exit_code": output.get("exit_code"),
+        }
+        status = "failed"
+    else:
+        raise ValueError("invalid coordinator output")
+    history = output.get("history")
+    if set(output) != expected or not isinstance(history, list):
+        raise ValueError("invalid coordinator output")
+    validate_checkpoint(
+        {
+            "schema_version": output.get("schema_version"),
+            "status": status,
+            "next_sequence": len(history) + 1,
+            "next_component": None,
+            "active_invocation": None,
+            "history": history,
+            "terminal": terminal,
+        }
+    )
+    return output
+
+
 def seal_failure(
     run_directory,
     state,
