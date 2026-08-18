@@ -5,6 +5,9 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import afk_run
 
 ROOT = Path(__file__).parents[1]
 
@@ -72,7 +75,12 @@ class RunPreparerCliTest(unittest.TestCase):
             json.loads(
                 (Path(assignment["workspace"]) / "worker-environment.json").read_text()
             ),
-            {"unrelated": None},
+            {
+                "unrelated": None,
+                "pi_database": None,
+                "openai_password": None,
+                "anthropic_internal": None,
+            },
         )
         self.assertEqual(request["assignment_path"], str(artifact / "assignment.json"))
         self.assertTrue((artifact / "coordinator").is_dir())
@@ -131,11 +139,32 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("worktree_root", collision.stderr)
         self.assertFalse((self.root / "runs").exists())
 
-    def test_failed_worktree_creation_is_rolled_back_and_sealed(self):
+    def test_payload_write_failure_has_authoritative_sealed_evidence(self):
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch(
+                "afk_run.write_json", side_effect=OSError("simulated payload failure")
+            ),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+        self.assertEqual(code, 2)
+        artifacts = list((self.root / "runs" / self.bead["id"]).iterdir())
+        self.assertEqual(len(artifacts), 1)
+        artifact = artifacts[0]
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(preparation["preparation_status"], "failed")
+        self.assertEqual(preparation["errors"][0]["category"], "filesystem")
+        self.assertTrue((artifact / "coordinator").is_dir())
+
+    def test_failed_worktree_creation_is_sealed_without_deleting_unknown_path(self):
         git = self.bin / "git"
         git.write_text(
-            "#!/usr/bin/env python3\nimport os,sys\n"
-            "if sys.argv[1:3] == ['worktree', 'add']:\n raise SystemExit(9)\n"
+            "#!/usr/bin/env python3\nimport os,sys\nfrom pathlib import Path\n"
+            "if sys.argv[1:3] == ['worktree', 'add']:\n"
+            " path = Path(sys.argv[5]); path.mkdir(parents=True); "
+            "(path / 'foreign').write_text('preserve me'); raise SystemExit(9)\n"
             "os.execv('/usr/bin/git', ['git', *sys.argv[1:]])\n"
         )
         git.chmod(0o755)
@@ -148,7 +177,28 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["errors"][0]["category"], "worktree_creation")
         self.assertTrue((artifact / "coordinator").is_dir())
         self.assertEqual(self.git("worktree", "list", "--porcelain"), before)
-        self.assertFalse(Path(preparation["repository"]["worktree"]).exists())
+        failed_destination = Path(preparation["repository"]["worktree"])
+        self.assertEqual((failed_destination / "foreign").read_text(), "preserve me")
+
+    def test_repository_internal_and_symlinked_destinations_are_rejected(self):
+        config = json.loads(self.config.read_text())
+        config["run_root"] = str(self.repository / "runs")
+        self.config.write_text(json.dumps(config))
+        internal = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertNotEqual(internal.returncode, 0)
+        self.assertIn("inside the selected repository", internal.stderr)
+        self.assertFalse((self.repository / "runs").exists())
+
+        self.write_config()
+        run_root = self.root / "runs"
+        run_root.mkdir()
+        redirected = self.root / "redirected"
+        redirected.mkdir()
+        (run_root / self.bead["id"]).symlink_to(redirected, target_is_directory=True)
+        symlinked = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertNotEqual(symlinked.returncode, 0)
+        self.assertIn("artifact parent", symlinked.stderr)
+        self.assertEqual(list(redirected.iterdir()), [])
 
     def test_missing_bead_is_reported_without_leaking_reader_secret(self):
         self.write_bd(exit_code=1, stderr="TOP_SECRET database password")
@@ -171,7 +221,11 @@ class RunPreparerCliTest(unittest.TestCase):
                     (
                         "import json,os; from pathlib import Path; "
                         "Path('worker-environment.json').write_text(json.dumps("
-                        "{'unrelated': os.getenv('UNRELATED_CANARY')})); raise SystemExit(7)"
+                        "{'unrelated': os.getenv('UNRELATED_CANARY'), "
+                        "'pi_database': os.getenv('PI_DATABASE_URL'), "
+                        "'openai_password': os.getenv('OPENAI_INTERNAL_PASSWORD'), "
+                        "'anthropic_internal': os.getenv('ANTHROPIC_INTERNAL_TOKEN')})); "
+                        "raise SystemExit(7)"
                     ),
                 ],
                 "timeout_seconds": 5,
@@ -206,6 +260,9 @@ class RunPreparerCliTest(unittest.TestCase):
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
         environment["UNRELATED_CANARY"] = "TOP_SECRET-must-not-be-forwarded"
+        environment["PI_DATABASE_URL"] = "TOP_SECRET-pi-database"
+        environment["OPENAI_INTERNAL_PASSWORD"] = "TOP_SECRET-openai-password"
+        environment["ANTHROPIC_INTERNAL_TOKEN"] = "TOP_SECRET-anthropic-token"
         return subprocess.run(
             [str(ROOT / "afk"), *arguments],
             cwd=self.root,

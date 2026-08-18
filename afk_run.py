@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 import re
-import shutil
 import subprocess
 import sys
 import uuid
@@ -57,7 +56,7 @@ def run(bead_id, config_path):
         run_id = new_run_id()
         artifact = destination(config["run_root"], bead_id, run_id)
         worktree = destination(config["worktree_root"], bead_id, run_id)
-        ensure_destinations(bead_id, config, artifact, worktree)
+        ensure_destinations(bead_id, config, repository, artifact, worktree)
         branch = f"afk/{bead_id}/{run_id}"
         if (
             git_result(
@@ -69,7 +68,6 @@ def run(bead_id, config_path):
                 f"Bead {bead_id} branch destination {branch!r} already exists"
             )
 
-        artifact.mkdir(parents=True)
         source_record = safe_bead(bead_id, bead)
         assignment = {
             "schema_version": 1,
@@ -84,9 +82,6 @@ def run(bead_id, config_path):
             "validation": project["validation"],
             **config["coordinator"],
         }
-        write_json(artifact / "bead.json", source_record)
-        write_json(artifact / "assignment.json", assignment)
-        write_json(artifact / "coordinator-request.json", request)
         started = timestamp()
         preparation = {
             "schema_version": 1,
@@ -122,15 +117,24 @@ def run(bead_id, config_path):
             },
             "errors": [],
         }
+        # Make the authoritative record and required directory the first contents of
+        # a published artifact root.  In particular, payload write failures can now
+        # always be categorized and sealed by the outer handlers.
+        artifact.mkdir(parents=True)
+        (artifact / "coordinator").mkdir()
         seal_json(artifact / "preparation.json", preparation)
+        write_json(artifact / "bead.json", source_record)
+        write_json(artifact / "assignment.json", assignment)
+        write_json(artifact / "coordinator-request.json", request)
         progress(f"creating prepared worktree for Bead {bead_id} at {worktree}")
         worktree.parent.mkdir(parents=True, exist_ok=True)
         added = git_result(
             repository, "worktree", "add", "-b", branch, str(worktree), base_commit
         )
         if added.returncode != 0:
-            rollback_worktree(repository, worktree, branch, base_commit)
-            (artifact / "coordinator").mkdir()
+            # A failed git command may have left evidence at the destination, or a
+            # concurrent actor may have created it after validation.  Never remove
+            # an unproven path; the sealed preparation record is the failure policy.
             fail_preparation(
                 preparation,
                 "worktree_creation",
@@ -146,6 +150,9 @@ def run(bead_id, config_path):
         preparation["coordinator"]["status"] = "running"
         seal_json(artifact / "preparation.json", preparation)
         progress(f"starting coordinator for Bead {bead_id}")
+        # The unchanged coordinator contract owns creation of its run directory.
+        # It has been present throughout preparation and is empty at this handoff.
+        (artifact / "coordinator").rmdir()
         try:
             completed = subprocess.run(
                 preparation["coordinator"]["command"],
@@ -225,6 +232,10 @@ def run(bead_id, config_path):
         return 2
     except KeyboardInterrupt:
         if artifact is not None and preparation is not None:
+            try:
+                (artifact / "coordinator").mkdir(exist_ok=True)
+            except OSError:
+                pass
             fail_preparation(
                 preparation,
                 "interrupted",
@@ -479,7 +490,7 @@ def destination(root, bead_id, run_id):
     return root / bead_id / run_id
 
 
-def ensure_destinations(bead_id, config, artifact, worktree):
+def ensure_destinations(bead_id, config, repository, artifact, worktree):
     run_root = config["run_root"]
     worktree_root = config["worktree_root"]
     if (
@@ -490,7 +501,21 @@ def ensure_destinations(bead_id, config, artifact, worktree):
         raise PreparationError(
             f"Bead {bead_id} Run and worktree roots overlap unsafely"
         )
-    for path, fact in ((artifact, "artifact"), (worktree, "worktree")):
+    for root, path, fact in (
+        (run_root, artifact, "artifact"),
+        (worktree_root, worktree, "worktree"),
+    ):
+        if root == repository or repository in root.parents:
+            raise PreparationError(
+                f"Bead {bead_id} {fact} root {root} is inside the selected repository"
+            )
+        bead_parent = path.parent
+        if os.path.lexists(bead_parent) and (
+            bead_parent.is_symlink() or not bead_parent.is_dir()
+        ):
+            raise PreparationError(
+                f"Bead {bead_id} {fact} parent {bead_parent} is unsafe"
+            )
         if os.path.lexists(path):
             raise PreparationError(
                 f"Bead {bead_id} {fact} destination {path} already exists"
@@ -501,20 +526,6 @@ def git_result(repository, *arguments):
     return subprocess.run(
         ["git", *arguments], cwd=repository, text=True, capture_output=True, check=False
     )
-
-
-def rollback_worktree(repository, worktree, branch, base_commit):
-    git_result(repository, "worktree", "remove", "--force", str(worktree))
-    if worktree.exists():
-        shutil.rmtree(worktree, ignore_errors=True)
-    branch_commit = git_result(
-        repository, "rev-parse", "--verify", f"refs/heads/{branch}^{{commit}}"
-    )
-    if (
-        branch_commit.returncode == 0
-        and branch_commit.stdout.strip().lower() == base_commit
-    ):
-        git_result(repository, "branch", "-D", branch)
 
 
 def fail_preparation(preparation, category, message):
@@ -533,7 +544,5 @@ def worker_environment():
     return {
         name: value
         for name, value in os.environ.items()
-        if name in allowed
-        or name in exact
-        or name.startswith(("LC_", "PI_", "OPENAI_", "ANTHROPIC_"))
+        if name in allowed or name in exact or name.startswith("LC_")
     }
