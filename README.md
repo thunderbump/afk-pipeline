@@ -3,6 +3,68 @@
 Small executable modules for running agent work, validating and reviewing its
 result, responding to feedback, and coordinating the accepted sequence.
 
+## Run Preparer
+
+From any working directory, prepare and execute one central Bead as a local AFK
+Coordinator Run:
+
+```sh
+/path/to/afk-pipeline/afk run central-123
+# Non-default/test installation:
+/path/to/afk-pipeline/afk run central-123 --config /absolute/path/to/config.json
+```
+
+The default configuration is `~/.config/afk/config.json`. It uses this minimal
+schema:
+
+```json
+{
+  "schema_version": 1,
+  "beads_workspace": "/absolute/path/to/central-beads",
+  "run_root": "/absolute/caller-owned/path/to/runs",
+  "worktree_root": "/absolute/caller-owned/path/to/worktrees",
+  "assignment": {
+    "command": ["agent", "--mode", "json", "work instructions"],
+    "timeout_seconds": 1800
+  },
+  "coordinator": {
+    "agent_timeout_seconds": 900,
+    "max_responses": 2
+  },
+  "projects": {
+    "example": {
+      "repository": "/absolute/path/to/example-repository",
+      "base_ref": "main",
+      "validation": {
+        "command": ["./scripts/validate"],
+        "timeout_seconds": 1800
+      }
+    }
+  }
+}
+```
+
+The trusted host process runs `bd show <bead-id> --json` only in the configured
+central Beads workspace and requires exactly one `project:<slug>` label. It
+resolves that project locally, freezes the base ref to a commit, and creates a
+new `afk/<bead-id>/<run-id>` branch and isolated worktree. It never fetches,
+clones, reuses, or replaces a destination. Beads connection settings remain in
+the preparer environment and are not forwarded to Coordinator workers or
+written to durable evidence.
+
+Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
+artifact root. It contains value-safe `bead.json`, `assignment.json`,
+`coordinator-request.json`, versioned `preparation.json`, and `coordinator/`.
+Progress includes the artifact root and terminal Coordinator outcome. The JSON
+evidence is authoritative. Preparation failures after artifact creation are
+sealed with categorized errors; worktree-creation failure is rolled back.
+Coordinator exit status is propagated, while preparation/input refusal exits
+`2`.
+
+The project mapping is the trusted local resolver seam. A future resolver may
+produce the same repository, canonical base commit, validation, and Coordinator
+selection without changing the Coordinator or worker contracts.
+
 ## Attempt Executor
 
 Run one structured assignment in a prepared Git workspace and retain an
