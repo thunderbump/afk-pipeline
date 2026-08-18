@@ -266,6 +266,22 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIsNone(output["repository"]["after"])
         self.assertIn("observation_error", output["repository"])
 
+    def test_malformed_assistant_content_shapes_are_sealed_protocol_failures(self):
+        for scenario in ("null-content", "object-content", "invalid-text-part"):
+            with self.subTest(scenario=scenario):
+                result, completed = self.run_review(scenario, result_name=scenario)
+
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(output["outcome"], "failed")
+                self.assertEqual(
+                    output["agent"],
+                    {"status": "error", "error": "invalid agent event JSON"},
+                )
+                self.assertIsNone(output["review"])
+                self.assertTrue(output["repository"]["unchanged"])
+                self.assertFalse((result / "output.json.tmp").exists())
+
     def test_timeout_terminates_the_agent_process_group_and_seals_output(self):
         marker = self.root / "descendant.pid"
 

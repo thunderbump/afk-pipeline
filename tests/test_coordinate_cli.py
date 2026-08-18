@@ -364,6 +364,25 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("no active invocation", abandoned.stderr)
         self.assertFalse(absent_run.exists())
 
+    def test_malformed_review_events_fail_the_run_deterministically(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "malformed-review-run"
+
+        completed = self.invoke(request_path, run, review_scenario="null-content")
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        review = json.loads((run / "04-review" / "output.json").read_text())
+        self.assertEqual(review["outcome"], "failed")
+        self.assertEqual(review["agent"]["status"], "error")
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["outcome"], "failed")
+        self.assertEqual(output["failed_component"], "review")
+        self.assertEqual(output["component_outcome"], "failed")
+        self.assertEqual(
+            [item["outcome"] for item in output["history"]],
+            ["succeeded", "passed", "completed", "failed"],
+        )
+
     def test_sealed_component_failure_seals_the_run_and_resume_is_idempotent(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         request = json.loads(request_path.read_text())

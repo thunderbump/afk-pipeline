@@ -77,9 +77,28 @@ def agent_response(events_path: Path) -> dict[str, object]:
             return error("agent_settled precedes agent_end")
         if event.get("type") == "message_end":
             message = event.get("message")
-            if not isinstance(message, dict):
+            if not isinstance(message, dict) or not isinstance(
+                message.get("role"), str
+            ):
                 return error("invalid agent event JSON")
-            if message.get("role") == "assistant":
+            if message["role"] == "assistant":
+                stop_reason = message.get("stopReason")
+                content = message.get("content", [])
+                if not isinstance(stop_reason, str) or not isinstance(content, list):
+                    return error("invalid agent event JSON")
+                for part in content:
+                    if not isinstance(part, dict) or not isinstance(
+                        part.get("type"), str
+                    ):
+                        return error("invalid agent event JSON")
+                    if part["type"] == "text" and not isinstance(part.get("text"), str):
+                        return error("invalid agent event JSON")
+                if (
+                    stop_reason == "error"
+                    and "errorMessage" in message
+                    and not isinstance(message["errorMessage"], str)
+                ):
+                    return error("invalid agent event JSON")
                 terminal_message = message
         if event.get("type") == "agent_end":
             saw_end = True

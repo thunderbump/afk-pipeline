@@ -17,6 +17,28 @@ if scenario == "hang":
 elif scenario == "invalid-events":
     print("not JSON", flush=True)
     raise SystemExit
+elif scenario in ("null-content", "object-content", "invalid-text-part"):
+    content = None
+    if scenario == "object-content":
+        content = {"type": "text", "text": "not a content array"}
+    elif scenario == "invalid-text-part":
+        content = [{"type": "text", "text": None}]
+    print(json.dumps({"type": "agent_start"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "stopReason": "stop",
+                    "content": content,
+                },
+            }
+        ),
+        flush=True,
+    )
+    print(json.dumps({"type": "agent_end"}), flush=True)
+    raise SystemExit
 elif scenario in ("mutate-workspace", "damage-git"):
     review = {"summary": "No actionable defects found.", "findings": []}
     if scenario == "mutate-workspace":
