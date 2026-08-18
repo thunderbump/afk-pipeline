@@ -1,6 +1,7 @@
 """Trusted host-side preparation of one repository-aware AFK run."""
 
 import argparse
+import fcntl
 import json
 import os
 import re
@@ -14,6 +15,8 @@ from afk_runtime import progress, seal_json, timestamp, write_json
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+ASSIGNMENT_PATH_PLACEHOLDER = "{assignment_path}"
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 
 
 class PreparationError(Exception):
@@ -38,8 +41,11 @@ def main(argv=None):
 
 def run(bead_id, config_path):
     artifact = None
+    artifact_io = None
     artifact_owned = False
     preparation = None
+    leases = []
+    open_fds = []
     try:
         if not SAFE_ID.fullmatch(bead_id):
             raise PreparationError(f"Bead {bead_id!r} is not a safe central Bead ID")
@@ -57,8 +63,10 @@ def run(bead_id, config_path):
         run_id = new_run_id()
         artifact = destination(config["run_root"], bead_id, run_id)
         worktree = destination(config["worktree_root"], bead_id, run_id)
-        ensure_destinations(bead_id, config, repository, artifact, worktree)
-        branch = f"afk/{bead_id}/{run_id}"
+        ensure_destination_layout(bead_id, config, repository, artifact, worktree)
+        # Flat refs cannot collide with bootstrap refs such as afk/<bead-id>.
+        branch = f"afk-{bead_id}-{run_id}"
+        leases.append(acquire_directory(repository, create=False))
         if (
             git_result(
                 repository, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
@@ -69,17 +77,34 @@ def run(bead_id, config_path):
                 f"Bead {bead_id} branch destination {branch!r} already exists"
             )
 
+        # Serialize cooperating preparers through exclusive creation and Git
+        # handoff. Open directory descriptors anchor operations if paths move.
+        for root in sorted(
+            (config["run_root"], config["worktree_root"]), key=lambda path: str(path)
+        ):
+            leases.append(acquire_directory(root, create=True))
+        run_lease = lease_for(leases, config["run_root"])
+        worktree_lease = lease_for(leases, config["worktree_root"])
+        artifact_parent_fd = prepare_parent(run_lease, bead_id, run_id, "artifact")
+        worktree_parent_fd = prepare_parent(worktree_lease, bead_id, run_id, "worktree")
+        open_fds.extend((artifact_parent_fd, worktree_parent_fd))
+
         source_record = safe_bead(bead_id, bead)
+        assignment_path = artifact / "assignment.json"
+        assignment_defaults = dict(config["assignment"])
+        assignment_defaults["command"] = assignment_command(
+            assignment_defaults["command"], assignment_path
+        )
         assignment = {
             "schema_version": 1,
             "objective": objective(bead),
             "workspace": str(worktree),
-            **config["assignment"],
+            **assignment_defaults,
             "source": {"kind": "bead", "id": bead_id},
         }
         request = {
             "schema_version": 1,
-            "assignment_path": str(artifact / "assignment.json"),
+            "assignment_path": str(assignment_path),
             "validation": project["validation"],
             **config["coordinator"],
         }
@@ -118,24 +143,25 @@ def run(bead_id, config_path):
             },
             "errors": [],
         }
-        # Publish the final directory with an exclusive mkdir.  Once that succeeds,
-        # outer handlers may safely seal failures there; before it succeeds, they
-        # must not touch a destination that a concurrent actor may own.
-        artifact.parent.mkdir(parents=True, exist_ok=True)
+        # Create relative to the open parent. Evidence writes use the owned
+        # descriptor and therefore do not traverse that parent a second time.
         try:
-            artifact.mkdir()
+            os.mkdir(run_id, dir_fd=artifact_parent_fd)
         except FileExistsError as error:
             raise PreparationError(
                 f"Bead {bead_id} artifact destination {artifact} already exists"
             ) from error
+        artifact_fd = os.open(run_id, DIRECTORY_FLAGS, dir_fd=artifact_parent_fd)
+        open_fds.append(artifact_fd)
+        artifact_io = Path(f"/proc/self/fd/{artifact_fd}")
         artifact_owned = True
-        (artifact / "coordinator").mkdir()
-        seal_json(artifact / "preparation.json", preparation)
-        write_json(artifact / "bead.json", source_record)
-        write_json(artifact / "assignment.json", assignment)
-        write_json(artifact / "coordinator-request.json", request)
+        (artifact_io / "coordinator").mkdir()
+        seal_json(artifact_io / "preparation.json", preparation)
+        write_json(artifact_io / "bead.json", source_record)
+        write_json(artifact_io / "assignment.json", assignment)
+        write_json(artifact_io / "coordinator-request.json", request)
         progress(f"creating prepared worktree for Bead {bead_id} at {worktree}")
-        worktree.parent.mkdir(parents=True, exist_ok=True)
+        require_identity(worktree.parent, worktree_parent_fd, "worktree parent")
         added = git_result(
             repository, "worktree", "add", "-b", branch, str(worktree), base_commit
         )
@@ -148,15 +174,36 @@ def run(bead_id, config_path):
                 "worktree_creation",
                 f"could not create isolated worktree for Bead {bead_id}",
             )
-            seal_json(artifact / "preparation.json", preparation)
+            seal_json(artifact_io / "preparation.json", preparation)
             raise PreparationError(
                 f"Bead {bead_id} isolated worktree preparation failed"
             )
 
+        try:
+            worktree_fd = os.open(run_id, DIRECTORY_FLAGS, dir_fd=worktree_parent_fd)
+        except OSError as error:
+            fail_preparation(
+                preparation,
+                "worktree_creation",
+                f"could not verify isolated worktree for Bead {bead_id}",
+            )
+            seal_json(artifact_io / "preparation.json", preparation)
+            raise PreparationError(
+                f"Bead {bead_id} isolated worktree preparation failed"
+            ) from error
+        open_fds.append(worktree_fd)
+        require_identity(artifact, artifact_fd, "artifact destination")
+        require_identity(worktree, worktree_fd, "worktree destination")
         preparation["preparation_status"] = "prepared"
         preparation["timestamps"]["prepared_at"] = timestamp()
         preparation["coordinator"]["status"] = "running"
-        seal_json(artifact / "preparation.json", preparation)
+        seal_json(artifact_io / "preparation.json", preparation)
+        # Revalidation above is the handoff boundary. Later path replacement by
+        # an actor that ignores these locks is outside the local-host contract.
+        close_resources(open_fds, leases)
+        open_fds.clear()
+        leases.clear()
+        artifact_io = artifact
         progress(f"starting coordinator for Bead {bead_id}")
         # The unchanged coordinator contract owns creation of its run directory.
         # It has been present throughout preparation and is empty at this handoff.
@@ -169,7 +216,7 @@ def run(bead_id, config_path):
                 check=False,
             )
         except OSError:
-            (artifact / "coordinator").mkdir(exist_ok=True)
+            (artifact_io / "coordinator").mkdir(exist_ok=True)
             preparation["coordinator"].update(
                 status="failed", exit_code=None, outcome=None
             )
@@ -180,7 +227,7 @@ def run(bead_id, config_path):
                     "message": f"coordinator could not be started for Bead {bead_id}",
                 }
             )
-            seal_json(artifact / "preparation.json", preparation)
+            seal_json(artifact_io / "preparation.json", preparation)
             raise PreparationError(
                 f"coordinator could not be started for Bead {bead_id}"
             )
@@ -200,7 +247,7 @@ def run(bead_id, config_path):
             outcome=outcome,
         )
         preparation["timestamps"]["finished_at"] = timestamp()
-        seal_json(artifact / "preparation.json", preparation)
+        seal_json(artifact_io / "preparation.json", preparation)
         progress(
             f"coordinator terminal outcome for Bead {bead_id}: {outcome or 'unsealed failure'}"
         )
@@ -214,14 +261,14 @@ def run(bead_id, config_path):
                 and not preparation["errors"]
             ):
                 fail_preparation(preparation, "preparation", str(error))
-                seal_json(artifact / "preparation.json", preparation)
+                seal_json(artifact_io / "preparation.json", preparation)
             print(f"artifact root: {artifact}", flush=True)
         print(f"afk run: Bead {bead_id}: {error}", file=sys.stderr)
         return 2
     except OSError:
         if artifact_owned and preparation is not None:
             try:
-                (artifact / "coordinator").mkdir(exist_ok=True)
+                (artifact_io / "coordinator").mkdir(exist_ok=True)
             except OSError:
                 pass
             fail_preparation(
@@ -230,7 +277,7 @@ def run(bead_id, config_path):
                 f"filesystem preparation failed for Bead {bead_id}",
             )
             try:
-                seal_json(artifact / "preparation.json", preparation)
+                seal_json(artifact_io / "preparation.json", preparation)
             except OSError:
                 pass
             print(f"artifact root: {artifact}", flush=True)
@@ -241,7 +288,7 @@ def run(bead_id, config_path):
     except KeyboardInterrupt:
         if artifact_owned and preparation is not None:
             try:
-                (artifact / "coordinator").mkdir(exist_ok=True)
+                (artifact_io / "coordinator").mkdir(exist_ok=True)
             except OSError:
                 pass
             fail_preparation(
@@ -249,10 +296,12 @@ def run(bead_id, config_path):
                 "interrupted",
                 f"Bead {bead_id} Run Preparer was interrupted",
             )
-            seal_json(artifact / "preparation.json", preparation)
+            seal_json(artifact_io / "preparation.json", preparation)
             print(f"artifact root: {artifact}", flush=True)
         print(f"afk run: Bead {bead_id} preparation interrupted", file=sys.stderr)
         return 130
+    finally:
+        close_resources(open_fds, leases)
 
 
 def load_config(path):
@@ -311,6 +360,13 @@ def validate_assignment_defaults(value):
             "configuration assignment must contain command and timeout_seconds"
         )
     argv(value["command"], "assignment command")
+    if value["command"].count(ASSIGNMENT_PATH_PLACEHOLDER) != 1 or any(
+        ASSIGNMENT_PATH_PLACEHOLDER in item and item != ASSIGNMENT_PATH_PLACEHOLDER
+        for item in value["command"]
+    ):
+        raise PreparationError(
+            "assignment command must contain exactly one {assignment_path} argument"
+        )
     positive(value["timeout_seconds"], "assignment timeout_seconds")
 
 
@@ -498,7 +554,15 @@ def destination(root, bead_id, run_id):
     return root / bead_id / run_id
 
 
-def ensure_destinations(bead_id, config, repository, artifact, worktree):
+def assignment_command(command, assignment_path):
+    """Replace one validated argv element; no shell interpolation is involved."""
+    return [
+        str(assignment_path) if item == ASSIGNMENT_PATH_PLACEHOLDER else item
+        for item in command
+    ]
+
+
+def ensure_destination_layout(bead_id, config, repository, artifact, worktree):
     run_root = config["run_root"]
     worktree_root = config["worktree_root"]
     if (
@@ -521,17 +585,84 @@ def ensure_destinations(bead_id, config, repository, artifact, worktree):
             raise PreparationError(
                 f"Bead {bead_id} {fact} destination {path} is inside the selected repository"
             )
-        bead_parent = path.parent
-        if os.path.lexists(bead_parent) and (
-            bead_parent.is_symlink() or not bead_parent.is_dir()
-        ):
-            raise PreparationError(
-                f"Bead {bead_id} {fact} parent {bead_parent} is unsafe"
-            )
-        if os.path.lexists(path):
-            raise PreparationError(
-                f"Bead {bead_id} {fact} destination {path} already exists"
-            )
+
+
+def acquire_directory(path, create):
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
+    try:
+        descriptor = os.open(path, DIRECTORY_FLAGS)
+    except OSError as error:
+        raise PreparationError(f"configured directory {path} is unsafe") from error
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        require_identity(path, descriptor, "configured directory")
+    except Exception:
+        os.close(descriptor)
+        raise
+    return (path, descriptor)
+
+
+def lease_for(leases, path):
+    return next(lease for lease in leases if lease[0] == path)
+
+
+def prepare_parent(lease, bead_id, run_id, fact):
+    root, root_fd = lease
+    try:
+        os.mkdir(bead_id, dir_fd=root_fd)
+    except FileExistsError:
+        pass
+    try:
+        parent_fd = os.open(bead_id, DIRECTORY_FLAGS, dir_fd=root_fd)
+    except OSError as error:
+        raise PreparationError(
+            f"Bead {bead_id} {fact} parent {root / bead_id} is unsafe"
+        ) from error
+    try:
+        require_identity(root / bead_id, parent_fd, f"{fact} parent")
+        try:
+            os.stat(run_id, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return parent_fd
+        raise PreparationError(
+            f"Bead {bead_id} {fact} destination {root / bead_id / run_id} already exists"
+        )
+    except Exception:
+        os.close(parent_fd)
+        raise
+
+
+def require_identity(path, descriptor, fact):
+    try:
+        visible = os.stat(path, follow_symlinks=False)
+        opened = os.fstat(descriptor)
+    except OSError as error:
+        raise PreparationError(f"{fact} {path} changed during preparation") from error
+    if not os.path.isdir(path) or (visible.st_dev, visible.st_ino) != (
+        opened.st_dev,
+        opened.st_ino,
+    ):
+        raise PreparationError(f"{fact} {path} changed during preparation")
+
+
+def close_resources(descriptors, leases):
+    while descriptors:
+        descriptor = descriptors.pop()
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    while leases:
+        _, descriptor = leases.pop()
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
 
 
 def git_result(repository, *arguments):

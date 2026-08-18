@@ -24,7 +24,7 @@ schema:
   "run_root": "/absolute/caller-owned/path/to/runs",
   "worktree_root": "/absolute/caller-owned/path/to/worktrees",
   "assignment": {
-    "command": ["agent", "--mode", "json", "work instructions"],
+    "command": ["agent", "--mode", "json", "Read", "{assignment_path}"],
     "timeout_seconds": 1800
   },
   "coordinator": {
@@ -47,10 +47,18 @@ schema:
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace and requires exactly one `project:<slug>` label. It
 resolves that project locally, freezes the base ref to a commit, and creates a
-new `afk/<bead-id>/<run-id>` branch and isolated worktree. It never fetches,
-clones, reuses, or replaces a destination. Beads connection settings remain in
-the preparer environment and are not forwarded to Coordinator workers or
-written to durable evidence.
+new flat `afk-<bead-id>-<run-id>` branch and isolated worktree. The flat name
+cannot conflict with a bootstrap branch such as `afk/<bead-id>`. It never
+fetches, clones, reuses, or replaces a destination. Beads connection settings
+remain in the preparer environment and are not forwarded to Coordinator workers
+or written to durable evidence.
+
+The assignment command must contain exactly one argv element equal to
+`{assignment_path}`. During preparation that element is replaced, without a
+shell, by the generated absolute `assignment.json` path. Embedded or repeated
+placeholders and commands without the placeholder are rejected before any run
+destination is created. This lets a configurable worker read the frozen Bead
+objective while keeping Beads lookup in the trusted preparer.
 
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
@@ -61,6 +69,19 @@ sealed with categorized errors. If worktree creation fails, any state left by
 Git at the worktree destination is preserved for inspection rather than being
 automatically removed. Coordinator exit status is propagated, while
 preparation/input refusal exits `2`.
+
+Run and worktree roots, their existing ancestors, and the repository are trusted
+local-host infrastructure. The preparer takes advisory directory locks to
+serialize cooperating preparers, creates Bead/run entries relative to open root
+descriptors, writes initial evidence through its owned artifact descriptor, and
+revalidates artifact and worktree identities before Coordinator handoff. Thus a
+supported concurrent preparer cannot race destination ownership, and an
+intermediate symlink swap is detected without redirecting evidence outside the
+configured root. Uncooperative local processes must not replace these paths,
+especially after handoff; the locks are not a sandbox or protection from a
+privileged or malicious host user. Refusals before exclusive artifact ownership
+produce no run evidence; an owned failure is sealed in the directory actually
+created.
 
 The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator

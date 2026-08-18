@@ -83,6 +83,13 @@ class RunPreparerCliTest(unittest.TestCase):
             },
         )
         self.assertEqual(request["assignment_path"], str(artifact / "assignment.json"))
+        self.assertEqual(
+            json.loads(
+                (Path(assignment["workspace"]) / "worker-objective.json").read_text()
+            ),
+            {"objective": assignment["objective"]},
+        )
+        self.assertEqual(assignment["command"][-1], request["assignment_path"])
         self.assertTrue((artifact / "coordinator").is_dir())
         self.assertNotIn(
             "TOP_SECRET",
@@ -138,6 +145,51 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertNotEqual(collision.returncode, 0)
         self.assertIn("worktree_root", collision.stderr)
         self.assertFalse((self.root / "runs").exists())
+
+    def test_assignment_command_requires_one_exact_path_placeholder_before_mutation(
+        self,
+    ):
+        for command in (
+            [sys.executable, "-c", "pass"],
+            ["worker", "prefix-{assignment_path}"],
+            ["worker", "{assignment_path}", "{assignment_path}"],
+        ):
+            config = json.loads(self.config.read_text())
+            config["assignment"]["command"] = command
+            self.config.write_text(json.dumps(config))
+            result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("exactly one {assignment_path} argument", result.stderr)
+            self.assertFalse((self.root / "runs").exists())
+
+    def test_flat_branch_avoids_prefix_conflict_and_exact_collision_is_preflighted(
+        self,
+    ):
+        self.git("branch", f"afk/{self.bead['id']}")
+        prefix = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertEqual(prefix.returncode, 1, prefix.stderr)
+        preparation = json.loads(
+            (self.artifact_from(prefix.stdout) / "preparation.json").read_text()
+        )
+        self.assertTrue(
+            preparation["repository"]["branch"].startswith(f"afk-{self.bead['id']}-")
+        )
+
+        exact_run = "collision"
+        exact_branch = f"afk-{self.bead['id']}-{exact_run}"
+        self.git("branch", exact_branch)
+        before = sorted((self.root / "runs" / self.bead["id"]).iterdir())
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("afk_run.new_run_id", return_value=exact_run),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            sorted((self.root / "runs" / self.bead["id"]).iterdir()), before
+        )
 
     def test_payload_write_failure_has_authoritative_sealed_evidence(self):
         environment = os.environ.copy()
@@ -240,24 +292,24 @@ class RunPreparerCliTest(unittest.TestCase):
     def test_artifact_creation_race_does_not_overwrite_foreign_destination(self):
         run_id = "fixed-run"
         artifact = self.root / "runs" / self.bead["id"] / run_id
-        original_mkdir = Path.mkdir
+        original_mkdir = os.mkdir
         raced = False
 
-        def mkdir_with_race(path, *args, **kwargs):
+        def mkdir_with_race(path, mode=0o777, *, dir_fd=None):
             nonlocal raced
-            if path == artifact and not raced:
+            if path == run_id and dir_fd is not None and not raced:
                 raced = True
-                original_mkdir(path, parents=True)
-                (path / "preparation.json").write_text("foreign evidence\n")
-                (path / "foreign").write_text("preserve me\n")
-            return original_mkdir(path, *args, **kwargs)
+                original_mkdir(path, mode, dir_fd=dir_fd)
+                (artifact / "preparation.json").write_text("foreign evidence\n")
+                (artifact / "foreign").write_text("preserve me\n")
+            return original_mkdir(path, mode, dir_fd=dir_fd)
 
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
         with (
             mock.patch.dict(os.environ, environment, clear=True),
             mock.patch("afk_run.new_run_id", return_value=run_id),
-            mock.patch("pathlib.Path.mkdir", new=mkdir_with_race),
+            mock.patch("os.mkdir", new=mkdir_with_race),
         ):
             code = afk_run.run(self.bead["id"], self.config)
 
@@ -268,6 +320,39 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertEqual((artifact / "foreign").read_text(), "preserve me\n")
         self.assertFalse((artifact / "coordinator").exists())
+
+    def test_parent_symlink_swap_cannot_redirect_owned_artifacts(self):
+        run_id = "symlink-race"
+        parent = self.root / "runs" / self.bead["id"]
+        displaced = self.root / "runs" / "displaced-parent"
+        redirected = self.root / "redirected"
+        redirected.mkdir()
+        original_mkdir = os.mkdir
+        swapped = False
+
+        def mkdir_with_swap(path, mode=0o777, *, dir_fd=None):
+            nonlocal swapped
+            if path == run_id and dir_fd is not None and not swapped:
+                swapped = True
+                parent.rename(displaced)
+                parent.symlink_to(redirected, target_is_directory=True)
+            return original_mkdir(path, mode, dir_fd=dir_fd)
+
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("afk_run.new_run_id", return_value=run_id),
+            mock.patch("os.mkdir", new=mkdir_with_swap),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+
+        self.assertEqual(code, 2)
+        self.assertTrue(swapped)
+        self.assertEqual(list(redirected.iterdir()), [])
+        preparation = json.loads((displaced / run_id / "preparation.json").read_text())
+        self.assertEqual(preparation["preparation_status"], "failed")
+        self.assertIn("changed during preparation", preparation["errors"][0]["message"])
 
     def test_missing_bead_is_reported_without_leaking_reader_secret(self):
         self.write_bd(exit_code=1, stderr="TOP_SECRET database password")
@@ -288,7 +373,10 @@ class RunPreparerCliTest(unittest.TestCase):
                     sys.executable,
                     "-c",
                     (
-                        "import json,os; from pathlib import Path; "
+                        "import json,os,sys; from pathlib import Path; "
+                        "assignment=json.loads(Path(sys.argv[1]).read_text()); "
+                        "Path('worker-objective.json').write_text(json.dumps("
+                        "{'objective': assignment['objective']})); "
                         "Path('worker-environment.json').write_text(json.dumps("
                         "{'unrelated': os.getenv('UNRELATED_CANARY'), "
                         "'pi_database': os.getenv('PI_DATABASE_URL'), "
@@ -296,6 +384,7 @@ class RunPreparerCliTest(unittest.TestCase):
                         "'anthropic_internal': os.getenv('ANTHROPIC_INTERNAL_TOKEN')})); "
                         "raise SystemExit(7)"
                     ),
+                    "{assignment_path}",
                 ],
                 "timeout_seconds": 5,
             },
