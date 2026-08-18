@@ -48,17 +48,19 @@ The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace and requires exactly one `project:<slug>` label. It
 resolves that project locally, freezes the base ref to a commit, and creates a
 new flat `afk-<bead-id>-<run-id>` branch and isolated worktree. The flat name
-cannot conflict with a bootstrap branch such as `afk/<bead-id>`. It never
-fetches, clones, reuses, or replaces a destination. Beads connection settings
-remain in the preparer environment and are not forwarded to Coordinator workers
-or written to durable evidence.
+cannot conflict with a bootstrap branch such as `afk/<bead-id>`, and preparation
+preflights exact, ancestor, and descendant branch-ref namespace collisions. It
+never fetches, clones, reuses, or replaces a destination. Beads connection
+settings remain in the preparer environment and are not forwarded to Coordinator
+workers or written to durable evidence.
 
 The assignment command must contain exactly one argv element equal to
 `{assignment_path}`. During preparation that element is replaced, without a
 shell, by the generated absolute `assignment.json` path. Embedded or repeated
-placeholders and commands without the placeholder are rejected before any run
-destination is created. This lets a configurable worker read the frozen Bead
-objective while keeping Beads lookup in the trusted preparer.
+placeholders, commands without the placeholder, and commands that use the
+Assignment path as their executable are rejected before any run destination is
+created. This lets a configurable worker read the frozen Bead objective while
+keeping Beads lookup in the trusted preparer.
 
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,

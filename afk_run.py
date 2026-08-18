@@ -67,15 +67,7 @@ def run(bead_id, config_path):
         # Flat refs cannot collide with bootstrap refs such as afk/<bead-id>.
         branch = f"afk-{bead_id}-{run_id}"
         leases.append(acquire_directory(repository, create=False))
-        if (
-            git_result(
-                repository, "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"
-            ).returncode
-            == 0
-        ):
-            raise PreparationError(
-                f"Bead {bead_id} branch destination {branch!r} already exists"
-            )
+        ensure_branch_available(bead_id, repository, branch)
 
         # Serialize cooperating preparers through exclusive creation and Git
         # handoff. Open directory descriptors anchor operations if paths move.
@@ -367,6 +359,10 @@ def validate_assignment_defaults(value):
         raise PreparationError(
             "assignment command must contain exactly one {assignment_path} argument"
         )
+    if value["command"][0] == ASSIGNMENT_PATH_PLACEHOLDER:
+        raise PreparationError(
+            "assignment command {assignment_path} cannot be the executable"
+        )
     positive(value["timeout_seconds"], "assignment timeout_seconds")
 
 
@@ -560,6 +556,24 @@ def assignment_command(command, assignment_path):
         str(assignment_path) if item == ASSIGNMENT_PATH_PLACEHOLDER else item
         for item in command
     ]
+
+
+def ensure_branch_available(bead_id, repository, branch):
+    """Reject exact, ancestor, or descendant collisions in Git's ref namespace."""
+    target = f"refs/heads/{branch}"
+    listed = git_result(repository, "for-each-ref", "--format=%(refname)", "refs/heads")
+    if listed.returncode != 0:
+        raise PreparationError(
+            f"Bead {bead_id} branch namespace could not be inspected"
+        )
+    refs = listed.stdout.splitlines()
+    if any(
+        ref == target or ref.startswith(f"{target}/") or target.startswith(f"{ref}/")
+        for ref in refs
+    ):
+        raise PreparationError(
+            f"Bead {bead_id} branch destination {branch!r} conflicts with an existing branch"
+        )
 
 
 def ensure_destination_layout(bead_id, config, repository, artifact, worktree):

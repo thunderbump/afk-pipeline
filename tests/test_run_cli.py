@@ -162,7 +162,21 @@ class RunPreparerCliTest(unittest.TestCase):
             self.assertIn("exactly one {assignment_path} argument", result.stderr)
             self.assertFalse((self.root / "runs").exists())
 
-    def test_flat_branch_avoids_prefix_conflict_and_exact_collision_is_preflighted(
+    def test_assignment_path_cannot_be_the_command_executable(self):
+        config = json.loads(self.config.read_text())
+        config["assignment"]["command"] = ["{assignment_path}"]
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("cannot be the executable", result.stderr)
+        self.assertFalse((self.root / "runs").exists())
+        self.assertEqual(
+            self.git("worktree", "list", "--porcelain").count("worktree "), 1
+        )
+
+    def test_flat_branch_avoids_prefix_conflict_and_namespace_collisions_are_preflighted(
         self,
     ):
         self.git("branch", f"afk/{self.bead['id']}")
@@ -189,6 +203,23 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(
             sorted((self.root / "runs" / self.bead["id"]).iterdir()), before
+        )
+
+        descendant_run = "descendant-collision"
+        descendant_branch = f"afk-{self.bead['id']}-{descendant_run}"
+        self.git("branch", f"{descendant_branch}/child")
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch("afk_run.new_run_id", return_value=descendant_run),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+        self.assertEqual(code, 2)
+        self.assertEqual(
+            sorted((self.root / "runs" / self.bead["id"]).iterdir()), before
+        )
+        self.assertNotIn(
+            f"worktree {self.root / 'worktrees' / self.bead['id'] / descendant_run}",
+            self.git("worktree", "list", "--porcelain"),
         )
 
     def test_payload_write_failure_has_authoritative_sealed_evidence(self):
