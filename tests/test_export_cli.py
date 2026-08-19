@@ -4,6 +4,9 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
+
+import afk_export
 
 ROOT = Path(__file__).parents[1]
 
@@ -318,6 +321,89 @@ class ExportCliTests(unittest.TestCase):
             public = (destination / event["path"]).read_bytes()
             self.assertNotIn(b"/Users/private/work", public)
             self.assertEqual(hashlib.sha256(public).hexdigest(), event["public_sha256"])
+
+    def test_v2_redacts_a_command_credential_value_from_assignment_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            secret = "opaque-command-credential"
+            for path in (
+                source / "assignment.json",
+                source / "coordinator/assignment.json",
+            ):
+                assignment = json.loads(path.read_text())
+                assignment["command"] = ["agent", "--token", secret, "--print"]
+                path.write_text(json.dumps(assignment))
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            public = b"".join(
+                path.read_bytes() for path in destination.rglob("*") if path.is_file()
+            )
+            self.assertNotIn(secret.encode(), public)
+            assignment = json.loads(
+                (destination / "artifacts/assignment.json").read_text()
+            )
+            self.assertEqual(
+                assignment["command"],
+                ["agent", "--token", "[redacted-secret]", "--print"],
+            )
+
+    def test_v2_assigns_globally_unique_public_artifact_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            attempt = source / "coordinator/01-attempt"
+            output_path = attempt / "output.json"
+            output = json.loads(output_path.read_text())
+            output["artifacts"] = {
+                "events": "output.json",
+                "stderr": "output.json.json",
+            }
+            output_path.write_text(json.dumps(output))
+            (attempt / "output.json.json").write_text("ordinary log\n")
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            paths = [
+                item["path"]
+                for item in record["artifacts"]
+                if item["state"] == "published"
+            ]
+            self.assertEqual(len(paths), len(set(paths)))
+            manifest = json.loads((destination / "manifest.json").read_text())
+            manifest_paths = [item["path"] for item in manifest["files"]]
+            self.assertEqual(len(manifest_paths), len(set(manifest_paths)))
+
+    def test_v2_seals_an_artifact_that_becomes_unreadable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "events.jsonl"
+            artifact.write_text('{"type":"message_end"}\n')
+            candidate = {
+                "root": root,
+                "source": "events.jsonl",
+                "scope": "component:1:attempt",
+                "kind": "events",
+                "media_type": "application/x-ndjson",
+            }
+
+            with mock.patch(
+                "afk_export.read_bytes",
+                side_effect=PermissionError("artifact replaced after lstat"),
+            ):
+                descriptor, public = afk_export.derive_public_artifact(candidate, set())
+
+            self.assertIsNone(public)
+            self.assertEqual(descriptor["state"], "unavailable")
+            self.assertEqual(descriptor["unavailable_reason"], "unavailable")
+            self.assertEqual(descriptor["public_bytes"], 0)
+            self.assertNotIn("path", descriptor)
 
     def test_v2_rejects_unsafe_component_artifact_paths_explicitly(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -74,6 +74,14 @@ HOST_PATH = re.compile(
     r"(?<![A-Za-z0-9.])/(?:home|tmp|var|etc|opt|root|srv|mnt|usr|run|"
     r"Users|private|Library|Volumes|Applications|System)/[^\s'\"`]+"
 )
+CREDENTIAL_OPTION = re.compile(
+    r"(?i)^--(?:access[-_]?token|api[-_]?key|client[-_]?secret|password|secret|token)$"
+)
+CREDENTIAL_OPTION_VALUE = re.compile(
+    r"(?i)^(--(?:access[-_]?token|api[-_]?key|client[-_]?secret|"
+    r"password|secret|token))=(.*)$"
+)
+REDACTED_SECRET = "[redacted-secret]"
 
 
 class ExportError(Exception):
@@ -542,6 +550,8 @@ def public_artifacts(observed):
             descriptor.pop("path", None)
             data = None
         if data is not None:
+            if descriptor["path"] in payloads:
+                raise ExportError("public artifact destinations collide")
             used += len(data)
             payloads[descriptor["path"]] = data
         descriptors.append(descriptor)
@@ -671,6 +681,23 @@ def artifact_candidates(observed):
         if not candidate["unsafe_path"] and source_counts[candidate["source"]] > 1:
             suffix = candidate.get("declaration") or candidate["kind"]
             candidate["destination"] = f"artifacts/{candidate['source']}.{suffix}"
+
+    # Source disambiguation can itself produce another candidate's natural
+    # destination (for example output.json.json versus output.json plus its
+    # semantic ``.json`` suffix).  Reserve destinations globally in stable
+    # candidate order so payload assembly can never silently overwrite bytes.
+    destinations = set()
+    for candidate in result:
+        if candidate["unsafe_path"]:
+            continue
+        desired = candidate.get("destination", f"artifacts/{candidate['source']}")
+        destination = desired
+        duplicate = 2
+        while destination in destinations:
+            destination = f"{desired}.duplicate-{duplicate}"
+            duplicate += 1
+        candidate["destination"] = destination
+        destinations.add(destination)
     return result
 
 
@@ -689,6 +716,8 @@ def derive_public_artifact(candidate, redactions):
         facts = path.lstat()
     except FileNotFoundError:
         return unavailable_descriptor(base, "missing"), None
+    except OSError:
+        return unavailable_descriptor(base, "unavailable"), None
     if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
         return unavailable_descriptor(base, "unsafe_file"), None
     if facts.st_size == 0:
@@ -697,6 +726,12 @@ def derive_public_artifact(candidate, redactions):
         return unavailable_descriptor(base, "oversized"), None
     try:
         raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES)
+    except (ExportError, OSError):
+        # Optional publication evidence may disappear, become unreadable, or
+        # be replaced after lstat.  Seal that observation without rejecting a
+        # valid terminal Run and without publishing bytes from the race.
+        return unavailable_descriptor(base, "unavailable"), None
+    try:
         text = decode_text(raw)
         if candidate["kind"] == "json":
             value = json.loads(text)
@@ -755,14 +790,24 @@ def unavailable_descriptor(base, reason):
 
 def sanitize_json_value(value, redactions):
     if isinstance(value, str):
+        option = CREDENTIAL_OPTION_VALUE.fullmatch(value)
+        if option:
+            return f"{option.group(1)}={REDACTED_SECRET}", True
         public = sanitize_public_text(value, redactions)
         return public, public != value
     if isinstance(value, list):
         result, changed = [], False
+        redact_next = False
         for item in value:
-            public, item_changed = sanitize_json_value(item, redactions)
+            if redact_next and isinstance(item, str):
+                public, item_changed = REDACTED_SECRET, item != REDACTED_SECRET
+            else:
+                public, item_changed = sanitize_json_value(item, redactions)
             result.append(public)
             changed = changed or item_changed
+            redact_next = isinstance(item, str) and bool(
+                CREDENTIAL_OPTION.fullmatch(item)
+            )
         return result, changed
     if isinstance(value, dict):
         result, changed = {}, False
