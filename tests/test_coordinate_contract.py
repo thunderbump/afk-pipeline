@@ -49,6 +49,27 @@ class CoordinatorTerminalContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "invalid coordinator checkpoint"):
             validate_output(output)
 
+    def test_rejects_abandoned_invocation_as_a_terminal_failure(self):
+        output = {
+            "schema_version": 1,
+            "outcome": "failed",
+            "failed_component": "attempt",
+            "component_outcome": "abandoned",
+            "exit_code": None,
+            "history": [
+                {
+                    "sequence": 1,
+                    "component": "attempt",
+                    "directory": "01-attempt",
+                    "input_from": {"assignment": "assignment.json"},
+                    "outcome": "abandoned",
+                }
+            ],
+        }
+
+        with self.assertRaisesRegex(ValueError, "invalid coordinator checkpoint"):
+            validate_output(output)
+
 
 if __name__ == "__main__":
     unittest.main()

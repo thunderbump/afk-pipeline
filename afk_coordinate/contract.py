@@ -235,10 +235,12 @@ def validate_terminal_history(state):
             raise ValueError("invalid coordinator checkpoint")
         return
     terminal = state["terminal"]
+    specification = COMPONENT_TOPOLOGY[last["component"]]
     if (
         last["component"] != terminal["failed_component"]
         or last["outcome"] != terminal["component_outcome"]
-        or last["outcome"] == COMPONENT_TOPOLOGY[last["component"]]["success"]
+        or last["outcome"] not in specification["outcomes"]
+        or last["outcome"] == specification["success"]
     ):
         raise ValueError("invalid coordinator checkpoint")
 
