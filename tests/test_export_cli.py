@@ -319,6 +319,69 @@ class ExportCliTests(unittest.TestCase):
             self.assertNotIn(b"/Users/private/work", public)
             self.assertEqual(hashlib.sha256(public).hexdigest(), event["public_sha256"])
 
+    def test_v2_rejects_unsafe_component_artifact_paths_explicitly(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            attempt = source / "coordinator/01-attempt"
+            output_path = attempt / "output.json"
+            output = json.loads(output_path.read_text())
+            output["artifacts"]["stderr"] = "private/notes.txt"
+            output_path.write_text(json.dumps(output))
+            (attempt / "private").mkdir()
+            secret = b"private component material\n"
+            (attempt / "private/notes.txt").write_bytes(secret)
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            descriptors = {item["source"]["path"]: item for item in record["artifacts"]}
+            rejected = descriptors["coordinator/01-attempt/declared-stderr"]
+            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
+            public = b"".join(
+                path.read_bytes() for path in destination.rglob("*") if path.is_file()
+            )
+            self.assertNotIn(secret.rstrip(), public)
+
+    def test_v2_applies_the_artifact_limit_after_canonicalization(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            events = source / "coordinator/01-attempt/events.jsonl"
+            # ensure_ascii expansion makes this public JSONL larger than 25 MiB
+            # even though the retained UTF-8 source is well below that limit.
+            events.write_text(
+                json.dumps({"text": "é" * (9 * 1024 * 1024)}, ensure_ascii=False) + "\n"
+            )
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            descriptors = {item["source"]["path"]: item for item in record["artifacts"]}
+            rejected = descriptors["coordinator/01-attempt/events.jsonl"]
+            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["unavailable_reason"], "oversized")
+            self.assertEqual(rejected["public_bytes"], 0)
+
+    def test_v2_malformed_preparation_is_a_normal_invalid_run_rejection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            (source / "preparation.json").write_text("[]")
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+            self.assertNotIn("Traceback", result.stderr)
+
     def test_v2_exports_a_terminal_preflight_pause_without_coordinator_history(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -405,6 +468,14 @@ class ExportCliTests(unittest.TestCase):
                 record["terminal"], {"stage": "preflight", "decision": "pause"}
             )
             self.assertEqual(record["preflight"]["requests"], [request])
+
+            invocation_input = {**preflight_input, "title": "Fabricated invocation"}
+            (preflight / "input.json").write_text(json.dumps(invocation_input))
+            rejected_destination = root / "inconsistent-paused-bundle"
+            rejected = self.export_v2(source, rejected_destination)
+            self.assertEqual(rejected.returncode, 1, rejected.stderr)
+            self.assertFalse(rejected_destination.exists())
+            self.assertEqual(json.loads(rejected.stdout)["error"], "invalid_run")
 
     def test_help_documents_the_export_interface(self):
         result = subprocess.run(

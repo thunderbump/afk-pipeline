@@ -167,6 +167,8 @@ def load_source_v2(source, project, run_id, bead_id):
         return observed
 
     preparation = read_json(preparation_path)
+    if not isinstance(preparation, dict):
+        raise ExportError("invalid Run Preparer evidence")
     if preparation.get("preparation_status") != "paused":
         observed = load_source(source, project, run_id, bead_id)
         observed["run_root"] = source
@@ -273,6 +275,11 @@ def load_optional_preflight(source, preparation):
     preflight_input = validate_preflight_input(
         read_json(source / "preflight-input.json")
     )
+    invocation_input = validate_preflight_input(
+        read_json(source / "preflight" / "input.json")
+    )
+    if invocation_input != preflight_input:
+        raise ExportError("prepared Preflight inputs disagree")
     preflight_output = validate_preflight_output(
         read_json(source / "preflight" / "output.json"), preflight_input
     )
@@ -536,8 +543,8 @@ def artifact_candidates(observed):
     result = []
     seen = set()
 
-    def add(relative, scope, kind, media_type, priority):
-        if relative in seen or not safe_relative(relative):
+    def add(relative, scope, kind, media_type, priority, unsafe_path=False):
+        if relative in seen or (not unsafe_path and not safe_relative(relative)):
             return
         seen.add(relative)
         result.append(
@@ -548,6 +555,7 @@ def artifact_candidates(observed):
                 "kind": kind,
                 "media_type": media_type,
                 "priority": priority,
+                "unsafe_path": unsafe_path,
             }
         )
 
@@ -602,12 +610,18 @@ def artifact_candidates(observed):
                         else "text/plain; charset=utf-8"
                     )
                 )
+                # Component contracts allow arbitrary strings here, but the
+                # publication allowlist is deliberately basename-only.  Keep
+                # rejected declarations visible under a synthetic safe source
+                # identity without ever resolving the declared path.
+                safe_name = Path(filename).name == filename and safe_relative(filename)
                 add(
-                    f"{base}/{filename}",
+                    f"{base}/{filename}" if safe_name else f"{base}/declared-{kind}",
                     scope,
                     artifact_kind,
                     media,
                     2 if kind == "events" else 1,
+                    unsafe_path=not safe_name,
                 )
     return result
 
@@ -620,6 +634,8 @@ def derive_public_artifact(candidate, redactions):
         "kind": candidate["kind"],
         "media_type": candidate["media_type"],
     }
+    if candidate.get("unsafe_path"):
+        return unavailable_descriptor(base, "unsafe_path"), None
     path = candidate["root"] / source
     try:
         facts = path.lstat()
@@ -663,6 +679,8 @@ def derive_public_artifact(candidate, redactions):
         ValueError,
     ):
         return unavailable_descriptor(base, "unsafe_or_invalid"), None
+    if len(public) > V2_MAX_ARTIFACT_BYTES:
+        return unavailable_descriptor(base, "oversized"), None
     destination = "artifacts/" + source
     descriptor = {
         **base,
