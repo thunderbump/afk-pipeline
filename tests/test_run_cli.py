@@ -94,6 +94,7 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertEqual(assignment["command"][-1], request["assignment_path"])
         self.assertTrue((artifact / "coordinator").is_dir())
+        self.assertFalse((artifact / "publication.json").exists())
         self.assertNotIn(
             "TOP_SECRET",
             "".join(
@@ -102,6 +103,122 @@ class RunPreparerCliTest(unittest.TestCase):
                 if p.is_file()
             ),
         )
+
+    def test_configured_publication_exports_and_accepts_terminal_run(self):
+        receipt = self.root / "publication-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        publication = json.loads((artifact / "publication.json").read_text())
+        self.assertEqual(publication["status"], "succeeded")
+        self.assertEqual(publication["admission_outcome"], "accepted")
+        self.assertEqual(publication["process"]["exit_code"], 0)
+        self.assertIsNone(publication["error_category"])
+        observed = json.loads(receipt.read_text())
+        self.assertEqual(
+            observed["identity"],
+            {"project": "fixture", "run_id": artifact.name},
+        )
+        self.assertEqual(observed["bead"], "central-123")
+        self.assertIn(
+            "publication outcome for Bead central-123: accepted", result.stdout
+        )
+        self.assertFalse(Path(observed["bundle"]).exists())
+
+    def test_same_terminal_run_replays_through_the_publication_seam(self):
+        store = self.root / "adapter-store.json"
+        adapter = self.write_stateful_publication_adapter(store)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(store)]
+        )
+
+        first = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(first.stdout)
+        accepted = json.loads((artifact / "publication.json").read_text())
+        config = afk_run.load_config(self.config)
+        replayed = afk_run.publish_terminal_run(artifact, config["publication"])
+
+        self.assertEqual(accepted["admission_outcome"], "accepted")
+        self.assertEqual(replayed["status"], "succeeded")
+        self.assertEqual(replayed["admission_outcome"], "replayed")
+
+    def test_rejected_publication_preserves_a_completed_run_and_fails_the_cli(self):
+        receipt = self.root / "rejected-receipt.json"
+        adapter = self.write_publication_adapter("rejected", 1, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        terminal = self.completed_output("stop")
+
+        code, _, artifact = self.run_with_coordinator_output(
+            terminal, 0, complete_evidence=True
+        )
+
+        publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(publication["status"], "failed")
+        self.assertEqual(publication["admission_outcome"], "rejected")
+        self.assertEqual(publication["error_category"], "admission_rejected")
+        self.assertEqual(preparation["coordinator"]["outcome"], "completed")
+        self.assertEqual(preparation["coordinator"]["decision"], "stop")
+        self.assertEqual(
+            json.loads((artifact / "coordinator" / "output.json").read_text()),
+            terminal,
+        )
+
+    def test_temporary_storage_failure_is_sealed_after_completed_run(self):
+        receipt = self.root / "unused-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        with mock.patch(
+            "afk_run.tempfile.TemporaryDirectory",
+            side_effect=OSError("temporary storage unavailable"),
+        ):
+            code, _, artifact = self.run_with_coordinator_output(
+                self.completed_output("stop"), 0, complete_evidence=True
+            )
+
+        publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(publication["error_category"], "temporary_storage")
+        self.assertEqual(preparation["coordinator"]["decision"], "stop")
+
+    def test_non_utf8_admission_output_is_a_protocol_failure(self):
+        adapter = self.root / "non-utf8-adapter.py"
+        adapter.write_text(
+            "import os,sys\nos.write(1, b'\\xff\\xfe')\nraise SystemExit(0)\n"
+        )
+        self.configure_publication([sys.executable, str(adapter), "{bundle_path}"])
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        artifact = self.artifact_from(result.stdout)
+        publication = json.loads((artifact / "publication.json").read_text())
+        self.assertEqual(publication["error_category"], "admission_protocol")
+
+    def test_malformed_publication_config_is_rejected_before_run_creation(self):
+        config = json.loads(self.config.read_text())
+        config["publication"] = {
+            "command": ["publisher", "missing-placeholder"],
+            "timeout_seconds": 5,
+        }
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("publication command", result.stderr)
+        self.assertFalse((self.root / "runs").exists())
 
     def test_ownership_mapping_repository_ref_and_collision_fail_before_git_mutation(
         self,
@@ -462,14 +579,17 @@ class RunPreparerCliTest(unittest.TestCase):
             ],
         }
 
-    def run_with_coordinator_output(self, output, exit_code):
+    def run_with_coordinator_output(self, output, exit_code, complete_evidence=False):
         original_run = subprocess.run
 
         def run(command, *args, **kwargs):
             if command[:3] == [sys.executable, "-m", "afk_coordinate"]:
                 coordinator = Path(command[4])
                 coordinator.mkdir()
-                (coordinator / "output.json").write_text(json.dumps(output))
+                if complete_evidence:
+                    self.write_completed_coordinator(coordinator, output)
+                else:
+                    (coordinator / "output.json").write_text(json.dumps(output))
                 return subprocess.CompletedProcess(command, exit_code)
             return original_run(command, *args, **kwargs)
 
@@ -484,6 +604,92 @@ class RunPreparerCliTest(unittest.TestCase):
             code = afk_run.run(self.bead["id"], self.config)
         artifact = self.artifact_from(stdout.getvalue())
         return code, stdout.getvalue(), artifact
+
+    def write_completed_coordinator(self, coordinator, output):
+        source = coordinator.parent
+        assignment = json.loads((source / "assignment.json").read_text())
+        request = json.loads((source / "coordinator-request.json").read_text())
+        state = {
+            "schema_version": 1,
+            "status": "completed",
+            "next_sequence": 7,
+            "next_component": None,
+            "active_invocation": None,
+            "history": output["history"],
+            "terminal": {"decision": output["decision"]},
+        }
+        for path, value in {
+            coordinator / "assignment.json": assignment,
+            coordinator / "input.json": request,
+            coordinator / "state.json": state,
+            coordinator / "output.json": output,
+        }.items():
+            path.write_text(json.dumps(value))
+        outputs = {
+            "01-attempt": {
+                "schema_version": 1,
+                "outcome": "succeeded",
+                "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+            },
+            "02-validation": {
+                "schema_version": 1,
+                "outcome": "passed",
+                "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+            },
+            "03-change": {
+                "schema_version": 1,
+                "outcome": "completed",
+                "change": {
+                    "workspace": assignment["workspace"],
+                    "objective": assignment["objective"],
+                    "source": {
+                        "kind": "attempt",
+                        "directory": str(coordinator / "01-attempt"),
+                    },
+                    "repository": {},
+                },
+            },
+            "04-review": {
+                "schema_version": 1,
+                "outcome": "completed",
+                "review": {"summary": "Clean.", "findings": []},
+                "artifacts": {
+                    "diff": "review.diff",
+                    "events": "events.jsonl",
+                    "stderr": "stderr.log",
+                },
+            },
+            "05-assessment": {
+                "schema_version": 1,
+                "outcome": "completed",
+                "assessment": {"summary": "No findings.", "decisions": []},
+                "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+            },
+            "06-iteration": {
+                "schema_version": 1,
+                "outcome": "completed",
+                "policy": {
+                    "decision": "stop",
+                    "completed_responses": 0,
+                    "max_responses": request["max_responses"],
+                    "actionable_findings": 0,
+                    "reason": "No actionable findings.",
+                },
+            },
+        }
+        for directory, value in outputs.items():
+            result = coordinator / directory
+            result.mkdir()
+            (result / "output.json").write_text(json.dumps(value))
+            for kind, artifact in value.get("artifacts", {}).items():
+                content = ""
+                if kind == "events":
+                    content = '{"type":"agent_end"}\n'
+                elif kind == "stdout":
+                    content = "validation passed\n"
+                elif kind == "diff":
+                    content = "diff --git a/README.md b/README.md\n"
+                (result / artifact).write_text(content)
 
     def write_config(self):
         value = {
@@ -524,6 +730,43 @@ class RunPreparerCliTest(unittest.TestCase):
             },
         }
         self.config.write_text(json.dumps(value))
+
+    def configure_publication(self, command):
+        value = json.loads(self.config.read_text())
+        value["publication"] = {"command": command, "timeout_seconds": 5}
+        self.config.write_text(json.dumps(value))
+
+    def write_publication_adapter(self, outcome, exit_code, receipt):
+        path = self.root / f"publish-{outcome}.py"
+        path.write_text(
+            "import json,sys\n"
+            "from pathlib import Path\n"
+            "bundle=Path(sys.argv[1])\n"
+            "record=json.loads((bundle/'workflow-run.json').read_text())\n"
+            "Path(sys.argv[2]).write_text(json.dumps({"
+            "'identity': record['identity'], 'bead': record['bead']['id'], "
+            "'bundle': str(bundle)}))\n"
+            f"print(json.dumps({{'schema_version': 1, 'outcome': {outcome!r}, "
+            "'identity': record['identity'], 'location': 'fixture/location'}))\n"
+            f"raise SystemExit({exit_code})\n"
+        )
+        return path
+
+    def write_stateful_publication_adapter(self, store):
+        path = self.root / "stateful-publication.py"
+        path.write_text(
+            "import hashlib,json,sys\n"
+            "from pathlib import Path\n"
+            "bundle=Path(sys.argv[1])\n"
+            "store=Path(sys.argv[2])\n"
+            "manifest=json.loads((bundle/'manifest.json').read_text())\n"
+            "digest=hashlib.sha256((bundle/'workflow-run.json').read_bytes()).hexdigest()\n"
+            "outcome='replayed' if store.exists() and store.read_text()==digest else 'accepted'\n"
+            "store.write_text(digest)\n"
+            "print(json.dumps({'schema_version': 1, 'outcome': outcome, "
+            "'identity': manifest['identity'], 'location': 'fixture/location'}))\n"
+        )
+        return path
 
     def write_bd(self, exit_code=0, stderr=""):
         path = self.bin / "bd"

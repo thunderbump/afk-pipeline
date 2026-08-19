@@ -7,17 +7,20 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 from afk_coordinate.contract import validate_output as validate_coordinator_output
-from afk_runtime import progress, seal_json, timestamp, write_json
+from afk_runtime import progress, run_command, seal_json, timestamp, write_json
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 ASSIGNMENT_PATH_PLACEHOLDER = "{assignment_path}"
+PUBLICATION_BUNDLE_PLACEHOLDER = "{bundle_path}"
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+MAX_ADMISSION_OUTPUT_BYTES = 64 * 1024
 
 
 class PreparationError(Exception):
@@ -92,6 +95,7 @@ def run(bead_id, config_path):
     artifact_io = None
     artifact_owned = False
     preparation = None
+    coordinator_sealed = False
     leases = []
     open_fds = []
     try:
@@ -283,12 +287,23 @@ def run(bead_id, config_path):
         )
         preparation["timestamps"]["finished_at"] = timestamp()
         seal_json(artifact_io / "preparation.json", preparation)
+        coordinator_sealed = True
         progress(
             f"coordinator terminal decision for Bead {bead_id}: "
             f"{decision or 'unavailable'}"
         )
+        publication_succeeded = True
+        if config.get("publication") is not None:
+            progress(f"publishing terminal Run for Bead {bead_id}")
+            publication = publish_terminal_run(artifact, config["publication"])
+            publication_succeeded = publication["status"] == "succeeded"
+            progress(
+                f"publication outcome for Bead {bead_id}: "
+                f"{publication['admission_outcome'] or publication['error_category']}"
+            )
         print(f"artifact root: {artifact}", flush=True)
-        return terminal_exit_code(code, outcome, decision)
+        terminal_code = terminal_exit_code(code, outcome, decision)
+        return 1 if terminal_code == 0 and not publication_succeeded else terminal_code
     except PreparationError as error:
         if artifact_owned:
             if (
@@ -302,37 +317,39 @@ def run(bead_id, config_path):
         print(f"afk run: Bead {bead_id}: {error}", file=sys.stderr)
         return 2
     except OSError:
-        if artifact_owned and preparation is not None:
-            try:
-                (artifact_io / "coordinator").mkdir(exist_ok=True)
-            except OSError:
-                pass
-            fail_preparation(
-                preparation,
-                "filesystem",
-                f"filesystem preparation failed for Bead {bead_id}",
-            )
-            try:
-                seal_json(artifact_io / "preparation.json", preparation)
-            except OSError:
-                pass
+        if artifact_owned:
+            if preparation is not None and not coordinator_sealed:
+                try:
+                    (artifact_io / "coordinator").mkdir(exist_ok=True)
+                except OSError:
+                    pass
+                fail_preparation(
+                    preparation,
+                    "filesystem",
+                    f"filesystem preparation failed for Bead {bead_id}",
+                )
+                try:
+                    seal_json(artifact_io / "preparation.json", preparation)
+                except OSError:
+                    pass
             print(f"artifact root: {artifact}", flush=True)
         print(
             f"afk run: Bead {bead_id}: filesystem preparation failed", file=sys.stderr
         )
         return 2
     except KeyboardInterrupt:
-        if artifact_owned and preparation is not None:
-            try:
-                (artifact_io / "coordinator").mkdir(exist_ok=True)
-            except OSError:
-                pass
-            fail_preparation(
-                preparation,
-                "interrupted",
-                f"Bead {bead_id} Run Preparer was interrupted",
-            )
-            seal_json(artifact_io / "preparation.json", preparation)
+        if artifact_owned:
+            if preparation is not None and not coordinator_sealed:
+                try:
+                    (artifact_io / "coordinator").mkdir(exist_ok=True)
+                except OSError:
+                    pass
+                fail_preparation(
+                    preparation,
+                    "interrupted",
+                    f"Bead {bead_id} Run Preparer was interrupted",
+                )
+                seal_json(artifact_io / "preparation.json", preparation)
             print(f"artifact root: {artifact}", flush=True)
         print(f"afk run: Bead {bead_id} preparation interrupted", file=sys.stderr)
         return 130
@@ -359,6 +376,109 @@ def terminal_exit_code(coordinator_code, outcome, decision):
     return 1
 
 
+def publish_terminal_run(source, config):
+    """Export one sealed Run, invoke Admission, and seal private result evidence."""
+    from afk_export import ExportError, ExportUsageError, export_run
+
+    started_at = timestamp()
+    exit_code = None
+    admission_outcome = None
+    error_category = None
+    stdout_path = source / "publication.stdout"
+    stderr_path = source / "publication.stderr"
+    try:
+        with tempfile.TemporaryDirectory(prefix="afk-publication-") as temporary:
+            bundle = Path(temporary) / "bundle"
+            try:
+                exported = export_run(source, bundle)
+            except (
+                ExportError,
+                ExportUsageError,
+                OSError,
+                TypeError,
+                ValueError,
+                KeyError,
+            ):
+                error_category = "export_failed"
+            else:
+                exit_code, admission_outcome, error_category = invoke_admission(
+                    bundle,
+                    exported["identity"],
+                    config,
+                    stdout_path,
+                    stderr_path,
+                )
+    except OSError:
+        error_category = "temporary_storage"
+
+    if not stdout_path.exists():
+        stdout_path.write_text("")
+    if not stderr_path.exists():
+        stderr_path.write_text("")
+    result = {
+        "schema_version": 1,
+        "status": "succeeded" if error_category is None else "failed",
+        "admission_outcome": admission_outcome,
+        "started_at": started_at,
+        "finished_at": timestamp(),
+        "process": {"exit_code": exit_code},
+        "error_category": error_category,
+    }
+    seal_json(source / "publication.json", result)
+    return result
+
+
+def invoke_admission(bundle, expected_identity, config, stdout_path, stderr_path):
+    """Run one Admission adapter and classify only its versioned result."""
+    command = replace_argument(
+        config["command"], PUBLICATION_BUNDLE_PLACEHOLDER, str(bundle)
+    )
+    try:
+        facts = run_command(
+            command,
+            Path(__file__).parent,
+            config["timeout_seconds"],
+            stdout_path,
+            stderr_path,
+        )
+    except OSError:
+        return None, None, "publication_io"
+    exit_code = facts["exit_code"]
+    if facts["interrupted"]:
+        return exit_code, None, "admission_interrupted"
+    if facts["timed_out"]:
+        return exit_code, None, "admission_timeout"
+    if facts["error"]:
+        return exit_code, None, "admission_launch"
+    try:
+        if stdout_path.stat().st_size > MAX_ADMISSION_OUTPUT_BYTES:
+            return exit_code, None, "admission_protocol"
+        stdout = stdout_path.read_text()
+    except (OSError, UnicodeDecodeError):
+        return exit_code, None, "admission_protocol"
+    admission_outcome, error_category = admission_terminal(
+        stdout, exit_code, expected_identity
+    )
+    return exit_code, admission_outcome, error_category
+
+
+def admission_terminal(stdout, exit_code, expected_identity):
+    try:
+        value = json.loads(stdout)
+    except json.JSONDecodeError:
+        return None, "admission_protocol"
+    outcome = value.get("outcome") if isinstance(value, dict) else None
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        return None, "admission_protocol"
+    if exit_code == 0 and outcome in {"accepted", "replayed"}:
+        if value.get("identity") != expected_identity:
+            return None, "admission_protocol"
+        return outcome, None
+    if exit_code != 0 and outcome in {"conflict", "rejected"}:
+        return outcome, "admission_rejected"
+    return None, "admission_protocol"
+
+
 def load_config(path):
     try:
         value = json.loads(path.read_text())
@@ -378,7 +498,8 @@ def load_config(path):
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != 1
-        or set(value) != expected
+        or frozenset(value)
+        not in {frozenset(expected), frozenset(expected | {"publication"})}
     ):
         raise PreparationError(
             f"configuration {path} is malformed (expected schema_version 1)"
@@ -395,6 +516,8 @@ def load_config(path):
         )
     validate_assignment_defaults(value["assignment"])
     validate_coordinator(value["coordinator"])
+    if "publication" in value:
+        validate_publication(value["publication"])
     projects = value["projects"]
     if not isinstance(projects, dict) or not projects:
         raise PreparationError("configuration projects must be a nonempty object")
@@ -444,6 +567,23 @@ def validate_coordinator(value):
         raise PreparationError(
             "coordinator max_responses must be a nonnegative integer"
         )
+
+
+def validate_publication(value):
+    if not isinstance(value, dict) or set(value) != {"command", "timeout_seconds"}:
+        raise PreparationError("configuration publication is malformed")
+    argv(value["command"], "publication command")
+    if value["command"].count(PUBLICATION_BUNDLE_PLACEHOLDER) != 1 or any(
+        PUBLICATION_BUNDLE_PLACEHOLDER in item
+        and item != PUBLICATION_BUNDLE_PLACEHOLDER
+        for item in value["command"]
+    ):
+        raise PreparationError(
+            "publication command must contain exactly one {bundle_path} argument"
+        )
+    if value["command"][0] == PUBLICATION_BUNDLE_PLACEHOLDER:
+        raise PreparationError("publication {bundle_path} cannot be the executable")
+    positive(value["timeout_seconds"], "publication timeout_seconds")
 
 
 def validate_project(slug, value):
@@ -615,10 +755,12 @@ def destination(root, bead_id, run_id):
 
 def assignment_command(command, assignment_path):
     """Replace one validated argv element; no shell interpolation is involved."""
-    return [
-        str(assignment_path) if item == ASSIGNMENT_PATH_PLACEHOLDER else item
-        for item in command
-    ]
+    return replace_argument(command, ASSIGNMENT_PATH_PLACEHOLDER, str(assignment_path))
+
+
+def replace_argument(command, placeholder, value):
+    """Replace one previously validated argv placeholder without a shell."""
+    return [value if item == placeholder else item for item in command]
 
 
 def ensure_branch_available(bead_id, repository, branch):
