@@ -59,6 +59,13 @@ def main(argv=None):
     export_parser.add_argument("--project")
     export_parser.add_argument("--run-id")
     export_parser.add_argument("--bead-id")
+    export_parser.add_argument(
+        "--schema-version",
+        type=int,
+        choices=(1, 2),
+        default=1,
+        help="Publication Bundle schema (default: 1)",
+    )
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
         return run(arguments.bead_id, arguments.config)
@@ -72,6 +79,7 @@ def main(argv=None):
                 arguments.project,
                 arguments.run_id,
                 arguments.bead_id,
+                arguments.schema_version,
             )
         except ExportUsageError:
             print(

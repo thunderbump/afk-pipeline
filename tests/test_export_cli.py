@@ -294,6 +294,118 @@ class ExportCliTests(unittest.TestCase):
                 record["history"][-1]["output"]["details"], {"kind": "review"}
             )
 
+    def test_v2_publishes_semantic_artifacts_and_large_events_without_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            events = source / "coordinator/01-attempt/events.jsonl"
+            line = b'{"type":"message_update","path":"/Users/private/work"}\n'
+            events.write_bytes(line * ((9 * 1024 * 1024 // len(line)) + 1))
+            private = events.read_bytes()
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(record["schema_version"], 2)
+            artifacts = {item["source"]["path"]: item for item in record["artifacts"]}
+            event = artifacts["coordinator/01-attempt/events.jsonl"]
+            self.assertEqual(event["state"], "published")
+            self.assertGreater(event["public_bytes"], 8 * 1024 * 1024)
+            self.assertEqual(event["sanitization_status"], "sanitized")
+            self.assertEqual(events.read_bytes(), private)
+            public = (destination / event["path"]).read_bytes()
+            self.assertNotIn(b"/Users/private/work", public)
+            self.assertEqual(hashlib.sha256(public).hexdigest(), event["public_sha256"])
+
+    def test_v2_exports_a_terminal_preflight_pause_without_coordinator_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preflight_input = {
+                "schema_version": 1,
+                "source": {"kind": "bead", "id": "central-example"},
+                "title": "Needs an operator",
+                "acceptance_criteria": "Deployment verification passes.",
+                "evidence_catalog": [
+                    {
+                        "category": "operator_external",
+                        "route": "operator handoff",
+                        "can_prove": "external deployment state",
+                    }
+                ],
+                "timeout_seconds": 60,
+            }
+            request = {
+                "index": 1,
+                "request": "Deployment verification passes.",
+                "category": "operator_external",
+                "route": "operator handoff",
+                "rationale": "An operator owns deployment.",
+            }
+            preflight_output = {
+                "schema_version": 1,
+                "outcome": "completed",
+                "source": preflight_input["source"],
+                "decision": "pause",
+                "started_at": "2026-08-19T00:00:00Z",
+                "finished_at": "2026-08-19T00:00:01Z",
+                "duration_seconds": 1,
+                "process": {"exit_code": 0, "signal": None},
+                "agent": {"status": "completed"},
+                "classifier": {
+                    "kind": "inference",
+                    "provider": "openai-codex",
+                    "model": "gpt-5.6-luna",
+                    "status": "completed",
+                },
+                "requests": [request],
+                "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+            }
+            preparation["preparation_status"] = "paused"
+            preparation["preflight"] = {
+                "command": ["private"],
+                "directory": "preflight",
+                "result": "preflight/output.json",
+                "status": "completed",
+                "exit_code": 0,
+                "outcome": "completed",
+                "decision": "pause",
+            }
+            preparation["coordinator"].update(
+                status="not_started", exit_code=None, outcome=None, decision=None
+            )
+            preparation_path.write_text(json.dumps(preparation))
+            (source / "preflight-input.json").write_text(json.dumps(preflight_input))
+            preflight = source / "preflight"
+            preflight.mkdir()
+            (preflight / "input.json").write_text(json.dumps(preflight_input))
+            (preflight / "output.json").write_text(json.dumps(preflight_output))
+            (preflight / "events.jsonl").write_text('{"type":"message_end"}\n')
+            (preflight / "stderr.log").write_text("")
+            for child in list((source / "coordinator").iterdir()):
+                if child.is_dir():
+                    import shutil
+
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+            destination = root / "paused-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(record["status"], "paused")
+            self.assertEqual(record["history"], [])
+            self.assertEqual(
+                record["terminal"], {"stage": "preflight", "decision": "pause"}
+            )
+            self.assertEqual(record["preflight"]["requests"], [request])
+
     def test_help_documents_the_export_interface(self):
         result = subprocess.run(
             [str(ROOT / "afk"), "export", "--help"],
@@ -309,6 +421,23 @@ class ExportCliTests(unittest.TestCase):
     def export(self, source, destination, *arguments):
         return subprocess.run(
             [str(ROOT / "afk"), "export", str(source), str(destination), *arguments],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def export_v2(self, source, destination, *arguments):
+        return subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(source),
+                str(destination),
+                "--schema-version",
+                "2",
+                *arguments,
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

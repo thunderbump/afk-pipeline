@@ -224,35 +224,38 @@ caller must provide those facts explicitly:
 already carries the corresponding identity. The destination parent must exist
 and the destination itself must not. Source and destination may not overlap.
 
-The exporter validates the terminal Coordinator checkpoint and output, exact
-history topology, frozen Assignment and request, every referenced component
-result, and Run Preparer evidence when present. New Run Preparer evidence must
-contain a completed `proceed` Preflight matching its sealed input and output;
-legacy sealed Runs without Preflight remain exportable. The v1 Publication
-Bundle does not yet project the Preflight ledger or raw Preflight artifacts.
-It writes `manifest.json`, one normalized `workflow-run.json`, and only
-inventoried, nonempty UTF-8 `stdout`,
-`stderr`, and Review `diff` files. Raw Pi `events.jsonl` is never copied; its
-bounded size, digest, line count, and event-type counts remain in the normalized
-record. Host paths, commands, component inputs, credentials in those excluded
-fields, raw errors, empty logs, unknown artifacts, and unbounded files are not
-published. Before copying eligible text Evidence or normalized public text, the
-exporter redacts known Run/workspace paths and common absolute host-path forms
-from normalized public text and copied Evidence. It rejects private-key
-headers, URL credentials, and common authorization, cloud-secret, token,
-password, and API-key forms. Included Evidence sizes and digests describe the
-redacted public bytes. This fail-closed filter is an exporter boundary; the
-Operations WebUI's rendered-publication secret scan remains a separate defense.
+The exporter validates terminal Coordinator evidence, or a terminal `pause`
+from Preflight before Coordinator was started. A paused export has an empty
+history; it never invents Coordinator invocations. Legacy Runs without
+Preflight remain exportable.
 
-The bundle uses the v1 Operations Datastore limits: at most 128 payload files,
-1 MiB per included file, 8 MiB total, and a 64 KiB manifest. Source event logs
-are read with a separate 64 MiB observation cap. Export is deterministic for
-unchanged evidence. It stages beside the requested destination and renames the
-complete directory into place; handled refusal removes staging and leaves no
-destination. Success prints an `exported` JSON result and exits zero. Invalid or
-unsealed evidence prints a bounded `invalid_run` result and exits one; missing
-direct-Run identity exits two. The exporter writes no datastore state, performs
-no network activity, and does not invoke an agent.
+Pass `--schema-version 2` to produce Publication Bundle v2. It retains the
+readable normalized Run fields and adds the Preflight request ledger plus a
+semantic `artifacts` inventory. Each descriptor identifies a safe Run-relative source, scope, kind,
+media type, publication state, public size and SHA-256, sanitization status, and
+an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
+UTF-8 logs, and diffs are written only as deterministic derived copies below
+`artifacts/`; private source files are never rewritten. Known host paths are
+redacted. Secret-like, invalid, non-UTF-8, empty, missing, unsafe, and oversized
+optional sources get descriptors but no public bytes. Structured payloads and
+logs are admitted before events. The limits are 25 MiB per uncompressed
+artifact, 32 MiB for the complete bundle, 128 payload files, and a 64 KiB
+manifest. This allows useful event streams above the old 8 MiB bundle limit.
+
+The backward-compatible default remains v1. It writes `manifest.json`, one
+`workflow-run.json`, and only inventoried, nonempty UTF-8 `stdout`, `stderr`,
+and Review `diff` files. Raw Pi `events.jsonl` is represented by digest, size,
+line count, and event counts but is not copied. Its limits remain 1 MiB per
+included file and 8 MiB total.
+
+Both formats reject private-key headers, URL credentials, and common
+authorization, cloud-secret, token, password, and API-key forms. Export is
+deterministic for unchanged evidence. It stages beside the destination and
+atomically renames the complete directory; refusal leaves no destination.
+Success prints an `exported` JSON result and exits zero. Invalid or unsealed
+evidence prints `invalid_run` and exits one; missing direct-Run identity exits
+two. The exporter writes no datastore state, performs no network activity, and
+does not invoke an agent.
 
 ## Attempt Executor
 

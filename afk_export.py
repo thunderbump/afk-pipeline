@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import math
 import os
 import re
 import shutil
@@ -27,6 +28,8 @@ MAX_INCLUDED_BYTES = 1024 * 1024
 MAX_EVENTS_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_FILES = 128
 MAX_BUNDLE_BYTES = 8 * 1024 * 1024
+V2_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
+V2_MAX_BUNDLE_BYTES = 32 * 1024 * 1024
 MAX_MANIFEST_BYTES = 64 * 1024
 EVENT_TYPES = {
     "session",
@@ -81,7 +84,14 @@ class ExportUsageError(ExportError):
     pass
 
 
-def export_run(source_path, destination_path, project=None, run_id=None, bead_id=None):
+def export_run(
+    source_path,
+    destination_path,
+    project=None,
+    run_id=None,
+    bead_id=None,
+    schema_version=1,
+):
     source_input = Path(source_path).absolute()
     destination_input = Path(destination_path).absolute()
     require_directory(source_input)
@@ -97,8 +107,16 @@ def export_run(source_path, destination_path, project=None, run_id=None, bead_id
         or destination in source.parents
     ):
         raise ExportError("source and destination must not overlap")
-    observed = load_source(source, project, run_id, bead_id)
-    record, payloads = normalize_run(observed)
+    if schema_version not in {1, 2}:
+        raise ExportUsageError("unsupported Publication Bundle schema")
+    observed = (
+        load_source(source, project, run_id, bead_id)
+        if schema_version == 1
+        else load_source_v2(source, project, run_id, bead_id)
+    )
+    record, payloads = (
+        normalize_run(observed) if schema_version == 1 else normalize_run_v2(observed)
+    )
     workflow = encode_json(record)
     if len(workflow) > MAX_INCLUDED_BYTES:
         raise ExportError("normalized Run exceeds bundle limits")
@@ -111,16 +129,15 @@ def export_run(source_path, destination_path, project=None, run_id=None, bead_id
     ]
     manifest = encode_json(
         {
-            "schema_version": 1,
+            "schema_version": schema_version,
             "kind": "afk-workflow-run",
             "identity": observed["identity"],
             "files": inventory,
         }
     )
-    if (
-        len(manifest) > MAX_MANIFEST_BYTES
-        or len(manifest) + sum(map(len, payloads.values())) > MAX_BUNDLE_BYTES
-    ):
+    if len(manifest) > MAX_MANIFEST_BYTES or len(manifest) + sum(
+        map(len, payloads.values())
+    ) > (MAX_BUNDLE_BYTES if schema_version == 1 else V2_MAX_BUNDLE_BYTES):
         raise ExportError("bundle exceeds admission limits")
     stage = Path(tempfile.mkdtemp(prefix=".afk-export-", dir=destination.parent))
     try:
@@ -133,11 +150,145 @@ def export_run(source_path, destination_path, project=None, run_id=None, bead_id
         if stage.exists():
             shutil.rmtree(stage)
     return {
-        "schema_version": 1,
+        "schema_version": schema_version,
         "outcome": "exported",
         "identity": observed["identity"],
         "destination": str(destination),
     }
+
+
+def load_source_v2(source, project, run_id, bead_id):
+    """Load either a terminal Coordinator Run or a terminal Preflight pause."""
+    preparation_path = source / "preparation.json"
+    if not preparation_path.exists() and not preparation_path.is_symlink():
+        observed = load_source(source, project, run_id, bead_id)
+        observed["run_root"] = source
+        observed["preflight"] = None
+        return observed
+
+    preparation = read_json(preparation_path)
+    if preparation.get("preparation_status") != "paused":
+        observed = load_source(source, project, run_id, bead_id)
+        observed["run_root"] = source
+        observed["preflight"] = load_optional_preflight(source, preparation)
+        return observed
+
+    # A pause is a terminal Run in its own right.  In particular, an empty
+    # Coordinator directory is evidence of absence, not missing history.
+    required = {
+        "schema_version",
+        "run",
+        "bead",
+        "project",
+        "repository",
+        "timestamps",
+        "preparation_status",
+        "preflight",
+        "coordinator",
+        "errors",
+    }
+    if not isinstance(preparation, dict) or set(preparation) != required:
+        raise ExportError("invalid paused Run Preparer evidence")
+    if preparation.get("schema_version") != 1 or preparation.get("errors") != []:
+        raise ExportError("invalid paused Run Preparer evidence")
+    run, project_record, bead = (
+        preparation.get("run"),
+        preparation.get("project"),
+        preparation.get("bead"),
+    )
+    if (
+        not exact_object(run, {"id", "artifact_root"})
+        or Path(run["artifact_root"]).resolve() != source.resolve()
+        or not exact_object(project_record, {"slug"})
+        or not exact_object(bead, {"id"})
+    ):
+        raise ExportError("invalid paused Run identity")
+    identity = validate_identity(project_record["slug"], run["id"])
+    validate_public_identity(bead["id"], SAFE_ID, "prepared Bead")
+    assert_identity(project, identity["project"], "project")
+    assert_identity(run_id, identity["run_id"], "run ID")
+    assert_identity(bead_id, bead["id"], "Bead ID")
+    timestamps = preparation.get("timestamps")
+    if not isinstance(timestamps, dict) or not isinstance(
+        timestamps.get("finished_at"), str
+    ):
+        raise ExportError("paused Run is not terminal")
+    coordinator_facts = preparation.get("coordinator")
+    if (
+        not isinstance(coordinator_facts, dict)
+        or coordinator_facts.get("status") != "not_started"
+        or coordinator_facts.get("exit_code") is not None
+        or coordinator_facts.get("outcome") is not None
+        or coordinator_facts.get("decision") is not None
+    ):
+        raise ExportError("paused Run has Coordinator evidence")
+    coordinator = source / "coordinator"
+    require_directory(coordinator)
+    if any(coordinator.iterdir()):
+        raise ExportError("paused Run has Coordinator history")
+    assignment = validate_assignment(read_json(source / "assignment.json"))
+    request = validate_request(read_json(source / "coordinator-request.json"))
+    assignment_bead = (
+        assignment.get("source", {}).get("id")
+        if assignment.get("source", {}).get("kind") == "bead"
+        else None
+    )
+    preflight = load_optional_preflight(source, preparation)
+    if (
+        assignment_bead != bead["id"]
+        or preflight is None
+        or preflight["input"]["source"] != {"kind": "bead", "id": bead["id"]}
+        or preflight["output"]["decision"] != "pause"
+    ):
+        raise ExportError("paused Run lacks a terminal Preflight pause")
+    redactions = {
+        str(source.resolve()),
+        assignment["workspace"],
+        run["artifact_root"],
+        preparation["repository"]["path"],
+        preparation["repository"]["worktree"],
+    }
+    return {
+        "identity": identity,
+        "bead_id": bead["id"],
+        "assignment": assignment,
+        "request": request,
+        "state": None,
+        "output": None,
+        "coordinator": coordinator,
+        "redactions": {
+            item
+            for item in redactions
+            if isinstance(item, str) and item.startswith("/")
+        },
+        "run_root": source,
+        "preflight": preflight,
+        "preparation": preparation,
+    }
+
+
+def load_optional_preflight(source, preparation):
+    if "preflight" not in preparation:
+        return None
+    preflight_input = validate_preflight_input(
+        read_json(source / "preflight-input.json")
+    )
+    preflight_output = validate_preflight_output(
+        read_json(source / "preflight" / "output.json"), preflight_input
+    )
+    facts = preparation["preflight"]
+    if (
+        not isinstance(facts, dict)
+        or facts.get("directory") != "preflight"
+        or facts.get("result") != "preflight/output.json"
+        or facts.get("status") != "completed"
+        or facts.get("exit_code") != 0
+        or facts.get("outcome") != "completed"
+        or facts.get("decision") != preflight_output["decision"]
+        or preflight_output["outcome"] != "completed"
+    ):
+        raise ExportError("invalid prepared Preflight evidence")
+    return {"input": preflight_input, "output": preflight_output}
 
 
 def load_source(source, project, run_id, bead_id):
@@ -308,7 +459,267 @@ def validate_preparer_terminal(preparation, output):
         raise ExportError("Run Preparer status disagrees with Coordinator")
 
 
-def normalize_run(observed):
+def normalize_run_v2(observed):
+    """Create the v2 semantic record and its sanitized public artifacts."""
+    if observed["state"] is None:
+        preflight = sanitize_json_value(
+            observed["preflight"]["output"], observed["redactions"]
+        )[0]
+        record = {
+            "schema_version": 2,
+            "identity": observed["identity"],
+            "bead": {"id": observed["bead_id"]},
+            "objective": bounded_text(
+                observed["assignment"]["objective"], observed["redactions"]
+            ),
+            "response_limit": observed["request"]["max_responses"],
+            "status": "paused",
+            "terminal": {"stage": "preflight", "decision": "pause"},
+            "history": [],
+            "evidence": [],
+            "preflight": {
+                "outcome": preflight["outcome"],
+                "decision": preflight["decision"],
+                "requests": preflight["requests"],
+            },
+        }
+    else:
+        record, _ = normalize_run(observed, include_evidence=False)
+        record["schema_version"] = 2
+        if observed.get("preflight"):
+            public, _ = sanitize_json_value(
+                observed["preflight"]["output"], observed["redactions"]
+            )
+            record["preflight"] = {
+                "outcome": public["outcome"],
+                "decision": public["decision"],
+                "requests": public["requests"],
+            }
+
+    descriptors, payloads = public_artifacts(observed)
+    record["artifacts"] = descriptors
+    return record, payloads
+
+
+def public_artifacts(observed):
+    candidates = artifact_candidates(observed)
+    descriptors = []
+    payloads = {}
+    # Structured records and human-readable logs are admitted before event
+    # streams.  Stable sorting makes the policy independent of filesystem order.
+    candidates.sort(key=lambda item: (item["priority"], item["source"]))
+    budget = V2_MAX_BUNDLE_BYTES - MAX_MANIFEST_BYTES - MAX_INCLUDED_BYTES
+    used = 0
+    for candidate in candidates:
+        descriptor, data = derive_public_artifact(candidate, observed["redactions"])
+        if data is not None and (
+            used + len(data) > budget or len(payloads) >= MAX_BUNDLE_FILES - 1
+        ):
+            descriptor.update(
+                state="unavailable",
+                public_bytes=0,
+                public_sha256=None,
+                sanitization_status="not_applicable",
+                unavailable_reason="bundle_limit",
+            )
+            descriptor.pop("path", None)
+            data = None
+        if data is not None:
+            used += len(data)
+            payloads[descriptor["path"]] = data
+        descriptors.append(descriptor)
+    return descriptors, payloads
+
+
+def artifact_candidates(observed):
+    root = observed["run_root"]
+    result = []
+    seen = set()
+
+    def add(relative, scope, kind, media_type, priority):
+        if relative in seen or not safe_relative(relative):
+            return
+        seen.add(relative)
+        result.append(
+            {
+                "root": root,
+                "source": relative,
+                "scope": scope,
+                "kind": kind,
+                "media_type": media_type,
+                "priority": priority,
+            }
+        )
+
+    # Only accepted Run-relative payload names are considered.  preparation.json
+    # is intentionally excluded: it contains host commands and private topology.
+    if observed["coordinator"].resolve() != root.resolve():
+        for name in ("assignment.json", "coordinator-request.json"):
+            add(name, "run", "json", "application/json", 0)
+    if observed.get("preflight"):
+        add("preflight-input.json", "preflight", "json", "application/json", 0)
+        add("preflight/input.json", "preflight", "json", "application/json", 0)
+        add("preflight/output.json", "preflight", "json", "application/json", 0)
+        add("preflight/stderr.log", "preflight", "log", "text/plain; charset=utf-8", 1)
+        add("preflight/events.jsonl", "preflight", "events", "application/x-ndjson", 2)
+    if observed["state"] is not None:
+        coordinator_prefix = (
+            ""
+            if observed["coordinator"].resolve() == root.resolve()
+            else "coordinator/"
+        )
+        for name in ("assignment.json", "input.json", "state.json", "output.json"):
+            add(
+                f"{coordinator_prefix}{name}",
+                "coordinator",
+                "json",
+                "application/json",
+                0,
+            )
+        for entry in observed["state"]["history"]:
+            if entry["outcome"] == "abandoned":
+                continue
+            base = f"{coordinator_prefix}{entry['directory']}"
+            scope = f"component:{entry['sequence']}:{entry['component']}"
+            add(f"{base}/output.json", scope, "json", "application/json", 0)
+            output = read_json(root / base / "output.json")
+            for kind, filename in sorted(output.get("artifacts", {}).items()):
+                if kind not in ARTIFACTS[entry["component"]] or not isinstance(
+                    filename, str
+                ):
+                    continue
+                artifact_kind = (
+                    "events"
+                    if kind == "events"
+                    else ("diff" if kind == "diff" else "log")
+                )
+                media = (
+                    "application/x-ndjson"
+                    if kind == "events"
+                    else (
+                        "text/x-diff; charset=utf-8"
+                        if kind == "diff"
+                        else "text/plain; charset=utf-8"
+                    )
+                )
+                add(
+                    f"{base}/{filename}",
+                    scope,
+                    artifact_kind,
+                    media,
+                    2 if kind == "events" else 1,
+                )
+    return result
+
+
+def derive_public_artifact(candidate, redactions):
+    source = candidate["source"]
+    base = {
+        "source": {"path": source},
+        "scope": candidate["scope"],
+        "kind": candidate["kind"],
+        "media_type": candidate["media_type"],
+    }
+    path = candidate["root"] / source
+    try:
+        facts = path.lstat()
+    except FileNotFoundError:
+        return unavailable_descriptor(base, "missing"), None
+    if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
+        return unavailable_descriptor(base, "unsafe_file"), None
+    if facts.st_size == 0:
+        return unavailable_descriptor(base, "empty"), None
+    if facts.st_size > V2_MAX_ARTIFACT_BYTES:
+        return unavailable_descriptor(base, "oversized"), None
+    try:
+        raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES)
+        text = decode_text(raw)
+        if candidate["kind"] == "json":
+            value = json.loads(text)
+            value, changed = sanitize_json_value(value, redactions)
+            public = encode_json(value)
+        elif candidate["kind"] == "events":
+            lines = []
+            changed = False
+            for line in text.splitlines():
+                if not line.strip():
+                    continue
+                value = json.loads(line)
+                value, item_changed = sanitize_json_value(value, redactions)
+                changed = changed or item_changed
+                lines.append(json.dumps(value, sort_keys=True, separators=(",", ":")))
+            if not lines:
+                return unavailable_descriptor(base, "empty"), None
+            public = ("\n".join(lines) + "\n").encode()
+        else:
+            sanitized = sanitize_public_text(text, redactions)
+            changed = sanitized != text
+            public = sanitized.encode()
+    except (
+        ExportError,
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        TypeError,
+        ValueError,
+    ):
+        return unavailable_descriptor(base, "unsafe_or_invalid"), None
+    destination = "artifacts/" + source
+    descriptor = {
+        **base,
+        "state": "published",
+        "public_bytes": len(public),
+        "public_sha256": digest(public),
+        "sanitization_status": "sanitized" if changed or public != raw else "unchanged",
+        "unavailable_reason": None,
+        "path": destination,
+    }
+    return descriptor, public
+
+
+def unavailable_descriptor(base, reason):
+    return {
+        **base,
+        "state": "unavailable",
+        "public_bytes": 0,
+        "public_sha256": None,
+        "sanitization_status": "not_applicable",
+        "unavailable_reason": reason,
+    }
+
+
+def sanitize_json_value(value, redactions):
+    if isinstance(value, str):
+        public = sanitize_public_text(value, redactions)
+        return public, public != value
+    if isinstance(value, list):
+        result, changed = [], False
+        for item in value:
+            public, item_changed = sanitize_json_value(item, redactions)
+            result.append(public)
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, dict):
+        result, changed = {}, False
+        for key in sorted(value):
+            if not isinstance(key, str):
+                raise ExportError("JSON object key is not text")
+            public_key = sanitize_public_text(key, redactions)
+            public, item_changed = sanitize_json_value(value[key], redactions)
+            if public_key in result:
+                raise ExportError("sanitized JSON keys collide")
+            result[public_key] = public
+            changed = changed or item_changed or public_key != key
+        return result, changed
+    if value is None or isinstance(value, (bool, int)):
+        return value, False
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ExportError("non-finite JSON number")
+        return value, False
+    raise ExportError("unsupported JSON value")
+
+
+def normalize_run(observed, include_evidence=True):
     state = observed["state"]
     directories = {entry["directory"]: entry["sequence"] for entry in state["history"]}
     history = []
@@ -327,11 +738,12 @@ def normalize_run(observed):
             normalized = normalize_component_output(
                 component, output, observed["redactions"]
             )
-            invocation_evidence, files = normalize_evidence(
-                entry, directory, output, observed["redactions"]
-            )
-            evidence.extend(invocation_evidence)
-            payloads.update(files)
+            if include_evidence:
+                invocation_evidence, files = normalize_evidence(
+                    entry, directory, output, observed["redactions"]
+                )
+                evidence.extend(invocation_evidence)
+                payloads.update(files)
         inputs = sorted(
             {
                 directories[source]
