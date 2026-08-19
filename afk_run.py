@@ -452,8 +452,10 @@ def execute_preflight(bead_id, artifact, preparation, preflight_input):
     outcome, decision, requests = preflight_terminal(
         artifact / "preflight" / "output.json", preflight_input
     )
-    if interrupted and outcome is None:
+    if interrupted:
         outcome = "interrupted"
+        decision = "pause"
+        requests = []
     preparation["preflight"].update(
         status=(
             "completed"

@@ -146,6 +146,26 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("operator_external -> operator handoff", result.stdout)
         self.assertIn("preflight terminal decision", result.stdout)
 
+    def test_repository_contained_43zn_32_proceeds_without_extra_authoring(self):
+        self.bead.update(
+            id="central-43zn.32",
+            title="Expose Coordinator terminal decision through Run Preparer",
+            acceptance_criteria=(
+                "Run Preparer records and prints stop versus exhausted from a "
+                "validated sealed Coordinator output; failed or malformed output "
+                "remains value-safe; exit behavior is explicitly decided and tested."
+            ),
+        )
+        self.write_bd()
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(preparation["preflight"]["decision"], "proceed")
+        self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
+
     def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
         self.preflight_scenario = "pause"
 
@@ -199,6 +219,40 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["coordinator"]["status"], "not_started")
         self.assertEqual(output["outcome"], "interrupted")
         self.assertEqual(output["requests"], [])
+
+    def test_interrupt_after_completed_output_still_projects_a_pause(self):
+        artifact = self.root / "interrupt-race"
+        (artifact / "preflight").mkdir(parents=True)
+        preparation = {
+            "preparation_status": "prepared",
+            "timestamps": {"finished_at": None},
+            "preflight": {"command": ["fixture"]},
+            "errors": [],
+        }
+        completed_request = {
+            "index": 1,
+            "request": "Repository tests pass.",
+            "category": "repository_validation",
+            "route": "repository validation",
+            "rationale": "The repository command proves this.",
+        }
+
+        with (
+            mock.patch("afk_run.run_foreground", return_value=(0, True)),
+            mock.patch(
+                "afk_run.preflight_terminal",
+                return_value=("completed", "proceed", [completed_request]),
+            ),
+        ):
+            code = afk_run.execute_preflight(
+                self.bead["id"], artifact, preparation, {"source": {}}
+            )
+
+        sealed = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(code, 130)
+        self.assertEqual(sealed["preparation_status"], "failed")
+        self.assertEqual(sealed["preflight"]["outcome"], "interrupted")
+        self.assertEqual(sealed["preflight"]["decision"], "pause")
 
     def test_missing_or_malformed_preflight_evidence_never_starts_coordinator(self):
         cases = ((None, "proceed"), ("Commit the result.", "invalid-classification"))
