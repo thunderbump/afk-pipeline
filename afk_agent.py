@@ -15,7 +15,19 @@ def write_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
     )
 
 
-def pi_command(configuration_name: str, system_prompt: str, tools: str) -> list[str]:
+def no_tool_pi_command(
+    configuration_name: str, system_prompt: str, model: str, thinking: str
+) -> list[str]:
+    return pi_command(configuration_name, system_prompt, None, model, thinking)
+
+
+def pi_command(
+    configuration_name: str,
+    system_prompt: str,
+    tools: str | None,
+    model: str = "gpt-5.6-sol",
+    thinking: str = "medium",
+) -> list[str]:
     configured = os.environ.get(configuration_name)
     if configured is not None:
         command = json.loads(configured)
@@ -34,15 +46,14 @@ def pi_command(configuration_name: str, system_prompt: str, tools: str) -> list[
         "--provider",
         "openai-codex",
         "--model",
-        "gpt-5.6-sol",
+        model,
         "--thinking",
-        "medium",
+        thinking,
         "--mode",
         "json",
         "--print",
         "--no-session",
-        "--tools",
-        tools,
+        *(["--tools", tools] if tools is not None else ["--no-tools"]),
         "--no-extensions",
         "--no-skills",
         "--no-prompt-templates",

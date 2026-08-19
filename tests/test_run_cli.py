@@ -12,6 +12,7 @@ from unittest import mock
 import afk_run
 
 ROOT = Path(__file__).parents[1]
+PREFLIGHT_FIXTURE = ROOT / "tests" / "fixture_preflight_agent.py"
 
 
 class RunPreparerCliTest(unittest.TestCase):
@@ -40,6 +41,7 @@ class RunPreparerCliTest(unittest.TestCase):
             "acceptance_criteria": "Commit the result.",
             "labels": ["project:fixture", "priority:normal"],
         }
+        self.preflight_scenario = "proceed"
         self.write_bd()
         self.config = self.root / "config.json"
         self.write_config()
@@ -61,6 +63,10 @@ class RunPreparerCliTest(unittest.TestCase):
         assignment = json.loads((artifact / "assignment.json").read_text())
         request = json.loads((artifact / "coordinator-request.json").read_text())
         preparation = json.loads((artifact / "preparation.json").read_text())
+        preflight_input = json.loads((artifact / "preflight-input.json").read_text())
+        preflight_output = json.loads(
+            (artifact / "preflight" / "output.json").read_text()
+        )
         self.assertEqual(bead["source"], {"kind": "bead", "id": "central-123"})
         self.assertEqual(assignment["source"], bead["source"])
         self.assertEqual(
@@ -70,6 +76,13 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["repository"]["base_commit"], self.base)
         self.assertEqual(preparation["project"]["slug"], "fixture")
         self.assertEqual(preparation["preparation_status"], "prepared")
+        self.assertEqual(preparation["preflight"]["status"], "completed")
+        self.assertEqual(preparation["preflight"]["decision"], "proceed")
+        self.assertEqual(preflight_input["source"], bead["source"])
+        self.assertEqual(
+            preflight_input["acceptance_criteria"], bead["acceptance_criteria"]
+        )
+        self.assertEqual(preflight_output["decision"], "proceed")
         self.assertEqual(preparation["coordinator"]["exit_code"], 1)
         self.assertEqual(preparation["coordinator"]["outcome"], "failed")
         self.assertIsNone(preparation["coordinator"]["decision"])
@@ -103,6 +116,67 @@ class RunPreparerCliTest(unittest.TestCase):
                 if p.is_file()
             ),
         )
+
+    def test_operator_evidence_pauses_before_coordinator_starts(self):
+        self.preflight_scenario = "pause"
+        self.bead["id"] = "central-6xx4.1"
+        self.bead["title"] = "Register Operations WebUI as a first-class Project"
+        self.bead["acceptance_criteria"] = (
+            "Tests, build, deployment and HTTP verification pass."
+        )
+        self.write_bd()
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        preflight = json.loads((artifact / "preflight" / "output.json").read_text())
+        self.assertEqual(preflight["decision"], "pause")
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["preflight"]["status"], "completed")
+        self.assertEqual(preparation["preflight"]["decision"], "pause")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+        self.assertIsNone(preparation["coordinator"]["exit_code"])
+        self.assertEqual(list((artifact / "coordinator").iterdir()), [])
+        self.assertFalse(any(artifact.rglob("01-attempt")))
+        self.assertIn("operator_external -> operator handoff", result.stdout)
+        self.assertIn("preflight terminal decision", result.stdout)
+
+    def test_missing_or_malformed_preflight_evidence_never_starts_coordinator(self):
+        cases = ((None, "proceed"), ("Commit the result.", "invalid-classification"))
+        for index, (acceptance, scenario) in enumerate(cases, 1):
+            with self.subTest(scenario=scenario):
+                if acceptance is None:
+                    self.bead.pop("acceptance_criteria")
+                else:
+                    self.bead["acceptance_criteria"] = acceptance
+                self.preflight_scenario = scenario
+                self.bead["id"] = f"central-preflight-{index}"
+                self.write_bd()
+
+                result = self.invoke(
+                    "run", self.bead["id"], "--config", str(self.config)
+                )
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                artifact = self.artifact_from(result.stdout)
+                preparation = json.loads((artifact / "preparation.json").read_text())
+                self.assertEqual(preparation["preparation_status"], "failed")
+                self.assertEqual(preparation["preflight"]["decision"], "pause")
+                self.assertEqual(preparation["coordinator"]["status"], "not_started")
+                self.assertEqual(list((artifact / "coordinator").iterdir()), [])
+
+    def test_validation_evidence_is_required_before_run_creation(self):
+        config = json.loads(self.config.read_text())
+        config["projects"]["fixture"]["validation"].pop("evidence")
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("validation is malformed", result.stderr)
+        self.assertFalse((self.root / "runs").exists())
 
     def test_configured_publication_exports_and_accepts_terminal_run(self):
         receipt = self.root / "publication-receipt.json"
@@ -595,6 +669,9 @@ class RunPreparerCliTest(unittest.TestCase):
 
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
+        )
         stdout = io.StringIO()
         with (
             mock.patch.dict(os.environ, environment, clear=True),
@@ -724,6 +801,7 @@ class RunPreparerCliTest(unittest.TestCase):
                     "base_ref": "HEAD",
                     "validation": {
                         "command": [sys.executable, "-c", "pass"],
+                        "evidence": "Repository tests and public behavior.",
                         "timeout_seconds": 5,
                     },
                 }
@@ -787,6 +865,9 @@ class RunPreparerCliTest(unittest.TestCase):
         environment["PI_DATABASE_URL"] = "TOP_SECRET-pi-database"
         environment["OPENAI_INTERNAL_PASSWORD"] = "TOP_SECRET-openai-password"
         environment["ANTHROPIC_INTERNAL_TOKEN"] = "TOP_SECRET-anthropic-token"
+        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
+        )
         return subprocess.run(
             [str(ROOT / "afk"), *arguments],
             cwd=self.root,

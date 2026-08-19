@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from afk_coordinate.contract import validate_output as validate_coordinator_output
+from afk_preflight.contract import validate_output as validate_preflight_output
 from afk_runtime import progress, run_command, seal_json, timestamp, write_json
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
@@ -149,9 +150,15 @@ def run(bead_id, config_path):
         request = {
             "schema_version": 1,
             "assignment_path": str(assignment_path),
-            "validation": project["validation"],
+            "validation": {
+                "command": project["validation"]["command"],
+                "timeout_seconds": project["validation"]["timeout_seconds"],
+            },
             **config["coordinator"],
         }
+        preflight_request = acceptance_preflight(
+            source_record, project["validation"], config["coordinator"]
+        )
         started = timestamp()
         preparation = {
             "schema_version": 1,
@@ -171,6 +178,21 @@ def run(bead_id, config_path):
                 "finished_at": None,
             },
             "preparation_status": "preparing",
+            "preflight": {
+                "command": [
+                    sys.executable,
+                    "-m",
+                    "afk_preflight",
+                    str(artifact / "preflight-input.json"),
+                    str(artifact / "preflight"),
+                ],
+                "directory": "preflight",
+                "result": "preflight/output.json",
+                "status": "not_started",
+                "exit_code": None,
+                "outcome": None,
+                "decision": None,
+            },
             "coordinator": {
                 "command": [
                     sys.executable,
@@ -200,10 +222,12 @@ def run(bead_id, config_path):
         open_fds.append(artifact_fd)
         artifact_io = Path(f"/proc/self/fd/{artifact_fd}")
         artifact_owned = True
+        (artifact_io / "preflight").mkdir()
         (artifact_io / "coordinator").mkdir()
         seal_json(artifact_io / "preparation.json", preparation)
         write_json(artifact_io / "bead.json", source_record)
         write_json(artifact_io / "assignment.json", assignment)
+        write_json(artifact_io / "preflight-input.json", preflight_request)
         write_json(artifact_io / "coordinator-request.json", request)
         progress(f"creating prepared worktree for Bead {bead_id} at {worktree}")
         require_identity(worktree.parent, worktree_parent_fd, "worktree parent")
@@ -241,7 +265,7 @@ def run(bead_id, config_path):
         require_identity(worktree, worktree_fd, "worktree destination")
         preparation["preparation_status"] = "prepared"
         preparation["timestamps"]["prepared_at"] = timestamp()
-        preparation["coordinator"]["status"] = "running"
+        preparation["preflight"]["status"] = "running"
         seal_json(artifact_io / "preparation.json", preparation)
         # Revalidation above is the handoff boundary. Later path replacement by
         # an actor that ignores these locks is outside the local-host contract.
@@ -249,6 +273,79 @@ def run(bead_id, config_path):
         open_fds.clear()
         leases.clear()
         artifact_io = artifact
+        progress(f"starting acceptance-evidence preflight for Bead {bead_id}")
+        (artifact / "preflight").rmdir()
+        try:
+            completed = subprocess.run(
+                preparation["preflight"]["command"],
+                cwd=Path(__file__).parent,
+                env=worker_environment(),
+                check=False,
+            )
+        except OSError:
+            (artifact_io / "preflight").mkdir(exist_ok=True)
+            preparation["preflight"].update(
+                status="failed", exit_code=None, outcome=None, decision="pause"
+            )
+            fail_preparation(
+                preparation,
+                "preflight_launch",
+                f"acceptance-evidence preflight could not be started for Bead {bead_id}",
+            )
+            seal_json(artifact_io / "preparation.json", preparation)
+            raise PreparationError(
+                f"acceptance-evidence preflight could not be started for Bead {bead_id}"
+            )
+        preflight_code = completed.returncode if completed.returncode >= 0 else 1
+        preflight_outcome, preflight_decision, preflight_requests = preflight_terminal(
+            artifact / "preflight" / "output.json", preflight_request
+        )
+        preparation["preflight"].update(
+            status=(
+                "completed"
+                if preflight_code == 0 and preflight_outcome == "completed"
+                else "failed"
+            ),
+            exit_code=preflight_code,
+            outcome=preflight_outcome,
+            decision=preflight_decision,
+        )
+        for classified in preflight_requests:
+            progress(
+                f"preflight request {classified['index']}: "
+                f"{classified['category']} -> {classified['route']}; "
+                f"request={json.dumps(classified['request'])}"
+            )
+        progress(
+            f"preflight terminal decision for Bead {bead_id}: "
+            f"{preflight_decision or 'pause'}"
+        )
+        if (
+            preflight_code != 0
+            or preflight_outcome != "completed"
+            or preflight_decision != "proceed"
+        ):
+            preparation["preparation_status"] = (
+                "paused"
+                if preflight_outcome == "completed" and preflight_decision == "pause"
+                else "failed"
+            )
+            preparation["timestamps"]["finished_at"] = timestamp()
+            if preparation["preparation_status"] == "failed":
+                preparation["errors"].append(
+                    {
+                        "category": "preflight",
+                        "message": (
+                            f"acceptance-evidence preflight failed for Bead {bead_id}"
+                        ),
+                    }
+                )
+            seal_json(artifact_io / "preparation.json", preparation)
+            print(f"artifact root: {artifact}", flush=True)
+            return 1
+
+        preparation["coordinator"]["status"] = "running"
+        seal_json(artifact_io / "preparation.json", preparation)
         progress(f"starting coordinator for Bead {bead_id}")
         # The unchanged coordinator contract owns creation of its run directory.
         # It has been present throughout preparation and is empty at this handoff.
@@ -365,6 +462,17 @@ def coordinator_terminal(output_path):
         return None, None
     decision = output.get("decision") if output["outcome"] == "completed" else None
     return output["outcome"], decision
+
+
+def preflight_terminal(output_path, preflight_input):
+    """Return only value-safe routing facts from a valid sealed Preflight output."""
+    try:
+        output = validate_preflight_output(
+            json.loads(output_path.read_text()), preflight_input
+        )
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
+        return None, "pause", []
+    return output["outcome"], output["decision"], output["requests"]
 
 
 def terminal_exit_code(coordinator_code, outcome, decision):
@@ -603,10 +711,18 @@ def validate_project(slug, value):
     validation = value["validation"]
     if not isinstance(validation, dict) or set(validation) != {
         "command",
+        "evidence",
         "timeout_seconds",
     }:
         raise PreparationError(f"project:{slug} validation is malformed")
     argv(validation["command"], f"project:{slug} validation command")
+    if (
+        not isinstance(validation["evidence"], str)
+        or not validation["evidence"].strip()
+    ):
+        raise PreparationError(
+            f"project:{slug} validation evidence must be nonempty text"
+        )
     positive(
         validation["timeout_seconds"], f"project:{slug} validation timeout_seconds"
     )
@@ -729,6 +845,42 @@ def safe_bead(bead_id, bead):
         if bead.get(name) is not None:
             result[name] = bead[name]
     return result
+
+
+def acceptance_preflight(bead, validation, coordinator):
+    return {
+        "schema_version": 1,
+        "source": bead["source"],
+        "title": bead["title"],
+        "acceptance_criteria": bead.get("acceptance_criteria"),
+        "evidence_catalog": [
+            {
+                "category": "repository_validation",
+                "route": "repository validation",
+                "can_prove": (
+                    f"{validation['evidence']} Exact argv: "
+                    f"{json.dumps(validation['command'])}."
+                ),
+            },
+            {
+                "category": "pipeline_evidence",
+                "route": "AFK committed change and Review",
+                "can_prove": (
+                    "Committed implementation facts, Git transition facts, and "
+                    "findings from AFK Review."
+                ),
+            },
+            {
+                "category": "operator_external",
+                "route": "operator handoff",
+                "can_prove": (
+                    "Host, deployment, live service, HTTP, and other checks outside "
+                    "the prepared repository Run."
+                ),
+            },
+        ],
+        "timeout_seconds": coordinator["agent_timeout_seconds"],
+    }
 
 
 def objective(bead):
@@ -899,6 +1051,7 @@ def fail_preparation(preparation, category, message):
 def worker_environment():
     allowed = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TERM", "TZ"}
     exact = {
+        "AFK_PREFLIGHT_AGENT_COMMAND",
         "AFK_REVIEW_AGENT_COMMAND",
         "AFK_ASSESS_AGENT_COMMAND",
         "AFK_RESPOND_AGENT_COMMAND",

@@ -17,6 +17,8 @@ from afk_coordinate.contract import (
     validate_output,
     validate_request,
 )
+from afk_preflight.contract import validate_input as validate_preflight_input
+from afk_preflight.contract import validate_output as validate_preflight_output
 
 SAFE_PROJECT = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -150,6 +152,16 @@ def load_source(source, project, run_id, bead_id):
         coordinator = source / "coordinator"
         root_assignment = read_json(source / "assignment.json")
         root_request = read_json(source / "coordinator-request.json")
+        if "preflight" in preparation:
+            preflight_input = validate_preflight_input(
+                read_json(source / "preflight-input.json")
+            )
+            preflight_output = validate_preflight_output(
+                read_json(source / "preflight" / "output.json"), preflight_input
+            )
+            validate_prepared_preflight(
+                preparation["preflight"], preflight_input, preflight_output
+            )
     else:
         if project is None or run_id is None:
             raise ExportUsageError(
@@ -226,7 +238,8 @@ def validate_preparation(source, value):
     }
     if (
         not isinstance(value, dict)
-        or set(value) != expected
+        or frozenset(value)
+        not in {frozenset(expected), frozenset(expected | {"preflight"})}
         or value.get("schema_version") != 1
     ):
         raise ExportError("invalid Run Preparer evidence")
@@ -261,6 +274,22 @@ def validate_preparation(source, value):
     ):
         raise ExportError("Run Preparer is not terminal")
     return identity, bead["id"]
+
+
+def validate_prepared_preflight(prepared, preflight_input, preflight_output):
+    if (
+        not isinstance(prepared, dict)
+        or prepared.get("directory") != "preflight"
+        or prepared.get("result") != "preflight/output.json"
+        or prepared.get("status") != "completed"
+        or prepared.get("exit_code") != 0
+        or prepared.get("outcome") != "completed"
+        or prepared.get("decision") != "proceed"
+        or preflight_output["outcome"] != "completed"
+        or preflight_output["decision"] != "proceed"
+        or preflight_output["source"] != preflight_input["source"]
+    ):
+        raise ExportError("invalid prepared Preflight evidence")
 
 
 def validate_preparer_terminal(preparation, output):

@@ -46,6 +46,7 @@ schema:
       "base_ref": "main",
       "validation": {
         "command": ["./scripts/validate"],
+        "evidence": "Ruff checks and the complete repository unit-test suite.",
         "timeout_seconds": 1800
       }
     }
@@ -77,11 +78,24 @@ Assignment path as their executable are rejected before any run destination is
 created. This lets a configurable worker read the frozen Bead objective while
 keeping Beads lookup in the trusted preparer.
 
+Each project validation mapping also requires bounded `evidence` text describing
+what its exact repository-owned command proves. Run Preparer uses that trusted
+metadata, the exact validation argv, existing AFK evidence capabilities, and the
+operator handoff boundary to build the acceptance-evidence catalog. The Bead
+does not supply or modify those capabilities.
+
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
-`coordinator-request.json`, versioned `preparation.json`, and `coordinator/`.
-Progress includes the artifact root and terminal Coordinator decision. For a
-validated sealed Coordinator output, `preparation.json` records `stop` or
+`preflight-input.json`, `coordinator-request.json`, versioned
+`preparation.json`, and reserved `preflight/` and `coordinator/` directories.
+After the worktree and inputs are frozen, Run Preparer invokes Acceptance
+Evidence Preflight before Coordinator. A valid `proceed` hands the unchanged
+Assignment to Coordinator. A valid `pause`, failed classifier, or malformed
+Preflight evidence exits `1`, retains request-level evidence, leaves Coordinator
+`not_started`, and starts no implementation Attempt. Progress prints every
+validated request category and route plus the terminal Preflight decision.
+
+For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that
 field null. The JSON evidence is authoritative. Preparation failures after
 artifact creation are sealed with categorized errors. If worktree creation
@@ -120,6 +134,67 @@ The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator
 selection without changing the Coordinator or worker contracts.
 
+## Acceptance Evidence Preflight
+
+Classify one Bead's requested acceptance evidence without running an
+implementation agent:
+
+```sh
+python3 -m afk_preflight preflight.json /new/result-directory
+```
+
+Input is one structured JSON object:
+
+```json
+{
+  "schema_version": 1,
+  "source": {"kind": "bead", "id": "central-123"},
+  "title": "Change the fixture",
+  "acceptance_criteria": "Tests pass and the deployment responds over HTTP.",
+  "evidence_catalog": [
+    {
+      "category": "repository_validation",
+      "route": "repository validation",
+      "can_prove": "Ruff and repository tests from ./scripts/validate."
+    },
+    {
+      "category": "pipeline_evidence",
+      "route": "AFK committed change and Review",
+      "can_prove": "Committed implementation and Review findings."
+    },
+    {
+      "category": "operator_external",
+      "route": "operator handoff",
+      "can_prove": "Deployment, live service, and HTTP behavior."
+    }
+  ],
+  "timeout_seconds": 900
+}
+```
+
+The default adapter invokes authenticated Pi with `gpt-5.6-luna`, low thinking,
+JSON event mode, and no tools, context files, extensions, skills, prompt
+templates, themes, or fallback model. A deterministic fixture may set
+`AFK_PREFLIGHT_AGENT_COMMAND` to an exact JSON argv array; Preflight appends its
+prompt as the final argument.
+
+The classifier splits free-form acceptance criteria into ordered requests. Each
+request contains bounded request text, one category, an exact catalog route or
+`human clarification`, and a rationale. Allowed categories are
+`repository_validation`, `pipeline_evidence`, `operator_external`,
+`unsupported`, and `ambiguous`. Inference cannot authorize execution: local
+contract validation derives `proceed` only when every request belongs to the
+first two categories. Every other valid classification returns `pause`.
+
+The new result directory contains accepted `input.json`, raw `events.jsonl`, raw
+`stderr.log`, and an atomically sealed `output.json`. Valid `proceed` and `pause`
+classifications both have `outcome: completed` and exit zero because the
+standalone classification succeeded. Launch, process, event-protocol, or
+structured-output failure seals a non-completed outcome with `decision: pause`
+and exits `1`. Invalid invocation or input exits `2` without replacing evidence.
+The component never accesses Beads, modifies a workspace, rewrites acceptance
+criteria, starts Coordinator, or runs validation.
+
 ## Workflow Run Exporter
 
 Export one sealed Run Preparer result to a new portable Publication Bundle:
@@ -142,8 +217,12 @@ and the destination itself must not. Source and destination may not overlap.
 
 The exporter validates the terminal Coordinator checkpoint and output, exact
 history topology, frozen Assignment and request, every referenced component
-result, and Run Preparer evidence when present. It writes `manifest.json`, one
-normalized `workflow-run.json`, and only inventoried, nonempty UTF-8 `stdout`,
+result, and Run Preparer evidence when present. New Run Preparer evidence must
+contain a completed `proceed` Preflight matching its sealed input and output;
+legacy sealed Runs without Preflight remain exportable. The v1 Publication
+Bundle does not yet project the Preflight ledger or raw Preflight artifacts.
+It writes `manifest.json`, one normalized `workflow-run.json`, and only
+inventoried, nonempty UTF-8 `stdout`,
 `stderr`, and Review `diff` files. Raw Pi `events.jsonl` is never copied; its
 bounded size, digest, line count, and event-type counts remain in the normalized
 record. Host paths, commands, component inputs, credentials in those excluded
