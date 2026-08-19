@@ -326,8 +326,10 @@ class ExportCliTests(unittest.TestCase):
             attempt = source / "coordinator/01-attempt"
             output_path = attempt / "output.json"
             output = json.loads(output_path.read_text())
+            output["artifacts"]["events"] = "declared-stderr"
             output["artifacts"]["stderr"] = "private/notes.txt"
             output_path.write_text(json.dumps(output))
+            (attempt / "declared-stderr").write_text('{"type":"message_end"}\n')
             (attempt / "private").mkdir()
             secret = b"private component material\n"
             (attempt / "private/notes.txt").write_bytes(secret)
@@ -337,14 +339,51 @@ class ExportCliTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             record = json.loads((destination / "workflow-run.json").read_text())
-            descriptors = {item["source"]["path"]: item for item in record["artifacts"]}
-            rejected = descriptors["coordinator/01-attempt/declared-stderr"]
+            descriptors = [
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
+            ]
+            self.assertEqual(len(descriptors), 2)
+            rejected = next(item for item in descriptors if item["kind"] == "log")
+            published = next(item for item in descriptors if item["kind"] == "events")
             self.assertEqual(rejected["state"], "unavailable")
             self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
+            self.assertEqual(published["state"], "published")
             public = b"".join(
                 path.read_bytes() for path in destination.rglob("*") if path.is_file()
             )
             self.assertNotIn(secret.rstrip(), public)
+
+    def test_v2_rejects_a_symlinked_preflight_invocation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            external = root / "external-preflight"
+            self.add_preflight(source, external)
+            (source / "preflight").symlink_to(external, target_is_directory=True)
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_successful_preflight_evidence_for_another_bead(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(
+                source, source / "preflight", bead_id="central-unrelated"
+            )
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_v2_applies_the_artifact_limit_after_canonicalization(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -514,6 +553,53 @@ class ExportCliTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def add_preflight(self, source, invocation, bead_id="central-example"):
+        preflight_input = {
+            "schema_version": 1,
+            "source": {"kind": "bead", "id": bead_id},
+            "title": "Portable publication",
+            "acceptance_criteria": "The export is safe.",
+            "evidence_catalog": [],
+            "timeout_seconds": 60,
+        }
+        preflight_output = {
+            "schema_version": 1,
+            "outcome": "completed",
+            "source": preflight_input["source"],
+            "decision": "proceed",
+            "started_at": "2026-08-19T00:00:00Z",
+            "finished_at": "2026-08-19T00:00:01Z",
+            "duration_seconds": 1,
+            "process": {"exit_code": 0, "signal": None},
+            "agent": {"status": "completed"},
+            "classifier": {
+                "kind": "inference",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-luna",
+                "status": "completed",
+            },
+            "requests": [],
+            "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+        }
+        preparation_path = source / "preparation.json"
+        preparation = json.loads(preparation_path.read_text())
+        preparation["preflight"] = {
+            "command": ["private"],
+            "directory": "preflight",
+            "result": "preflight/output.json",
+            "status": "completed",
+            "exit_code": 0,
+            "outcome": "completed",
+            "decision": "proceed",
+        }
+        preparation_path.write_text(json.dumps(preparation))
+        (source / "preflight-input.json").write_text(json.dumps(preflight_input))
+        invocation.mkdir()
+        (invocation / "input.json").write_text(json.dumps(preflight_input))
+        (invocation / "output.json").write_text(json.dumps(preflight_output))
+        (invocation / "events.jsonl").write_text('{"type":"message_end"}\n')
+        (invocation / "stderr.log").write_text("")
 
     def sealed_preparer(self, root):
         source = root / "source-run"

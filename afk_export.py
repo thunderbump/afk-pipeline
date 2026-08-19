@@ -170,9 +170,15 @@ def load_source_v2(source, project, run_id, bead_id):
     if not isinstance(preparation, dict):
         raise ExportError("invalid Run Preparer evidence")
     if preparation.get("preparation_status") != "paused":
+        if "preflight" in preparation:
+            require_directory(source / "preflight")
         observed = load_source(source, project, run_id, bead_id)
         observed["run_root"] = source
         observed["preflight"] = load_optional_preflight(source, preparation)
+        if observed["preflight"] is not None and observed["preflight"]["input"][
+            "source"
+        ] != {"kind": "bead", "id": observed["bead_id"]}:
+            raise ExportError("prepared Preflight Bead identity disagrees")
         return observed
 
     # A pause is a terminal Run in its own right.  In particular, an empty
@@ -272,6 +278,10 @@ def load_source_v2(source, project, run_id, bead_id):
 def load_optional_preflight(source, preparation):
     if "preflight" not in preparation:
         return None
+    # O_NOFOLLOW on evidence files does not protect against a symlinked parent.
+    # Establish that the accepted Preflight invocation itself is inside the Run
+    # before reading either its required evidence or optional artifacts.
+    require_directory(source / "preflight")
     preflight_input = validate_preflight_input(
         read_json(source / "preflight-input.json")
     )
@@ -543,10 +553,33 @@ def artifact_candidates(observed):
     result = []
     seen = set()
 
-    def add(relative, scope, kind, media_type, priority, unsafe_path=False):
-        if relative in seen or (not unsafe_path and not safe_relative(relative)):
+    def add(
+        relative,
+        scope,
+        kind,
+        media_type,
+        priority,
+        unsafe_path=False,
+        declaration=None,
+    ):
+        if not unsafe_path and not safe_relative(relative):
             return
-        seen.add(relative)
+        # A source filename is not a semantic identity: separate artifact
+        # declarations may intentionally name the same file, and a synthetic
+        # unsafe-path descriptor may collide with a real basename.  Deduplicate
+        # only truly identical candidates so every declaration remains visible.
+        identity = (
+            relative,
+            scope,
+            kind,
+            media_type,
+            priority,
+            unsafe_path,
+            declaration,
+        )
+        if identity in seen:
+            return
+        seen.add(identity)
         result.append(
             {
                 "root": root,
@@ -556,6 +589,7 @@ def artifact_candidates(observed):
                 "media_type": media_type,
                 "priority": priority,
                 "unsafe_path": unsafe_path,
+                "declaration": declaration,
             }
         )
 
@@ -622,7 +656,21 @@ def artifact_candidates(observed):
                     media,
                     2 if kind == "events" else 1,
                     unsafe_path=not safe_name,
+                    declaration=kind,
                 )
+
+    # Colliding published candidates need distinct bundle paths even though
+    # they correctly retain the same Run-relative source identity.
+    source_counts = {}
+    for candidate in result:
+        if not candidate["unsafe_path"]:
+            source_counts[candidate["source"]] = (
+                source_counts.get(candidate["source"], 0) + 1
+            )
+    for candidate in result:
+        if not candidate["unsafe_path"] and source_counts[candidate["source"]] > 1:
+            suffix = candidate.get("declaration") or candidate["kind"]
+            candidate["destination"] = f"artifacts/{candidate['source']}.{suffix}"
     return result
 
 
@@ -681,7 +729,7 @@ def derive_public_artifact(candidate, redactions):
         return unavailable_descriptor(base, "unsafe_or_invalid"), None
     if len(public) > V2_MAX_ARTIFACT_BYTES:
         return unavailable_descriptor(base, "oversized"), None
-    destination = "artifacts/" + source
+    destination = candidate.get("destination", "artifacts/" + source)
     descriptor = {
         **base,
         "state": "published",
