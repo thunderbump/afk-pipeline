@@ -27,16 +27,63 @@ class PreparationError(Exception):
 def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="afk",
-        usage="afk run <bead-id> [--config PATH]",
-        description="Prepare and locally execute one central Bead run.",
+        usage=(
+            "afk run <bead-id> [--config PATH] | "
+            "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"
+        ),
+        description="Prepare, execute, or export one AFK Workflow Run.",
     )
     subparsers = parser.add_subparsers(dest="operation", required=True)
     run_parser = subparsers.add_parser("run", help="prepare and execute a Bead")
     run_parser.add_argument("bead_id", metavar="<bead-id>")
     run_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    export_parser = subparsers.add_parser(
+        "export", help="export one sealed Run as a portable bundle"
+    )
+    export_parser.add_argument("source", type=Path, metavar="<sealed-run>")
+    export_parser.add_argument(
+        "destination", type=Path, metavar="<new-bundle-directory>"
+    )
+    export_parser.add_argument("--project")
+    export_parser.add_argument("--run-id")
+    export_parser.add_argument("--bead-id")
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
         return run(arguments.bead_id, arguments.config)
+    if arguments.operation == "export":
+        from afk_export import ExportError, ExportUsageError, export_run
+
+        try:
+            result = export_run(
+                arguments.source,
+                arguments.destination,
+                arguments.project,
+                arguments.run_id,
+                arguments.bead_id,
+            )
+        except ExportUsageError:
+            print(
+                json.dumps(
+                    {"schema_version": 1, "outcome": "rejected", "error": "usage"}
+                )
+            )
+            return 2
+        except (
+            ExportError,
+            OSError,
+            TypeError,
+            ValueError,
+            KeyError,
+            json.JSONDecodeError,
+        ):
+            print(
+                json.dumps(
+                    {"schema_version": 1, "outcome": "rejected", "error": "invalid_run"}
+                )
+            )
+            return 1
+        print(json.dumps(result))
+        return 0
     return 2
 
 

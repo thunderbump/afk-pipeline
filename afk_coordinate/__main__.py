@@ -8,7 +8,9 @@ from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     expected_input_sources,
     validate_checkpoint,
+    validate_component_output,
     validate_output,
+    validate_request,
 )
 from afk_runtime import progress, seal_json, write_json
 
@@ -147,42 +149,6 @@ def main():
     return finalize(run_directory, state)
 
 
-def validate_request(value):
-    expected = {
-        "schema_version",
-        "assignment_path",
-        "validation",
-        "agent_timeout_seconds",
-        "max_responses",
-    }
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise ValueError("coordinator input must use schema_version 1")
-    if set(value) != expected:
-        raise ValueError("coordinator input has unexpected fields")
-    assignment_path = value["assignment_path"]
-    if not isinstance(assignment_path, str) or not Path(assignment_path).is_absolute():
-        raise ValueError("assignment_path must be an absolute path")
-    validation = value["validation"]
-    if not isinstance(validation, dict) or set(validation) != {
-        "command",
-        "timeout_seconds",
-    }:
-        raise ValueError("validation must contain command and timeout_seconds")
-    command = validation["command"]
-    if (
-        not isinstance(command, list)
-        or not command
-        or not all(isinstance(argument, str) and argument for argument in command)
-    ):
-        raise ValueError("validation command must be a nonempty argv array")
-    positive_integer(value["validation"]["timeout_seconds"], "validation timeout")
-    positive_integer(value["agent_timeout_seconds"], "agent timeout")
-    limit = value["max_responses"]
-    if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
-        raise ValueError("max_responses must be a nonnegative integer")
-    return value
-
-
 def load_checkpoint(run_directory, request, assignment):
     if read_json(run_directory / "input.json") != request:
         raise ValueError("resume input does not match the accepted coordinator input")
@@ -190,11 +156,6 @@ def load_checkpoint(run_directory, request, assignment):
         raise ValueError("resume Assignment does not match the frozen Assignment")
     state = read_json(run_directory / "state.json")
     return validate_checkpoint(state)
-
-
-def positive_integer(value, name):
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
 
 
 def validate_run_location(run_directory, workspace):
@@ -282,25 +243,6 @@ def latest(state, *components):
         if item["component"] in components
         and item["outcome"] == COMPONENTS[item["component"]]["success"]
     )
-
-
-def validate_component_output(component, output):
-    specification = COMPONENTS[component]
-    if (
-        not isinstance(output, dict)
-        or output.get("schema_version") != 1
-        or output.get("outcome") not in specification["outcomes"]
-    ):
-        raise ValueError(f"invalid {component} output")
-    if component == "iteration" and output["outcome"] == specification["success"]:
-        policy = output.get("policy")
-        if not isinstance(policy, dict) or policy.get("decision") not in {
-            "stop",
-            "exhausted",
-            "continue",
-        }:
-            raise ValueError("invalid iteration output")
-    return output["outcome"]
 
 
 def advance(state, output):

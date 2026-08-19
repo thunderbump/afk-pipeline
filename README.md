@@ -93,6 +93,52 @@ The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator
 selection without changing the Coordinator or worker contracts.
 
+## Workflow Run Exporter
+
+Export one sealed Run Preparer result to a new portable Publication Bundle:
+
+```sh
+/path/to/afk-pipeline/afk export /path/to/sealed-run /path/to/new-bundle
+```
+
+A direct Coordinator directory does not carry Project or Run identity, so its
+caller must provide those facts explicitly:
+
+```sh
+/path/to/afk-pipeline/afk export /path/to/coordinator /path/to/new-bundle \
+  --project example --run-id run-123
+```
+
+`--project`, `--run-id`, and `--bead-id` act as assertions when sealed evidence
+already carries the corresponding identity. The destination parent must exist
+and the destination itself must not. Source and destination may not overlap.
+
+The exporter validates the terminal Coordinator checkpoint and output, exact
+history topology, frozen Assignment and request, every referenced component
+result, and Run Preparer evidence when present. It writes `manifest.json`, one
+normalized `workflow-run.json`, and only inventoried, nonempty UTF-8 `stdout`,
+`stderr`, and Review `diff` files. Raw Pi `events.jsonl` is never copied; its
+bounded size, digest, line count, and event-type counts remain in the normalized
+record. Host paths, commands, component inputs, credentials in those excluded
+fields, raw errors, empty logs, unknown artifacts, and unbounded files are not
+published. Before copying eligible text Evidence or normalized public text, the
+exporter redacts known Run/workspace paths and common absolute host-path forms
+from normalized public text and copied Evidence. It rejects private-key
+headers, URL credentials, and common authorization, cloud-secret, token,
+password, and API-key forms. Included Evidence sizes and digests describe the
+redacted public bytes. This fail-closed filter is an exporter boundary; the
+Operations WebUI's rendered-publication secret scan remains a separate defense.
+
+The bundle uses the v1 Operations Datastore limits: at most 128 payload files,
+1 MiB per included file, 8 MiB total, and a 64 KiB manifest. Source event logs
+are read with a separate 64 MiB observation cap. Export is deterministic for
+unchanged evidence. It stages beside the requested destination and renames the
+complete directory into place; handled refusal removes staging and leaves no
+destination. Success prints an `exported` JSON result and exits zero. Invalid or
+unsealed evidence prints a bounded `invalid_run` result and exits one; missing
+direct-Run identity exits two. The exporter writes no datastore state, performs
+no network activity, and does not invoke an agent.
+
 ## Attempt Executor
 
 Run one structured assignment in a prepared Git workspace and retain an
