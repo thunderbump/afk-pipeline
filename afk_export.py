@@ -658,7 +658,11 @@ def artifact_candidates(observed):
                 # publication allowlist is deliberately basename-only.  Keep
                 # rejected declarations visible under a synthetic safe source
                 # identity without ever resolving the declared path.
-                safe_name = Path(filename).name == filename and safe_relative(filename)
+                safe_name = (
+                    Path(filename).name == filename
+                    and safe_relative(filename)
+                    and safe_public_artifact_name(filename, observed["redactions"])
+                )
                 add(
                     f"{base}/{filename}" if safe_name else f"{base}/declared-{kind}",
                     scope,
@@ -716,7 +720,7 @@ def derive_public_artifact(candidate, redactions):
         facts = path.lstat()
     except FileNotFoundError:
         return unavailable_descriptor(base, "missing"), None
-    except OSError:
+    except (OSError, ValueError):
         return unavailable_descriptor(base, "unavailable"), None
     if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
         return unavailable_descriptor(base, "unsafe_file"), None
@@ -1244,10 +1248,19 @@ def require_boolean(value):
     return value
 
 
+def safe_public_artifact_name(value, redactions):
+    """Return whether a private declaration is safe to expose as metadata."""
+    try:
+        return sanitize_public_text(value, redactions) == value
+    except ExportError:
+        return False
+
+
 def safe_relative(value):
     return (
         isinstance(value, str)
         and value
+        and "\0" not in value
         and not value.startswith("/")
         and "\\" not in value
         and all(part not in {"", ".", ".."} for part in value.split("/"))

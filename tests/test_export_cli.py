@@ -474,6 +474,65 @@ class ExportCliTests(unittest.TestCase):
             )
             self.assertNotIn(secret.rstrip(), public)
 
+    def test_v2_does_not_publish_sensitive_component_artifact_names(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            attempt = source / "coordinator/01-attempt"
+            output_path = attempt / "output.json"
+            output = json.loads(output_path.read_text())
+            sensitive_name = "token=opaque-artifact-secret"
+            output["artifacts"]["stderr"] = sensitive_name
+            output_path.write_text(json.dumps(output))
+            private = b"retained private evidence\n"
+            (attempt / sensitive_name).write_bytes(private)
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            public = b"".join(
+                path.read_bytes() for path in destination.rglob("*") if path.is_file()
+            )
+            self.assertNotIn(sensitive_name.encode(), public)
+            self.assertNotIn(b"opaque-artifact-secret", public)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            rejected = next(
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
+                and item["kind"] == "log"
+            )
+            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
+            self.assertEqual((attempt / sensitive_name).read_bytes(), private)
+
+    def test_v2_seals_a_nul_component_artifact_name_as_unsafe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            attempt = source / "coordinator/01-attempt"
+            output_path = attempt / "output.json"
+            output = json.loads(output_path.read_text())
+            output["artifacts"]["stderr"] = "stderr\0private.log"
+            output_path.write_text(json.dumps(output))
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            rejected = next(
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
+                and item["kind"] == "log"
+            )
+            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
+            self.assertEqual(rejected["public_bytes"], 0)
+            self.assertNotIn("path", rejected)
+
     def test_v2_rejects_a_symlinked_preflight_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
