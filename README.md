@@ -236,11 +236,16 @@ media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
 UTF-8 logs, and diffs are written only as deterministic derived copies below
 `artifacts/`; private source files are never rewritten. Known host paths are
-redacted. Secret-like, invalid, non-UTF-8, empty, missing, unsafe, and oversized
-optional sources get descriptors but no public bytes. Structured payloads and
-logs are admitted before events. The limits are 25 MiB per uncompressed
-artifact, 32 MiB for the complete bundle, 128 payload files, and a 64 KiB
-manifest. This allows useful event streams above the old 8 MiB bundle limit.
+redacted, as are recognized credential forms. Artifact state is `downloadable`,
+`empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
+carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
+optional sources remain explicit without public bytes. Structured payloads and
+logs are admitted before events. The allowlist covers the frozen Bead,
+Assignment, Coordinator request, Preparation record, Preflight records,
+Coordinator records, and each Component Invocation input, output, and declared
+artifact. The limits are 25 MiB per uncompressed artifact, 32 MiB for the
+complete bundle, 128 payload files, and a 64 KiB manifest. This allows useful
+event streams above the old 8 MiB bundle limit.
 
 The backward-compatible default remains v1. It writes `manifest.json`, one
 `workflow-run.json`, and only inventoried, nonempty UTF-8 `stdout`, `stderr`,

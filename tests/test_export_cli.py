@@ -314,14 +314,27 @@ class ExportCliTests(unittest.TestCase):
             record = json.loads((destination / "workflow-run.json").read_text())
             self.assertEqual(record["schema_version"], 2)
             artifacts = {item["source"]["path"]: item for item in record["artifacts"]}
+            self.assertTrue(
+                {
+                    "bead.json",
+                    "assignment.json",
+                    "coordinator-request.json",
+                    "preparation.json",
+                    "coordinator/01-attempt/input.json",
+                    "coordinator/01-attempt/output.json",
+                }.issubset(artifacts)
+            )
             event = artifacts["coordinator/01-attempt/events.jsonl"]
-            self.assertEqual(event["state"], "published")
+            self.assertEqual(event["state"], "downloadable")
             self.assertGreater(event["public_bytes"], 8 * 1024 * 1024)
             self.assertEqual(event["sanitization_status"], "sanitized")
             self.assertEqual(events.read_bytes(), private)
             public = (destination / event["path"]).read_bytes()
             self.assertNotIn(b"/Users/private/work", public)
             self.assertEqual(hashlib.sha256(public).hexdigest(), event["public_sha256"])
+            empty = artifacts["coordinator/02-validation/stderr.log"]
+            self.assertEqual(empty["state"], "empty")
+            self.assertEqual(empty["unavailable_reason"], "empty")
 
     def test_v2_redacts_a_command_credential_value_from_assignment_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -352,6 +365,32 @@ class ExportCliTests(unittest.TestCase):
                 ["agent", "--token", "[redacted-secret]", "--print"],
             )
 
+    def test_v2_redacts_credentials_inside_downloadable_payloads_and_logs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            secret = "opaque-download-credential"
+            bead_path = source / "bead.json"
+            bead = json.loads(bead_path.read_text())
+            bead["description"] = f"token={secret}"
+            bead_path.write_text(json.dumps(bead))
+            log_path = source / "coordinator/02-validation/stdout.log"
+            log_path.write_text(f"validation token={secret}\n")
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            artifacts = {item["source"]["path"]: item for item in record["artifacts"]}
+            for source_path in ("bead.json", "coordinator/02-validation/stdout.log"):
+                descriptor = artifacts[source_path]
+                self.assertEqual(descriptor["state"], "downloadable")
+                self.assertEqual(descriptor["sanitization_status"], "sanitized")
+                public = (destination / descriptor["path"]).read_bytes()
+                self.assertIn(afk_export.REDACTED_SECRET.encode(), public)
+                self.assertNotIn(secret.encode(), public)
+
     def test_v2_assigns_globally_unique_public_artifact_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -374,7 +413,7 @@ class ExportCliTests(unittest.TestCase):
             paths = [
                 item["path"]
                 for item in record["artifacts"]
-                if item["state"] == "published"
+                if item["state"] == "downloadable"
             ]
             self.assertEqual(len(paths), len(set(paths)))
             manifest = json.loads((destination / "manifest.json").read_text())
@@ -466,9 +505,9 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(len(descriptors), 2)
             rejected = next(item for item in descriptors if item["kind"] == "log")
             published = next(item for item in descriptors if item["kind"] == "events")
-            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["state"], "unsafe")
             self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
-            self.assertEqual(published["state"], "published")
+            self.assertEqual(published["state"], "downloadable")
             public = b"".join(
                 path.read_bytes() for path in destination.rglob("*") if path.is_file()
             )
@@ -503,7 +542,7 @@ class ExportCliTests(unittest.TestCase):
                 if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
                 and item["kind"] == "log"
             )
-            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["state"], "unsafe")
             self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
             self.assertEqual((attempt / sensitive_name).read_bytes(), private)
 
@@ -528,7 +567,7 @@ class ExportCliTests(unittest.TestCase):
                 if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
                 and item["kind"] == "log"
             )
-            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["state"], "unsafe")
             self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
             self.assertEqual(rejected["public_bytes"], 0)
             self.assertNotIn("path", rejected)
@@ -555,7 +594,7 @@ class ExportCliTests(unittest.TestCase):
                 if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
                 and item["kind"] == "log"
             )
-            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["state"], "unsafe")
             self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
             self.assertNotIn(
                 private_name, (destination / "workflow-run.json").read_text()
@@ -613,9 +652,46 @@ class ExportCliTests(unittest.TestCase):
             record = json.loads((destination / "workflow-run.json").read_text())
             descriptors = {item["source"]["path"]: item for item in record["artifacts"]}
             rejected = descriptors["coordinator/01-attempt/events.jsonl"]
-            self.assertEqual(rejected["state"], "unavailable")
-            self.assertEqual(rejected["unavailable_reason"], "oversized")
+            self.assertEqual(rejected["state"], "oversized")
+            self.assertEqual(rejected["unavailable_reason"], "artifact_limit")
             self.assertEqual(rejected["public_bytes"], 0)
+
+    def test_v2_marks_an_artifact_that_does_not_fit_the_bundle_as_oversized(self):
+        candidates = [
+            {"priority": 0, "source": "first.json"},
+            {"priority": 0, "source": "second.json"},
+        ]
+        descriptors = [
+            {
+                "source": {"path": name},
+                "scope": "run",
+                "kind": "json",
+                "media_type": "application/json",
+                "state": "downloadable",
+                "public_bytes": 50,
+                "public_sha256": "a" * 64,
+                "sanitization_status": "unchanged",
+                "unavailable_reason": None,
+                "path": f"artifacts/{name}",
+            }
+            for name in ("first.json", "second.json")
+        ]
+        with (
+            mock.patch("afk_export.artifact_candidates", return_value=candidates),
+            mock.patch(
+                "afk_export.derive_public_artifact",
+                side_effect=[(descriptors[0], b"x" * 50), (descriptors[1], b"y" * 50)],
+            ),
+            mock.patch("afk_export.V2_MAX_BUNDLE_BYTES", 80),
+            mock.patch("afk_export.MAX_MANIFEST_BYTES", 0),
+            mock.patch("afk_export.MAX_INCLUDED_BYTES", 0),
+        ):
+            result, payloads = afk_export.public_artifacts({"redactions": set()})
+
+        self.assertEqual(result[0]["state"], "downloadable")
+        self.assertEqual(result[1]["state"], "oversized")
+        self.assertEqual(result[1]["unavailable_reason"], "bundle_limit")
+        self.assertEqual(set(payloads), {"artifacts/first.json"})
 
     def test_v2_malformed_preparation_is_a_normal_invalid_run_rejection(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -883,7 +959,15 @@ class ExportCliTests(unittest.TestCase):
             },
             "errors": [],
         }
+        bead = {
+            "id": "central-example",
+            "title": "Portable publication",
+            "description": "Export the retained Run.",
+            "acceptance_criteria": "The export is safe.",
+            "labels": ["project:operations-webui"],
+        }
         for path, value in {
+            source / "bead.json": bead,
             source / "assignment.json": assignment,
             source / "coordinator-request.json": request,
             source / "preparation.json": preparation,
@@ -1018,6 +1102,9 @@ class ExportCliTests(unittest.TestCase):
         for directory, output in outputs.items():
             result = coordinator / directory
             result.mkdir()
+            (result / "input.json").write_text(
+                json.dumps({"schema_version": 1, "fixture": directory})
+            )
             (result / "output.json").write_text(json.dumps(output))
             for kind, artifact in output.get("artifacts", {}).items():
                 value = ""

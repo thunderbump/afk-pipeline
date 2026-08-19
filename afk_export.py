@@ -56,12 +56,12 @@ ARTIFACTS = {
     "response": {"events", "stderr"},
 }
 INCLUDED_NAMES = {"stdout": "stdout.txt", "stderr": "stderr.txt", "diff": "diff.patch"}
-SENSITIVE_TEXT = (
+PRIVATE_KEY_TEXT = re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----")
+REDACTABLE_CREDENTIAL_TEXT = (
     re.compile(r"gh[pousr]_[A-Za-z0-9]{20,}"),
     re.compile(r"glpat-[A-Za-z0-9_-]{20,}"),
     re.compile(r"xox[baprs]-[A-Za-z0-9-]{10,}"),
     re.compile(r"AKIA[0-9A-Z]{16}"),
-    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"(?i)(?:password|token|secret|api[_-]?key)\s*[:=]\s*\S+"),
     re.compile(
         r"(?i)(?:AWS_SECRET_ACCESS_KEY|AWS_SESSION_TOKEN|AZURE_CLIENT_SECRET|"
@@ -71,6 +71,7 @@ SENSITIVE_TEXT = (
     re.compile(r"eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"),
     re.compile(r"[a-z][a-z0-9+.-]*://[^\s/:]+:[^\s/@]+@"),
 )
+SENSITIVE_TEXT = (*REDACTABLE_CREDENTIAL_TEXT, PRIVATE_KEY_TEXT)
 HOST_PATH = re.compile(
     r"(?<![A-Za-z0-9.])/(?:home|tmp|var|etc|opt|root|srv|mnt|usr|run|"
     r"Users|private|Library|Volumes|Applications|System)/[^\s'\"`]+"
@@ -542,7 +543,7 @@ def public_artifacts(observed):
             used + len(data) > budget or len(payloads) >= MAX_BUNDLE_FILES - 1
         ):
             descriptor.update(
-                state="unavailable",
+                state="oversized",
                 public_bytes=0,
                 public_sha256=None,
                 sanitization_status="not_applicable",
@@ -604,10 +605,15 @@ def artifact_candidates(observed):
             }
         )
 
-    # Only accepted Run-relative payload names are considered.  preparation.json
-    # is intentionally excluded: it contains host commands and private topology.
+    # Only accepted Run-relative payload names are considered.  Private paths and
+    # command credentials inside structured records are sanitized field by field.
     if observed["coordinator"].resolve() != root.resolve():
-        for name in ("assignment.json", "coordinator-request.json"):
+        for name in (
+            "bead.json",
+            "assignment.json",
+            "coordinator-request.json",
+            "preparation.json",
+        ):
             add(name, "run", "json", "application/json", 0)
     if observed.get("preflight"):
         add("preflight-input.json", "preflight", "json", "application/json", 0)
@@ -634,6 +640,7 @@ def artifact_candidates(observed):
                 continue
             base = f"{coordinator_prefix}{entry['directory']}"
             scope = f"component:{entry['sequence']}:{entry['component']}"
+            add(f"{base}/input.json", scope, "json", "application/json", 0)
             add(f"{base}/output.json", scope, "json", "application/json", 0)
             output = read_json(root / base / "output.json")
             for kind, filename in sorted(output.get("artifacts", {}).items()):
@@ -715,27 +722,27 @@ def derive_public_artifact(candidate, redactions):
         "media_type": candidate["media_type"],
     }
     if candidate.get("unsafe_path"):
-        return unavailable_descriptor(base, "unsafe_path"), None
+        return nondownloadable_descriptor(base, "unsafe", "unsafe_path"), None
     path = candidate["root"] / source
     try:
         facts = path.lstat()
     except FileNotFoundError:
-        return unavailable_descriptor(base, "missing"), None
+        return nondownloadable_descriptor(base, "unavailable", "missing"), None
     except (OSError, ValueError):
-        return unavailable_descriptor(base, "unavailable"), None
+        return nondownloadable_descriptor(base, "unavailable", "unavailable"), None
     if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
-        return unavailable_descriptor(base, "unsafe_file"), None
+        return nondownloadable_descriptor(base, "unsafe", "unsafe_file"), None
     if facts.st_size == 0:
-        return unavailable_descriptor(base, "empty"), None
+        return nondownloadable_descriptor(base, "empty", "empty"), None
     if facts.st_size > V2_MAX_ARTIFACT_BYTES:
-        return unavailable_descriptor(base, "oversized"), None
+        return nondownloadable_descriptor(base, "oversized", "artifact_limit"), None
     try:
         raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES, expected_facts=facts)
     except (ExportError, OSError):
         # Optional publication evidence may disappear, become unreadable, or
         # be replaced after lstat.  Seal that observation without rejecting a
         # valid terminal Run and without publishing bytes from the race.
-        return unavailable_descriptor(base, "unavailable"), None
+        return nondownloadable_descriptor(base, "unavailable", "unavailable"), None
     try:
         text = decode_text(raw)
         if candidate["kind"] == "json":
@@ -753,10 +760,10 @@ def derive_public_artifact(candidate, redactions):
                 changed = changed or item_changed
                 lines.append(json.dumps(value, sort_keys=True, separators=(",", ":")))
             if not lines:
-                return unavailable_descriptor(base, "empty"), None
+                return nondownloadable_descriptor(base, "empty", "empty"), None
             public = ("\n".join(lines) + "\n").encode()
         else:
-            sanitized = sanitize_public_text(text, redactions)
+            sanitized = sanitize_public_artifact_text(text, redactions)
             changed = sanitized != text
             public = sanitized.encode()
     except (
@@ -766,13 +773,13 @@ def derive_public_artifact(candidate, redactions):
         TypeError,
         ValueError,
     ):
-        return unavailable_descriptor(base, "unsafe_or_invalid"), None
+        return nondownloadable_descriptor(base, "unsafe", "unsafe_or_invalid"), None
     if len(public) > V2_MAX_ARTIFACT_BYTES:
-        return unavailable_descriptor(base, "oversized"), None
+        return nondownloadable_descriptor(base, "oversized", "artifact_limit"), None
     destination = candidate.get("destination", "artifacts/" + source)
     descriptor = {
         **base,
-        "state": "published",
+        "state": "downloadable",
         "public_bytes": len(public),
         "public_sha256": digest(public),
         "sanitization_status": "sanitized" if changed or public != raw else "unchanged",
@@ -782,10 +789,10 @@ def derive_public_artifact(candidate, redactions):
     return descriptor, public
 
 
-def unavailable_descriptor(base, reason):
+def nondownloadable_descriptor(base, state, reason):
     return {
         **base,
-        "state": "unavailable",
+        "state": state,
         "public_bytes": 0,
         "public_sha256": None,
         "sanitization_status": "not_applicable",
@@ -798,7 +805,7 @@ def sanitize_json_value(value, redactions):
         option = CREDENTIAL_OPTION_VALUE.fullmatch(value)
         if option:
             return f"{option.group(1)}={REDACTED_SECRET}", True
-        public = sanitize_public_text(value, redactions)
+        public = sanitize_public_artifact_text(value, redactions)
         return public, public != value
     if isinstance(value, list):
         result, changed = [], False
@@ -1098,11 +1105,26 @@ def normalize_evidence(entry, directory, output, redactions):
 
 
 def sanitize_public_text(text, redactions):
+    text = redact_public_paths(text, redactions)
+    if any(pattern.search(text) for pattern in SENSITIVE_TEXT):
+        raise ExportError("included Evidence contains sensitive text")
+    return text
+
+
+def sanitize_public_artifact_text(text, redactions):
+    """Derive public v2 text by redacting paths and replaceable credentials."""
+    text = redact_public_paths(text, redactions)
+    if PRIVATE_KEY_TEXT.search(text):
+        raise ExportError("artifact contains unsafe private key material")
+    for pattern in REDACTABLE_CREDENTIAL_TEXT:
+        text = pattern.sub(REDACTED_SECRET, text)
+    return text
+
+
+def redact_public_paths(text, redactions):
     for prefix in sorted(redactions, key=len, reverse=True):
         text = text.replace(prefix, "[redacted-path]")
     text = HOST_PATH.sub("[redacted-path]", text)
-    if any(pattern.search(text) for pattern in SENSITIVE_TEXT):
-        raise ExportError("included Evidence contains sensitive text")
     return text
 
 
