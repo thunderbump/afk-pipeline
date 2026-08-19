@@ -725,7 +725,7 @@ def derive_public_artifact(candidate, redactions):
     if facts.st_size > V2_MAX_ARTIFACT_BYTES:
         return unavailable_descriptor(base, "oversized"), None
     try:
-        raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES)
+        raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES, expected_facts=facts)
     except (ExportError, OSError):
         # Optional publication evidence may disappear, become unreadable, or
         # be replaced after lstat.  Seal that observation without rejecting a
@@ -1179,10 +1179,15 @@ def read_json(path):
     return json.loads(decode_text(read_bytes(path, MAX_JSON_BYTES)))
 
 
-def read_bytes(path, limit):
+def read_bytes(path, limit, expected_facts=None):
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
     try:
         facts = os.fstat(descriptor)
+        if expected_facts is not None and (
+            facts.st_dev != expected_facts.st_dev
+            or facts.st_ino != expected_facts.st_ino
+        ):
+            raise ExportError("artifact was replaced before being read")
         if not stat.S_ISREG(facts.st_mode) or facts.st_size > limit:
             raise ExportError("artifact is not a bounded regular file")
         data = bytearray()

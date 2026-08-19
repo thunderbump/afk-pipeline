@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -404,6 +405,38 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(descriptor["unavailable_reason"], "unavailable")
             self.assertEqual(descriptor["public_bytes"], 0)
             self.assertNotIn("path", descriptor)
+
+    def test_v2_seals_an_artifact_replaced_between_lstat_and_open(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            artifact = root / "events.jsonl"
+            original = b'{"type":"message_end","text":"original"}\n'
+            replacement = b'{"type":"message_end","text":"replacement"}\n'
+            artifact.write_bytes(original)
+            candidate = {
+                "root": root,
+                "source": "events.jsonl",
+                "scope": "component:1:attempt",
+                "kind": "events",
+                "media_type": "application/x-ndjson",
+            }
+            real_read_bytes = afk_export.read_bytes
+
+            def replace_then_read(path, limit, expected_facts=None):
+                replacement_path = root / "replacement.jsonl"
+                replacement_path.write_bytes(replacement)
+                os.replace(replacement_path, artifact)
+                return real_read_bytes(path, limit, expected_facts=expected_facts)
+
+            with mock.patch("afk_export.read_bytes", side_effect=replace_then_read):
+                descriptor, public = afk_export.derive_public_artifact(candidate, set())
+
+            self.assertIsNone(public)
+            self.assertEqual(descriptor["state"], "unavailable")
+            self.assertEqual(descriptor["unavailable_reason"], "unavailable")
+            self.assertEqual(descriptor["public_bytes"], 0)
+            self.assertNotIn("path", descriptor)
+            self.assertEqual(artifact.read_bytes(), replacement)
 
     def test_v2_rejects_unsafe_component_artifact_paths_explicitly(self):
         with tempfile.TemporaryDirectory() as temporary:
