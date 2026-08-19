@@ -30,6 +30,7 @@ MAX_BUNDLE_FILES = 128
 MAX_BUNDLE_BYTES = 8 * 1024 * 1024
 V2_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 V2_MAX_BUNDLE_BYTES = 32 * 1024 * 1024
+V2_MAX_ARTIFACT_NAME_BYTES = 255
 MAX_MANIFEST_BYTES = 64 * 1024
 EVENT_TYPES = {
     "session",
@@ -1251,8 +1252,11 @@ def require_boolean(value):
 def safe_public_artifact_name(value, redactions):
     """Return whether a private declaration is safe to expose as metadata."""
     try:
-        return sanitize_public_text(value, redactions) == value
-    except ExportError:
+        return (
+            len(value.encode()) <= V2_MAX_ARTIFACT_NAME_BYTES
+            and sanitize_public_text(value, redactions) == value
+        )
+    except (ExportError, UnicodeError):
         return False
 
 

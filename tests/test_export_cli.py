@@ -533,6 +533,38 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(rejected["public_bytes"], 0)
             self.assertNotIn("path", rejected)
 
+    def test_v2_seals_an_oversized_component_artifact_name_as_unsafe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            attempt = source / "coordinator/01-attempt"
+            output_path = attempt / "output.json"
+            output = json.loads(output_path.read_text())
+            private_name = "x" * (afk_export.V2_MAX_ARTIFACT_NAME_BYTES + 1)
+            output["artifacts"]["stderr"] = private_name
+            output_path.write_text(json.dumps(output))
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            rejected = next(
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "coordinator/01-attempt/declared-stderr"
+                and item["kind"] == "log"
+            )
+            self.assertEqual(rejected["state"], "unavailable")
+            self.assertEqual(rejected["unavailable_reason"], "unsafe_path")
+            self.assertNotIn(
+                private_name, (destination / "workflow-run.json").read_text()
+            )
+            self.assertLess(
+                (destination / "workflow-run.json").stat().st_size,
+                afk_export.MAX_INCLUDED_BYTES,
+            )
+
     def test_v2_rejects_a_symlinked_preflight_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
