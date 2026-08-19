@@ -1,9 +1,11 @@
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -42,6 +44,7 @@ class RunPreparerCliTest(unittest.TestCase):
             "labels": ["project:fixture", "priority:normal"],
         }
         self.preflight_scenario = "proceed"
+        self.preflight_command = None
         self.write_bd()
         self.config = self.root / "config.json"
         self.write_config()
@@ -143,6 +146,60 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("operator_external -> operator handoff", result.stdout)
         self.assertIn("preflight terminal decision", result.stdout)
 
+    def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
+        self.preflight_scenario = "pause"
+
+        first = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        first_artifact = self.artifact_from(first.stdout)
+        first_evidence = (first_artifact / "preparation.json").read_bytes()
+        second = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        second_artifact = self.artifact_from(second.stdout)
+
+        self.assertEqual((first.returncode, second.returncode), (1, 1))
+        self.assertNotEqual(first_artifact, second_artifact)
+        self.assertEqual(
+            (first_artifact / "preparation.json").read_bytes(), first_evidence
+        )
+        self.assertEqual(
+            json.loads((second_artifact / "preparation.json").read_text())[
+                "preparation_status"
+            ],
+            "paused",
+        )
+
+    def test_interrupt_during_preflight_seals_terminal_state(self):
+        marker = self.root / "preflight-child.pid"
+        self.preflight_command = [
+            sys.executable,
+            str(PREFLIGHT_FIXTURE),
+            "hang",
+            str(marker),
+        ]
+        process = self.invoke_async(
+            "run", self.bead["id"], "--config", str(self.config)
+        )
+        for _ in range(100):
+            if marker.exists():
+                break
+            time.sleep(0.05)
+        self.assertTrue(marker.exists(), "preflight classifier did not start")
+
+        process.send_signal(signal.SIGINT)
+        stdout, stderr = process.communicate(timeout=15)
+
+        self.assertEqual(process.returncode, 130, stderr)
+        artifact = self.artifact_from(stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        output = json.loads((artifact / "preflight" / "output.json").read_text())
+        self.assertEqual(preparation["preparation_status"], "failed")
+        self.assertEqual(preparation["preflight"]["status"], "failed")
+        self.assertEqual(preparation["preflight"]["exit_code"], 130)
+        self.assertEqual(preparation["preflight"]["outcome"], "interrupted")
+        self.assertEqual(preparation["preflight"]["decision"], "pause")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+        self.assertEqual(output["outcome"], "interrupted")
+        self.assertEqual(output["requests"], [])
+
     def test_missing_or_malformed_preflight_evidence_never_starts_coordinator(self):
         cases = ((None, "proceed"), ("Commit the result.", "invalid-classification"))
         for index, (acceptance, scenario) in enumerate(cases, 1):
@@ -176,6 +233,17 @@ class RunPreparerCliTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("validation is malformed", result.stderr)
+        self.assertFalse((self.root / "runs").exists())
+
+    def test_validation_evidence_must_be_bounded_before_run_creation(self):
+        config = json.loads(self.config.read_text())
+        config["projects"]["fixture"]["validation"]["evidence"] = "x" * 2001
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("bounded nonempty text", result.stderr)
         self.assertFalse((self.root / "runs").exists())
 
     def test_configured_publication_exports_and_accepts_terminal_run(self):
@@ -859,6 +927,19 @@ class RunPreparerCliTest(unittest.TestCase):
         path.chmod(0o755)
 
     def invoke(self, *arguments):
+        return subprocess.run(
+            [str(ROOT / "afk"), *arguments],
+            check=False,
+            **self.invocation_options(),
+        )
+
+    def invoke_async(self, *arguments):
+        return subprocess.Popen(
+            [str(ROOT / "afk"), *arguments],
+            **self.invocation_options(),
+        )
+
+    def invocation_options(self):
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
         environment["UNRELATED_CANARY"] = "TOP_SECRET-must-not-be-forwarded"
@@ -866,16 +947,16 @@ class RunPreparerCliTest(unittest.TestCase):
         environment["OPENAI_INTERNAL_PASSWORD"] = "TOP_SECRET-openai-password"
         environment["ANTHROPIC_INTERNAL_TOKEN"] = "TOP_SECRET-anthropic-token"
         environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
+            self.preflight_command
+            or [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
         )
-        return subprocess.run(
-            [str(ROOT / "afk"), *arguments],
-            cwd=self.root,
-            env=environment,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        return {
+            "cwd": self.root,
+            "env": environment,
+            "text": True,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+        }
 
     def artifact_from(self, stdout):
         line = next(

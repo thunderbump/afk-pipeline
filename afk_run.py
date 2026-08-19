@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import tempfile
@@ -14,7 +15,14 @@ from pathlib import Path
 
 from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_preflight.contract import validate_output as validate_preflight_output
-from afk_runtime import progress, run_command, seal_json, timestamp, write_json
+from afk_runtime import (
+    progress,
+    run_command,
+    seal_json,
+    terminate,
+    timestamp,
+    write_json,
+)
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -273,76 +281,12 @@ def run(bead_id, config_path):
         open_fds.clear()
         leases.clear()
         artifact_io = artifact
-        progress(f"starting acceptance-evidence preflight for Bead {bead_id}")
-        (artifact / "preflight").rmdir()
-        try:
-            completed = subprocess.run(
-                preparation["preflight"]["command"],
-                cwd=Path(__file__).parent,
-                env=worker_environment(),
-                check=False,
-            )
-        except OSError:
-            (artifact_io / "preflight").mkdir(exist_ok=True)
-            preparation["preflight"].update(
-                status="failed", exit_code=None, outcome=None, decision="pause"
-            )
-            fail_preparation(
-                preparation,
-                "preflight_launch",
-                f"acceptance-evidence preflight could not be started for Bead {bead_id}",
-            )
-            seal_json(artifact_io / "preparation.json", preparation)
-            raise PreparationError(
-                f"acceptance-evidence preflight could not be started for Bead {bead_id}"
-            )
-        preflight_code = completed.returncode if completed.returncode >= 0 else 1
-        preflight_outcome, preflight_decision, preflight_requests = preflight_terminal(
-            artifact / "preflight" / "output.json", preflight_request
+        preflight_code = execute_preflight(
+            bead_id, artifact, preparation, preflight_request
         )
-        preparation["preflight"].update(
-            status=(
-                "completed"
-                if preflight_code == 0 and preflight_outcome == "completed"
-                else "failed"
-            ),
-            exit_code=preflight_code,
-            outcome=preflight_outcome,
-            decision=preflight_decision,
-        )
-        for classified in preflight_requests:
-            progress(
-                f"preflight request {classified['index']}: "
-                f"{classified['category']} -> {classified['route']}; "
-                f"request={json.dumps(classified['request'])}"
-            )
-        progress(
-            f"preflight terminal decision for Bead {bead_id}: "
-            f"{preflight_decision or 'pause'}"
-        )
-        if (
-            preflight_code != 0
-            or preflight_outcome != "completed"
-            or preflight_decision != "proceed"
-        ):
-            preparation["preparation_status"] = (
-                "paused"
-                if preflight_outcome == "completed" and preflight_decision == "pause"
-                else "failed"
-            )
-            preparation["timestamps"]["finished_at"] = timestamp()
-            if preparation["preparation_status"] == "failed":
-                preparation["errors"].append(
-                    {
-                        "category": "preflight",
-                        "message": (
-                            f"acceptance-evidence preflight failed for Bead {bead_id}"
-                        ),
-                    }
-                )
-            seal_json(artifact_io / "preparation.json", preparation)
+        if preflight_code != 0:
             print(f"artifact root: {artifact}", flush=True)
-            return 1
+            return preflight_code
 
         preparation["coordinator"]["status"] = "running"
         seal_json(artifact_io / "preparation.json", preparation)
@@ -437,6 +381,13 @@ def run(bead_id, config_path):
     except KeyboardInterrupt:
         if artifact_owned:
             if preparation is not None and not coordinator_sealed:
+                if preparation["preflight"]["status"] == "running":
+                    preparation["preflight"].update(
+                        status="failed",
+                        exit_code=130,
+                        outcome="interrupted",
+                        decision="pause",
+                    )
                 try:
                     (artifact_io / "coordinator").mkdir(exist_ok=True)
                 except OSError:
@@ -473,6 +424,100 @@ def preflight_terminal(output_path, preflight_input):
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         return None, "pause", []
     return output["outcome"], output["decision"], output["requests"]
+
+
+def execute_preflight(bead_id, artifact, preparation, preflight_input):
+    """Run and record the complete pre-Coordinator acceptance gate."""
+    progress(f"starting acceptance-evidence preflight for Bead {bead_id}")
+    (artifact / "preflight").rmdir()
+    try:
+        preflight_code, interrupted = run_foreground(
+            preparation["preflight"]["command"], Path(__file__).parent
+        )
+    except OSError:
+        (artifact / "preflight").mkdir(exist_ok=True)
+        preparation["preflight"].update(
+            status="failed", exit_code=None, outcome=None, decision="pause"
+        )
+        fail_preparation(
+            preparation,
+            "preflight_launch",
+            f"acceptance-evidence preflight could not be started for Bead {bead_id}",
+        )
+        seal_json(artifact / "preparation.json", preparation)
+        raise PreparationError(
+            f"acceptance-evidence preflight could not be started for Bead {bead_id}"
+        )
+
+    outcome, decision, requests = preflight_terminal(
+        artifact / "preflight" / "output.json", preflight_input
+    )
+    if interrupted and outcome is None:
+        outcome = "interrupted"
+    preparation["preflight"].update(
+        status=(
+            "completed"
+            if not interrupted and preflight_code == 0 and outcome == "completed"
+            else "failed"
+        ),
+        exit_code=130 if interrupted else preflight_code,
+        outcome=outcome,
+        decision=decision,
+    )
+    for classified in requests:
+        progress(
+            f"preflight request {classified['index']}: "
+            f"{classified['category']} -> {classified['route']}; "
+            f"request={json.dumps(classified['request'])}"
+        )
+    progress(f"preflight terminal decision for Bead {bead_id}: {decision}")
+    if not interrupted and preflight_code == 0 and outcome == "completed":
+        if decision == "proceed":
+            return 0
+        preparation["preparation_status"] = "paused"
+        preparation["timestamps"]["finished_at"] = timestamp()
+        seal_json(artifact / "preparation.json", preparation)
+        return 1
+
+    preparation["preparation_status"] = "failed"
+    preparation["timestamps"]["finished_at"] = timestamp()
+    preparation["errors"].append(
+        {
+            "category": "interrupted" if interrupted else "preflight",
+            "message": (
+                f"acceptance-evidence preflight "
+                f"{'was interrupted' if interrupted else 'failed'} for Bead {bead_id}"
+            ),
+        }
+    )
+    seal_json(artifact / "preparation.json", preparation)
+    return 130 if interrupted else 1
+
+
+def run_foreground(command, cwd):
+    """Run one visible child and let Ctrl-C reach its durable shutdown path."""
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=worker_environment(),
+        start_new_session=True,
+    )
+    try:
+        return normalize_exit_code(process.wait()), False
+    except KeyboardInterrupt:
+        try:
+            os.killpg(process.pid, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+        try:
+            process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            terminate(process)
+        return 130, True
+
+
+def normalize_exit_code(exit_code):
+    return exit_code if exit_code >= 0 else 1
 
 
 def terminal_exit_code(coordinator_code, outcome, decision):
@@ -719,9 +764,10 @@ def validate_project(slug, value):
     if (
         not isinstance(validation["evidence"], str)
         or not validation["evidence"].strip()
+        or len(validation["evidence"]) > 2000
     ):
         raise PreparationError(
-            f"project:{slug} validation evidence must be nonempty text"
+            f"project:{slug} validation evidence must be bounded nonempty text"
         )
     positive(
         validation["timeout_seconds"], f"project:{slug} validation timeout_seconds"
@@ -848,7 +894,7 @@ def safe_bead(bead_id, bead):
 
 
 def acceptance_preflight(bead, validation, coordinator):
-    return {
+    request = {
         "schema_version": 1,
         "source": bead["source"],
         "title": bead["title"],
@@ -881,6 +927,9 @@ def acceptance_preflight(bead, validation, coordinator):
         ],
         "timeout_seconds": coordinator["agent_timeout_seconds"],
     }
+    if any(len(item["can_prove"]) > 4000 for item in request["evidence_catalog"]):
+        raise PreparationError("configured acceptance-evidence catalog is too large")
+    return request
 
 
 def objective(bead):

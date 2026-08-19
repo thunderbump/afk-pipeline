@@ -91,9 +91,18 @@ artifact root. It contains value-safe `bead.json`, `assignment.json`,
 After the worktree and inputs are frozen, Run Preparer invokes Acceptance
 Evidence Preflight before Coordinator. A valid `proceed` hands the unchanged
 Assignment to Coordinator. A valid `pause`, failed classifier, or malformed
-Preflight evidence exits `1`, retains request-level evidence, leaves Coordinator
-`not_started`, and starts no implementation Attempt. Progress prints every
-validated request category and route plus the terminal Preflight decision.
+Preflight evidence exits `1`, leaves Coordinator `not_started`, and starts no
+implementation Attempt. A valid `pause` retains its classified request ledger.
+A failed classifier or malformed result retains the accepted input, raw agent
+streams, and sealed pause outcome without claiming a valid request ledger.
+Progress prints every validated request category and route plus the terminal
+Preflight decision.
+
+A paused or failed Preflight is terminal for that Run; Run Preparer never
+reclassifies or resumes it in place. After correcting the Bead, configuration,
+or transient failure, invoke `afk run <bead-id>` again. The retry creates a new
+Run ID, worktree, and branch while retaining the earlier Run and worktree for
+inspection.
 
 For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that

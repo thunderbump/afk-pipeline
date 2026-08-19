@@ -182,8 +182,8 @@ def validate_output(
             raise ValueError("completed preflight agent must be completed")
         if preflight_decision != decision(requests):
             raise ValueError("preflight output decision does not match its requests")
-    elif preflight_decision != "pause":
-        raise ValueError("noncompleted preflight must pause")
+    elif preflight_decision != "pause" or requests:
+        raise ValueError("noncompleted preflight must pause without a request ledger")
     return value
 
 
