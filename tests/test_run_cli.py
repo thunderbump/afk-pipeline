@@ -167,11 +167,17 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
 
     def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
+        receipt = self.root / "paused-retry-publication-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
         self.preflight_scenario = "pause"
 
         first = self.invoke("run", self.bead["id"], "--config", str(self.config))
         first_artifact = self.artifact_from(first.stdout)
         first_evidence = (first_artifact / "preparation.json").read_bytes()
+        first_publication = (first_artifact / "publication.json").read_bytes()
         second = self.invoke("run", self.bead["id"], "--config", str(self.config))
         second_artifact = self.artifact_from(second.stdout)
 
@@ -181,10 +187,22 @@ class RunPreparerCliTest(unittest.TestCase):
             (first_artifact / "preparation.json").read_bytes(), first_evidence
         )
         self.assertEqual(
+            (first_artifact / "publication.json").read_bytes(), first_publication
+        )
+        self.assertEqual(
             json.loads((second_artifact / "preparation.json").read_text())[
                 "preparation_status"
             ],
             "paused",
+        )
+        second_publication = json.loads(
+            (second_artifact / "publication.json").read_text()
+        )
+        self.assertEqual(second_publication["status"], "succeeded")
+        self.assertEqual(second_publication["admission_outcome"], "accepted")
+        self.assertEqual(
+            json.loads(receipt.read_text())["identity"]["run_id"],
+            second_artifact.name,
         )
 
     def test_interrupt_during_preflight_seals_terminal_state(self):
