@@ -41,7 +41,11 @@ class RunPreparerCliTest(unittest.TestCase):
             "description": "Do the requested work.",
             "design": "Keep it small.",
             "acceptance_criteria": "Commit the result.",
-            "labels": ["project:fixture", "priority:normal"],
+            "labels": [
+                "project:fixture",
+                "priority:normal",
+                "ready-for-agent",
+            ],
         }
         self.preflight_scenario = "proceed"
         self.preflight_command = None
@@ -552,13 +556,69 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("publication command", result.stderr)
         self.assertFalse((self.root / "runs").exists())
 
+    def test_readiness_gate_accepts_exactly_one_ready_for_agent_label(self):
+        self.preflight_scenario = "pause"
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertTrue(self.artifact_from(result.stdout).is_dir())
+
+    def test_readiness_gate_rejects_non_agent_states_before_resolution_or_creation(
+        self,
+    ):
+        git_log = self.root / "git-invocations"
+        git = self.bin / "git"
+        git.write_text(
+            "#!/usr/bin/env python3\nimport os,sys\nfrom pathlib import Path\n"
+            f"Path({str(git_log)!r}).write_text('called')\n"
+            "os.execv('/usr/bin/git', ['git', *sys.argv[1:]])\n"
+        )
+        git.chmod(0o755)
+        cases = (
+            (["project:fixture"], "ready-for-agent"),
+            (["project:fixture", "ready-for-human"], "ready-for-human"),
+            (
+                ["project:fixture", "ready-for-agent", "ready-for-human"],
+                "ready-for-human",
+            ),
+            (
+                ["project:fixture", "ready-for-agent", "ready-for-agent"],
+                "exactly once",
+            ),
+        )
+        for labels, message in cases:
+            with self.subTest(labels=labels):
+                git_log.unlink(missing_ok=True)
+                self.bead["labels"] = labels
+                self.write_bd()
+
+                result = self.invoke(
+                    "run", self.bead["id"], "--config", str(self.config)
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(message, result.stderr)
+                self.assertIn("update its triage labels", result.stderr)
+                self.assertFalse(
+                    git_log.exists(), "repository resolution was attempted"
+                )
+                self.assertFalse((self.root / "runs").exists())
+                self.assertFalse((self.root / "worktrees").exists())
+
     def test_ownership_mapping_repository_ref_and_collision_fail_before_git_mutation(
         self,
     ):
         cases = [
-            ([], "exactly one project:<slug>"),
-            (["project:a", "project:b"], "exactly one project:<slug>"),
-            (["project:missing"], "has no configured project mapping"),
+            (["ready-for-agent"], "exactly one project:<slug>"),
+            (
+                ["project:a", "project:b", "ready-for-agent"],
+                "exactly one project:<slug>",
+            ),
+            (
+                ["project:missing", "ready-for-agent"],
+                "has no configured project mapping",
+            ),
         ]
         before = self.git("worktree", "list", "--porcelain")
         for labels, text in cases:
@@ -568,7 +628,7 @@ class RunPreparerCliTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(text, result.stderr)
             self.assertEqual(self.git("worktree", "list", "--porcelain"), before)
-        self.bead["labels"] = ["project:fixture"]
+        self.bead["labels"] = ["project:fixture", "ready-for-agent"]
         self.write_bd()
         config = json.loads(self.config.read_text())
         config["projects"]["fixture"]["base_ref"] = "absent"

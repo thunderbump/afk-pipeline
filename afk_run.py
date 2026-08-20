@@ -122,6 +122,7 @@ def run(bead_id, config_path):
         config = load_config(config_path)
         progress(f"reading Bead {bead_id} from configured central workspace")
         bead = read_bead(bead_id, config["beads_workspace"])
+        require_agent_readiness(bead_id, bead["labels"])
         project_slug = ownership(bead_id, bead["labels"])
         project = config["projects"].get(project_slug)
         if project is None:
@@ -859,6 +860,27 @@ def read_bead(bead_id, workspace):
     ):
         raise PreparationError(f"Bead {bead_id} labels are malformed")
     return value
+
+
+def require_agent_readiness(bead_id, labels):
+    """Enforce the narrow triage admission contract before repository work."""
+    agent_count = labels.count("ready-for-agent")
+    human_count = labels.count("ready-for-human")
+    if agent_count == 1 and human_count == 0:
+        return
+    if human_count and agent_count:
+        reason = "ready-for-agent conflicts with ready-for-human"
+    elif human_count:
+        reason = "ready-for-human is present"
+    elif agent_count == 0:
+        reason = "ready-for-agent is missing"
+    else:
+        reason = "ready-for-agent must appear exactly once"
+    raise PreparationError(
+        f"Bead {bead_id} is not ready for an agent ({reason}); "
+        "update its triage labels to exactly one ready-for-agent and no "
+        "ready-for-human, then retry"
+    )
 
 
 def ownership(bead_id, labels):

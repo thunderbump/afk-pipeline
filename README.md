@@ -61,14 +61,22 @@ shell. The current adapter is Operations Datastore Admission, but the preparer
 depends only on its small versioned JSON result contract.
 
 The trusted host process runs `bd show <bead-id> --json` only in the configured
-central Beads workspace and requires exactly one `project:<slug>` label. It
-resolves that project locally, freezes the base ref to a commit, and creates a
-new flat `afk-<bead-id>-<run-id>` branch and isolated worktree. The flat name
-cannot conflict with a bootstrap branch such as `afk/<bead-id>`, and preparation
-preflights exact, ancestor, and descendant branch-ref namespace collisions. It
-never fetches, clones, reuses, or replaces a destination. Beads connection
-settings remain in the preparer environment and are not forwarded to Coordinator
-workers or written to durable evidence.
+central Beads workspace. Run admission requires the Bead to have exactly one
+`ready-for-agent` label and no `ready-for-human` label. Missing, duplicate, or
+conflicting readiness labels exit `2` with instructions to update triage; this
+check occurs before project ownership resolution, repository inspection, Git
+mutation, worktree creation, or durable Run artifacts. There is no readiness
+bypass flag. This is the readiness gate for Runs later exposed through the
+current Operations WebUI publication interface.
+
+After readiness admission, the preparer requires exactly one `project:<slug>`
+label. It resolves that project locally, freezes the base ref to a commit, and
+creates a new flat `afk-<bead-id>-<run-id>` branch and isolated worktree. The
+flat name cannot conflict with a bootstrap branch such as `afk/<bead-id>`, and
+preparation preflights exact, ancestor, and descendant branch-ref namespace
+collisions. It never fetches, clones, reuses, or replaces a destination. Beads
+connection settings remain in the preparer environment and are not forwarded to
+Coordinator workers or written to durable evidence.
 
 The assignment command must contain exactly one argv element equal to
 `{assignment_path}`. During preparation that element is replaced, without a
