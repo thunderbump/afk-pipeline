@@ -112,7 +112,7 @@ def run(bead_id, config_path):
     artifact_io = None
     artifact_owned = False
     preparation = None
-    coordinator_sealed = False
+    terminal_sealed = False
     leases = []
     open_fds = []
     try:
@@ -293,6 +293,12 @@ def run(bead_id, config_path):
             bead_id, artifact, preparation, preflight_request
         )
         if preflight_code != 0:
+            # Only a validated completed pause is a publishable Preflight
+            # terminal. Failed, malformed, and interrupted gates remain local
+            # fail-closed evidence and never reach Coordinator or Admission.
+            if preparation["preparation_status"] == "paused":
+                terminal_sealed = True
+                publish_configured_run(bead_id, artifact, config)
             print(f"artifact root: {artifact}", flush=True)
             return preflight_code
 
@@ -336,20 +342,12 @@ def run(bead_id, config_path):
         )
         preparation["timestamps"]["finished_at"] = timestamp()
         seal_json(artifact_io / "preparation.json", preparation)
-        coordinator_sealed = True
+        terminal_sealed = True
         progress(
             f"coordinator terminal decision for Bead {bead_id}: "
             f"{decision or 'unavailable'}"
         )
-        publication_succeeded = True
-        if config.get("publication") is not None:
-            progress(f"publishing terminal Run for Bead {bead_id}")
-            publication = publish_terminal_run(artifact, config["publication"])
-            publication_succeeded = publication["status"] == "succeeded"
-            progress(
-                f"publication outcome for Bead {bead_id}: "
-                f"{publication['admission_outcome'] or publication['error_category']}"
-            )
+        publication_succeeded = publish_configured_run(bead_id, artifact, config)
         print(f"artifact root: {artifact}", flush=True)
         terminal_code = terminal_exit_code(code, outcome, decision)
         return 1 if terminal_code == 0 and not publication_succeeded else terminal_code
@@ -367,7 +365,7 @@ def run(bead_id, config_path):
         return 2
     except OSError:
         if artifact_owned:
-            if preparation is not None and not coordinator_sealed:
+            if preparation is not None and not terminal_sealed:
                 try:
                     (artifact_io / "coordinator").mkdir(exist_ok=True)
                 except OSError:
@@ -388,7 +386,7 @@ def run(bead_id, config_path):
         return 2
     except KeyboardInterrupt:
         if artifact_owned:
-            if preparation is not None and not coordinator_sealed:
+            if preparation is not None and not terminal_sealed:
                 if preparation["preflight"]["status"] == "running":
                     preparation["preflight"].update(
                         status="failed",
@@ -537,6 +535,19 @@ def terminal_exit_code(coordinator_code, outcome, decision):
     if outcome == "completed" and decision == "stop":
         return 0
     return 1
+
+
+def publish_configured_run(bead_id, artifact, config):
+    """Publish one already-sealed terminal Run when the seam is configured."""
+    if config.get("publication") is None:
+        return True
+    progress(f"publishing terminal Run for Bead {bead_id}")
+    publication = publish_terminal_run(artifact, config["publication"])
+    progress(
+        f"publication outcome for Bead {bead_id}: "
+        f"{publication['admission_outcome'] or publication['error_category']}"
+    )
+    return publication["status"] == "succeeded"
 
 
 def publish_terminal_run(source, config):

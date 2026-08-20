@@ -114,17 +114,21 @@ zero, while `exhausted` exits `1` so actionable findings are visible to command
 line callers. Nonzero Coordinator exits are propagated, a zero exit without a
 valid completed output becomes `1`, and preparation/input refusal exits `2`.
 
-After sealing terminal Coordinator facts in `preparation.json`, a configured
-preparer exports the Run, invokes the publication command, and removes the
-temporary bundle. It writes raw adapter streams to `publication.stdout` and
+After sealing either a terminal completed Preflight pause or terminal
+Coordinator facts in `preparation.json`, a configured preparer exports the Run,
+invokes the publication command exactly once, and removes the temporary bundle.
+A pause is published with an empty Coordinator history; Coordinator remains
+`not_started`, and no Attempt is created. Failed, malformed, or interrupted
+Preflight runs are not publishable terminals and remain fail-closed locally.
+The preparer writes raw adapter streams to `publication.stdout` and
 `publication.stderr`, then atomically seals `publication.json` last. A valid
 `accepted` or `replayed` result records publication success. Conflict,
-rejection, timeout, launch, malformed adapter output, or export failure records
-a categorized failure. Publication never rewrites Coordinator evidence. A
-publication failure changes an otherwise successful `afk run` exit to `1`;
-an already-unsuccessful Coordinator retains its existing exit behavior.
-Without `publication`, the command behaves exactly as before and creates no
-publication artifacts.
+rejection, timeout, launch, malformed adapter output, temporary-storage failure,
+or export failure records categorized evidence without changing the Run's
+terminal facts. A publication failure changes an otherwise successful `afk run`
+exit to `1`; an already-unsuccessful Coordinator or paused Preflight retains its
+existing exit behavior. Without `publication`, the command behaves exactly as
+before and creates no publication artifacts.
 
 Run and worktree roots, their existing ancestors, and the repository are trusted
 local-host infrastructure. The preparer takes advisory directory locks to

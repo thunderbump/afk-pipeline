@@ -188,6 +188,17 @@ class RunPreparerCliTest(unittest.TestCase):
         )
 
     def test_interrupt_during_preflight_seals_terminal_state(self):
+        adapter = self.write_publication_adapter(
+            "accepted", 0, self.root / "interrupted-publication-receipt.json"
+        )
+        self.configure_publication(
+            [
+                sys.executable,
+                str(adapter),
+                "{bundle_path}",
+                str(self.root / "interrupted-publication-receipt.json"),
+            ]
+        )
         marker = self.root / "preflight-child.pid"
         self.preflight_command = [
             sys.executable,
@@ -219,6 +230,7 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["coordinator"]["status"], "not_started")
         self.assertEqual(output["outcome"], "interrupted")
         self.assertEqual(output["requests"], [])
+        self.assertFalse((artifact / "publication.json").exists())
 
     def test_interrupt_after_completed_output_still_projects_a_pause(self):
         artifact = self.root / "interrupt-race"
@@ -328,6 +340,56 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertFalse(Path(observed["bundle"]).exists())
 
+    def test_completed_preflight_pause_is_published_once_without_coordinator_evidence(
+        self,
+    ):
+        receipt = self.root / "paused-publication-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        self.preflight_scenario = "pause"
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        publication = json.loads((artifact / "publication.json").read_text())
+        observed = json.loads(receipt.read_text())
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+        self.assertIsNone(preparation["coordinator"]["exit_code"])
+        self.assertEqual(list((artifact / "coordinator").iterdir()), [])
+        self.assertFalse(any(artifact.rglob("01-attempt")))
+        self.assertEqual(publication["status"], "succeeded")
+        self.assertEqual(publication["admission_outcome"], "accepted")
+        self.assertEqual(
+            (artifact / "publication.stdout").read_text().count("accepted"), 1
+        )
+        self.assertEqual((artifact / "publication.stderr").read_text(), "")
+        self.assertEqual(observed["identity"]["run_id"], artifact.name)
+        self.assertEqual(observed["status"], "paused")
+        self.assertIn("publication outcome", result.stdout)
+
+    def test_replayed_paused_publication_preserves_the_terminal_run(self):
+        receipt = self.root / "paused-replay-receipt.json"
+        adapter = self.write_publication_adapter("replayed", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        self.preflight_scenario = "pause"
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        artifact = self.artifact_from(result.stdout)
+        publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(publication["status"], "succeeded")
+        self.assertEqual(publication["admission_outcome"], "replayed")
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+
     def test_same_terminal_run_replays_through_the_publication_seam(self):
         store = self.root / "adapter-store.json"
         adapter = self.write_stateful_publication_adapter(store)
@@ -370,6 +432,25 @@ class RunPreparerCliTest(unittest.TestCase):
             terminal,
         )
 
+    def test_rejected_paused_publication_is_separate_durable_evidence(self):
+        receipt = self.root / "paused-rejected-receipt.json"
+        adapter = self.write_publication_adapter("rejected", 1, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        self.preflight_scenario = "pause"
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(publication["status"], "failed")
+        self.assertEqual(publication["error_category"], "admission_rejected")
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+
     def test_temporary_storage_failure_is_sealed_after_completed_run(self):
         receipt = self.root / "unused-receipt.json"
         adapter = self.write_publication_adapter("accepted", 0, receipt)
@@ -390,18 +471,54 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(publication["error_category"], "temporary_storage")
         self.assertEqual(preparation["coordinator"]["decision"], "stop")
 
+    def test_temporary_storage_failure_is_sealed_after_paused_run(self):
+        receipt = self.root / "unused-paused-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        self.preflight_scenario = "pause"
+        environment = os.environ.copy()
+        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
+        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(PREFLIGHT_FIXTURE), "pause"]
+        )
+        stdout = io.StringIO()
+        with (
+            mock.patch.dict(os.environ, environment, clear=True),
+            mock.patch(
+                "afk_run.tempfile.TemporaryDirectory",
+                side_effect=OSError("temporary storage unavailable"),
+            ),
+            redirect_stdout(stdout),
+        ):
+            code = afk_run.run(self.bead["id"], self.config)
+
+        artifact = self.artifact_from(stdout.getvalue())
+        publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(code, 1)
+        self.assertEqual(publication["error_category"], "temporary_storage")
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+
     def test_non_utf8_admission_output_is_a_protocol_failure(self):
         adapter = self.root / "non-utf8-adapter.py"
         adapter.write_text(
             "import os,sys\nos.write(1, b'\\xff\\xfe')\nraise SystemExit(0)\n"
         )
         self.configure_publication([sys.executable, str(adapter), "{bundle_path}"])
+        self.preflight_scenario = "pause"
 
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
 
         artifact = self.artifact_from(result.stdout)
         publication = json.loads((artifact / "publication.json").read_text())
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertEqual(result.returncode, 1)
         self.assertEqual(publication["error_category"], "admission_protocol")
+        self.assertEqual(preparation["preparation_status"], "paused")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
 
     def test_malformed_publication_config_is_rejected_before_run_creation(self):
         config = json.loads(self.config.read_text())
@@ -947,6 +1064,7 @@ class RunPreparerCliTest(unittest.TestCase):
             "manifest=json.loads((bundle/'manifest.json').read_text())\n"
             "Path(sys.argv[2]).write_text(json.dumps({"
             "'identity': record['identity'], 'bead': record['bead']['id'], "
+            "'status': record['status'], "
             "'manifest_schema_version': manifest['schema_version'], "
             "'bundle': str(bundle)}))\n"
             f"print(json.dumps({{'schema_version': 1, 'outcome': {outcome!r}, "
