@@ -322,6 +322,7 @@ class RunPreparerCliTest(unittest.TestCase):
             {"project": "fixture", "run_id": artifact.name},
         )
         self.assertEqual(observed["bead"], "central-123")
+        self.assertEqual(observed["manifest_schema_version"], 2)
         self.assertIn(
             "publication outcome for Bead central-123: accepted", result.stdout
         )
@@ -943,8 +944,10 @@ class RunPreparerCliTest(unittest.TestCase):
             "from pathlib import Path\n"
             "bundle=Path(sys.argv[1])\n"
             "record=json.loads((bundle/'workflow-run.json').read_text())\n"
+            "manifest=json.loads((bundle/'manifest.json').read_text())\n"
             "Path(sys.argv[2]).write_text(json.dumps({"
             "'identity': record['identity'], 'bead': record['bead']['id'], "
+            "'manifest_schema_version': manifest['schema_version'], "
             "'bundle': str(bundle)}))\n"
             f"print(json.dumps({{'schema_version': 1, 'outcome': {outcome!r}, "
             "'identity': record['identity'], 'location': 'fixture/location'}))\n"

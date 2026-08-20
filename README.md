@@ -229,8 +229,8 @@ from Preflight before Coordinator was started. A paused export has an empty
 history; it never invents Coordinator invocations. Legacy Runs without
 Preflight remain exportable.
 
-Pass `--schema-version 2` to produce Publication Bundle v2. It retains the
-readable normalized Run fields and adds the Preflight request ledger plus a
+Publication Bundle v2 is the default producer output. It retains the readable
+normalized Run fields and adds the Preflight request ledger plus a
 semantic `artifacts` inventory. Each descriptor identifies a safe Run-relative source, scope, kind,
 media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
@@ -247,11 +247,12 @@ artifact. The limits are 25 MiB per uncompressed artifact, 32 MiB for the
 complete bundle, 128 payload files, and a 64 KiB manifest. This allows useful
 event streams above the old 8 MiB bundle limit.
 
-The backward-compatible default remains v1. It writes `manifest.json`, one
-`workflow-run.json`, and only inventoried, nonempty UTF-8 `stdout`, `stderr`,
-and Review `diff` files. Raw Pi `events.jsonl` is represented by digest, size,
-line count, and event counts but is not copied. Its limits remain 1 MiB per
-included file and 8 MiB total.
+Pass `--schema-version 1` only when a producer must emit the legacy v1
+contract. It writes `manifest.json`, one `workflow-run.json`, and only
+inventoried, nonempty UTF-8 `stdout`, `stderr`, and Review `diff` files. Raw Pi
+`events.jsonl` is represented by digest, size, line count, and event counts but
+is not copied. Its limits remain 1 MiB per included file and 8 MiB total.
+Existing datastore readers continue to accept v1 bundles.
 
 Both formats reject private-key headers, URL credentials, and common
 authorization, cloud-secret, token, password, and API-key forms. Export is

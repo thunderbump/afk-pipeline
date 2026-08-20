@@ -13,7 +13,7 @@ ROOT = Path(__file__).parents[1]
 
 
 class ExportCliTests(unittest.TestCase):
-    def test_exports_a_sealed_preparer_run_as_a_portable_bundle(self):
+    def test_export_defaults_to_publication_bundle_v2(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -22,7 +22,23 @@ class ExportCliTests(unittest.TestCase):
             result = self.export(source, destination)
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["schema_version"], 2)
+            manifest = json.loads((destination / "manifest.json").read_text())
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(manifest["schema_version"], 2)
+            self.assertIn("artifacts", record)
+
+    def test_explicit_v1_exports_the_legacy_portable_bundle(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            destination = root / "bundle"
+
+            result = self.export_v1(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
             output = json.loads(result.stdout)
+            self.assertEqual(output["schema_version"], 1)
             self.assertEqual(output["outcome"], "exported")
             self.assertEqual(
                 output["identity"],
@@ -30,6 +46,7 @@ class ExportCliTests(unittest.TestCase):
             )
             manifest = json.loads((destination / "manifest.json").read_text())
             record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(manifest["schema_version"], 1)
             self.assertEqual(manifest["identity"], output["identity"])
             self.assertEqual(record["bead"], {"id": "central-example"})
             self.assertEqual(record["status"], "completed")
@@ -72,7 +89,7 @@ class ExportCliTests(unittest.TestCase):
             self.assertNotIn(b"should-not-export", rendered)
 
             second = root / "second-bundle"
-            self.assertEqual(self.export(source, second).returncode, 0)
+            self.assertEqual(self.export_v1(source, second).returncode, 0)
             first_files = {
                 path.relative_to(destination): path.read_bytes()
                 for path in destination.rglob("*")
@@ -140,7 +157,7 @@ class ExportCliTests(unittest.TestCase):
                 },
             )
 
-    def test_oversized_allowlisted_evidence_leaves_no_bundle(self):
+    def test_v1_oversized_allowlisted_evidence_leaves_no_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -149,7 +166,7 @@ class ExportCliTests(unittest.TestCase):
                 stream.truncate(2 * 1024 * 1024)
             destination = root / "bundle"
 
-            result = self.export(source, destination)
+            result = self.export_v1(source, destination)
 
             self.assertEqual(result.returncode, 1)
             self.assertFalse(destination.exists())
@@ -166,7 +183,7 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertFalse((source / "bundle").exists())
 
-    def test_allowlisted_evidence_redacts_paths_and_blocks_credentials(self):
+    def test_v1_allowlisted_evidence_redacts_paths_and_blocks_credentials(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -180,7 +197,7 @@ class ExportCliTests(unittest.TestCase):
                 with self.subTest(value=value):
                     stdout.write_text(value)
                     destination = root / f"bundle-{index}"
-                    result = self.export(source, destination)
+                    result = self.export_v1(source, destination)
                     self.assertEqual(result.returncode, 0)
                     exported = (
                         destination / "evidence/02-validation/stdout.txt"
@@ -197,7 +214,7 @@ class ExportCliTests(unittest.TestCase):
                 with self.subTest(value=value):
                     stdout.write_text(value)
                     destination = root / f"blocked-bundle-{index}"
-                    result = self.export(source, destination)
+                    result = self.export_v1(source, destination)
                     self.assertEqual(result.returncode, 1)
                     self.assertFalse(destination.exists())
 
@@ -802,6 +819,17 @@ class ExportCliTests(unittest.TestCase):
             self.assertFalse(rejected_destination.exists())
             self.assertEqual(json.loads(rejected.stdout)["error"], "invalid_run")
 
+    def test_unsupported_schema_is_rejected_before_destination_creation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            destination = root / "bundle"
+
+            result = self.export(source, destination, "--schema-version", "3")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertFalse(destination.exists())
+
     def test_help_documents_the_export_interface(self):
         result = subprocess.run(
             [str(ROOT / "afk"), "export", "--help"],
@@ -817,6 +845,23 @@ class ExportCliTests(unittest.TestCase):
     def export(self, source, destination, *arguments):
         return subprocess.run(
             [str(ROOT / "afk"), "export", str(source), str(destination), *arguments],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def export_v1(self, source, destination, *arguments):
+        return subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(source),
+                str(destination),
+                "--schema-version",
+                "1",
+                *arguments,
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,

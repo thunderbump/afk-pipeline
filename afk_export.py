@@ -100,8 +100,10 @@ def export_run(
     project=None,
     run_id=None,
     bead_id=None,
-    schema_version=1,
+    schema_version=2,
 ):
+    if schema_version not in {1, 2}:
+        raise ExportUsageError("unsupported Publication Bundle schema")
     source_input = Path(source_path).absolute()
     destination_input = Path(destination_path).absolute()
     require_directory(source_input)
@@ -117,8 +119,6 @@ def export_run(
         or destination in source.parents
     ):
         raise ExportError("source and destination must not overlap")
-    if schema_version not in {1, 2}:
-        raise ExportUsageError("unsupported Publication Bundle schema")
     observed = (
         load_source(source, project, run_id, bead_id)
         if schema_version == 1

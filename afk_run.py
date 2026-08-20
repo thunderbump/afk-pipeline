@@ -63,8 +63,8 @@ def main(argv=None):
         "--schema-version",
         type=int,
         choices=(1, 2),
-        default=1,
-        help="Publication Bundle schema (default: 1)",
+        default=2,
+        help="Publication Bundle schema (default: 2)",
     )
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
@@ -553,7 +553,7 @@ def publish_terminal_run(source, config):
         with tempfile.TemporaryDirectory(prefix="afk-publication-") as temporary:
             bundle = Path(temporary) / "bundle"
             try:
-                exported = export_run(source, bundle)
+                exported = export_run(source, bundle, schema_version=2)
             except (
                 ExportError,
                 ExportUsageError,
