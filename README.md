@@ -276,7 +276,10 @@ media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
 UTF-8 logs, and diffs are written only as deterministic derived copies below
 `artifacts/`; private source files are never rewritten. Known host paths are
-redacted, as are recognized credential forms. Artifact state is `downloadable`,
+redacted, as are recognized credential forms. In a schema-validated Preflight
+output, the classifier `key` field alone is replaced with an explicit public
+marker; the remaining Preflight fields and the private source record are
+preserved. Artifact state is `downloadable`,
 `empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
 carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
 optional sources remain explicit without public bytes. Structured payloads and

@@ -84,6 +84,7 @@ CREDENTIAL_OPTION_VALUE = re.compile(
     r"password|secret|token))=(.*)$"
 )
 REDACTED_SECRET = "[redacted-secret]"
+PUBLIC_PREFLIGHT_CLASSIFIER_KEY = "[sanitized-preflight-classifier-key]"
 
 
 class ExportError(Exception):
@@ -573,6 +574,7 @@ def artifact_candidates(observed):
         priority,
         unsafe_path=False,
         declaration=None,
+        validated_preflight_classifier_key=None,
     ):
         if not unsafe_path and not safe_relative(relative):
             return
@@ -602,6 +604,9 @@ def artifact_candidates(observed):
                 "priority": priority,
                 "unsafe_path": unsafe_path,
                 "declaration": declaration,
+                "validated_preflight_classifier_key": (
+                    validated_preflight_classifier_key
+                ),
             }
         )
 
@@ -618,7 +623,16 @@ def artifact_candidates(observed):
     if observed.get("preflight"):
         add("preflight-input.json", "preflight", "json", "application/json", 0)
         add("preflight/input.json", "preflight", "json", "application/json", 0)
-        add("preflight/output.json", "preflight", "json", "application/json", 0)
+        add(
+            "preflight/output.json",
+            "preflight",
+            "json",
+            "application/json",
+            0,
+            validated_preflight_classifier_key=observed["preflight"]["output"][
+                "classifier"
+            ].get("key"),
+        )
         add("preflight/stderr.log", "preflight", "log", "text/plain; charset=utf-8", 1)
         add("preflight/events.jsonl", "preflight", "events", "application/x-ndjson", 2)
     if observed["state"] is not None:
@@ -747,7 +761,11 @@ def derive_public_artifact(candidate, redactions):
         text = decode_text(raw)
         if candidate["kind"] == "json":
             value = json.loads(text)
-            value, changed = sanitize_json_value(value, redactions)
+            changed = sanitize_validated_preflight_classifier_key(
+                value, candidate.get("validated_preflight_classifier_key")
+            )
+            value, generally_changed = sanitize_json_value(value, redactions)
+            changed = changed or generally_changed
             public = encode_json(value)
         elif candidate["kind"] == "events":
             lines = []
@@ -787,6 +805,21 @@ def derive_public_artifact(candidate, redactions):
         "path": destination,
     }
     return descriptor, public
+
+
+def sanitize_validated_preflight_classifier_key(value, expected_key):
+    """Replace only a classifier key accepted by the Preflight output contract."""
+    if expected_key is None:
+        return False
+    if (
+        not isinstance(value, dict)
+        or not isinstance(value.get("classifier"), dict)
+        or value["classifier"].get("key") != expected_key
+    ):
+        # The source changed after validation or is not the validated record.
+        raise ExportError("validated Preflight classifier key disagrees")
+    value["classifier"]["key"] = PUBLIC_PREFLIGHT_CLASSIFIER_KEY
+    return True
 
 
 def nondownloadable_descriptor(base, state, reason):

@@ -353,6 +353,69 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(empty["state"], "empty")
             self.assertEqual(empty["unavailable_reason"], "empty")
 
+    def test_v2_sanitizes_only_the_validated_preflight_classifier_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(source, source / "preflight", stored_classifier=True)
+            output_path = source / "preflight/output.json"
+            private = output_path.read_bytes()
+            private_output = json.loads(private)
+            classifier_key = private_output["classifier"]["key"]
+            unrelated_hex = "b" * 64
+            private_output["classifier"]["policy"]["system_prompt_sha256"] = (
+                unrelated_hex
+            )
+            # Recompute the key after changing an inspectable policy field so the
+            # retained output remains a schema-valid Preflight record.
+            from afk_preflight.contract import classification_key as derive_key
+
+            classifier_key = derive_key(
+                json.loads((source / "preflight-input.json").read_text()),
+                private_output["classifier"]["policy"],
+            )
+            private_output["classifier"]["key"] = classifier_key
+            private_output["classifier"]["record"] = f"{classifier_key}.json"
+            output_path.write_text(json.dumps(private_output))
+            private = output_path.read_bytes()
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output_path.read_bytes() == private)
+            workflow = json.loads((destination / "workflow-run.json").read_text())
+            descriptor = next(
+                item
+                for item in workflow["artifacts"]
+                if item["source"]["path"] == "preflight/output.json"
+            )
+            public_bytes = (destination / descriptor["path"]).read_bytes()
+            public = json.loads(public_bytes)
+            self.assertEqual(
+                public["classifier"]["key"],
+                afk_export.PUBLIC_PREFLIGHT_CLASSIFIER_KEY,
+            )
+            self.assertFalse(public["classifier"]["key"] == classifier_key)
+            self.assertTrue(
+                public["classifier"]["record"] == private_output["classifier"]["record"]
+            )
+            self.assertEqual(
+                public["classifier"]["policy"]["system_prompt_sha256"], unrelated_hex
+            )
+            self.assertEqual(descriptor["sanitization_status"], "sanitized")
+            self.assertEqual(descriptor["public_bytes"], len(public_bytes))
+            self.assertEqual(
+                descriptor["public_sha256"], hashlib.sha256(public_bytes).hexdigest()
+            )
+            manifest = json.loads((destination / "manifest.json").read_text())
+            inventory = {item["path"]: item for item in manifest["files"]}
+            self.assertEqual(inventory[descriptor["path"]]["bytes"], len(public_bytes))
+            self.assertEqual(
+                inventory[descriptor["path"]]["sha256"],
+                hashlib.sha256(public_bytes).hexdigest(),
+            )
+
     def test_v2_redacts_a_command_credential_value_from_assignment_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -407,6 +470,32 @@ class ExportCliTests(unittest.TestCase):
                 public = (destination / descriptor["path"]).read_bytes()
                 self.assertIn(afk_export.REDACTED_SECRET.encode(), public)
                 self.assertNotIn(secret.encode(), public)
+
+    def test_v2_keeps_private_key_material_unsafe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            bead_path = source / "bead.json"
+            bead = json.loads(bead_path.read_text())
+            bead["description"] = "-----BEGIN PRIVATE KEY-----"
+            bead_path.write_text(json.dumps(bead))
+            private = bead_path.read_bytes()
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(bead_path.read_bytes() == private)
+            workflow = json.loads((destination / "workflow-run.json").read_text())
+            descriptor = next(
+                item
+                for item in workflow["artifacts"]
+                if item["source"]["path"] == "bead.json"
+            )
+            self.assertEqual(descriptor["state"], "unsafe")
+            self.assertEqual(descriptor["unavailable_reason"], "unsafe_or_invalid")
+            self.assertEqual(descriptor["sanitization_status"], "not_applicable")
+            self.assertNotIn("path", descriptor)
 
     def test_v2_assigns_globally_unique_public_artifact_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -885,15 +974,54 @@ class ExportCliTests(unittest.TestCase):
             check=False,
         )
 
-    def add_preflight(self, source, invocation, bead_id="central-example"):
+    def add_preflight(
+        self, source, invocation, bead_id="central-example", stored_classifier=False
+    ):
         preflight_input = {
             "schema_version": 1,
             "source": {"kind": "bead", "id": bead_id},
             "title": "Portable publication",
             "acceptance_criteria": "The export is safe.",
-            "evidence_catalog": [],
+            "evidence_catalog": [
+                {
+                    "category": "repository_validation",
+                    "route": "repository validation",
+                    "can_prove": "the export is safe",
+                }
+            ],
             "timeout_seconds": 60,
         }
+        requests = [
+            {
+                "index": 1,
+                "request": "The export is safe.",
+                "category": "repository_validation",
+                "route": "repository validation",
+                "rationale": "Repository validation proves this request.",
+            }
+        ]
+        classifier = {
+            "kind": "inference",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-luna",
+            "status": "completed",
+        }
+        if stored_classifier:
+            from afk_preflight.contract import classification_key
+
+            policy = {
+                "input_contract": "afk-preflight-input-v1",
+                "classification_contract": "afk-preflight-classification-v1",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-luna",
+                "thinking": "low",
+                "system_prompt_sha256": "1" * 64,
+                "adapter_command_sha256": "2" * 64,
+            }
+            key = classification_key(preflight_input, policy)
+            classifier.update(
+                source="inferred", key=key, record=f"{key}.json", policy=policy
+            )
         preflight_output = {
             "schema_version": 1,
             "outcome": "completed",
@@ -904,13 +1032,8 @@ class ExportCliTests(unittest.TestCase):
             "duration_seconds": 1,
             "process": {"exit_code": 0, "signal": None},
             "agent": {"status": "completed"},
-            "classifier": {
-                "kind": "inference",
-                "provider": "openai-codex",
-                "model": "gpt-5.6-luna",
-                "status": "completed",
-            },
-            "requests": [],
+            "classifier": classifier,
+            "requests": requests,
             "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
         }
         preparation_path = source / "preparation.json"
