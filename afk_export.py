@@ -301,8 +301,11 @@ def load_optional_preflight(source, preparation):
     )
     if invocation_input != preflight_input:
         raise ExportError("prepared Preflight inputs disagree")
+    preflight_output_raw = read_bytes(
+        source / "preflight" / "output.json", MAX_JSON_BYTES
+    )
     preflight_output = validate_preflight_output(
-        read_json(source / "preflight" / "output.json"), preflight_input
+        json.loads(decode_text(preflight_output_raw)), preflight_input
     )
     facts = preparation["preflight"]
     if (
@@ -316,7 +319,13 @@ def load_optional_preflight(source, preparation):
         or preflight_output["outcome"] != "completed"
     ):
         raise ExportError("invalid prepared Preflight evidence")
-    return {"input": preflight_input, "output": preflight_output}
+    return {
+        "input": preflight_input,
+        "output": preflight_output,
+        # Retain the exact bytes that passed the contract so the narrowly
+        # privileged public transformation cannot be applied to a later file.
+        "output_raw": preflight_output_raw,
+    }
 
 
 def load_source(source, project, run_id, bead_id):
@@ -575,6 +584,7 @@ def artifact_candidates(observed):
         unsafe_path=False,
         declaration=None,
         validated_preflight_classifier_key=None,
+        validated_preflight_output_raw=None,
     ):
         if not unsafe_path and not safe_relative(relative):
             return
@@ -607,6 +617,7 @@ def artifact_candidates(observed):
                 "validated_preflight_classifier_key": (
                     validated_preflight_classifier_key
                 ),
+                "validated_preflight_output_raw": validated_preflight_output_raw,
             }
         )
 
@@ -632,6 +643,7 @@ def artifact_candidates(observed):
             validated_preflight_classifier_key=observed["preflight"]["output"][
                 "classifier"
             ].get("key"),
+            validated_preflight_output_raw=observed["preflight"]["output_raw"],
         )
         add("preflight/stderr.log", "preflight", "log", "text/plain; charset=utf-8", 1)
         add("preflight/events.jsonl", "preflight", "events", "application/x-ndjson", 2)
@@ -758,6 +770,12 @@ def derive_public_artifact(candidate, redactions):
         # valid terminal Run and without publishing bytes from the race.
         return nondownloadable_descriptor(base, "unavailable", "unavailable"), None
     try:
+        validated_preflight_output_raw = candidate.get("validated_preflight_output_raw")
+        if (
+            validated_preflight_output_raw is not None
+            and raw != validated_preflight_output_raw
+        ):
+            raise ExportError("validated Preflight output changed")
         text = decode_text(raw)
         if candidate["kind"] == "json":
             value = json.loads(text)

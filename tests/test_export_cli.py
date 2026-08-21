@@ -416,6 +416,35 @@ class ExportCliTests(unittest.TestCase):
                 hashlib.sha256(public_bytes).hexdigest(),
             )
 
+    def test_v2_does_not_sanitize_preflight_output_changed_after_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(source, source / "preflight", stored_classifier=True)
+            observed = afk_export.load_source_v2(source, None, None, None)
+            candidate = next(
+                item
+                for item in afk_export.artifact_candidates(observed)
+                if item["source"] == "preflight/output.json"
+            )
+
+            output_path = source / "preflight/output.json"
+            changed = json.loads(output_path.read_text())
+            validated_key = changed["classifier"]["key"]
+            changed["requests"] = "content that did not pass the contract"
+            output_path.write_text(json.dumps(changed))
+            self.assertEqual(changed["classifier"]["key"], validated_key)
+
+            descriptor, public = afk_export.derive_public_artifact(
+                candidate, observed["redactions"]
+            )
+
+            self.assertIsNone(public)
+            self.assertEqual(descriptor["state"], "unsafe")
+            self.assertEqual(descriptor["unavailable_reason"], "unsafe_or_invalid")
+            self.assertNotIn("path", descriptor)
+            self.assertEqual(json.loads(output_path.read_text()), changed)
+
     def test_v2_redacts_a_command_credential_value_from_assignment_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
