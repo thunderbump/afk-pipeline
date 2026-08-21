@@ -202,6 +202,8 @@ def run(bead_id, config_path):
                     "afk_preflight",
                     str(artifact / "preflight-input.json"),
                     str(artifact / "preflight"),
+                    "--classification-store",
+                    str(config["classification_store"]),
                 ],
                 "directory": "preflight",
                 "result": "preflight/output.json",
@@ -666,6 +668,7 @@ def load_config(path):
         "beads_workspace",
         "run_root",
         "worktree_root",
+        "classification_store",
         "assignment",
         "coordinator",
         "projects",
@@ -679,7 +682,12 @@ def load_config(path):
         raise PreparationError(
             f"configuration {path} is malformed (expected schema_version 1)"
         )
-    for name in ("beads_workspace", "run_root", "worktree_root"):
+    for name in (
+        "beads_workspace",
+        "run_root",
+        "worktree_root",
+        "classification_store",
+    ):
         value[name] = absolute_path(value[name], f"configuration {name}")
         if value[name].exists() and not value[name].is_dir():
             raise PreparationError(
@@ -1028,6 +1036,7 @@ def ensure_branch_available(bead_id, repository, branch):
 def ensure_destination_layout(bead_id, config, repository, artifact, worktree):
     run_root = config["run_root"]
     worktree_root = config["worktree_root"]
+    classification_store = config["classification_store"]
     if (
         run_root == worktree_root
         or run_root in worktree_root.parents
@@ -1036,6 +1045,20 @@ def ensure_destination_layout(bead_id, config, repository, artifact, worktree):
         raise PreparationError(
             f"Bead {bead_id} Run and worktree roots overlap unsafely"
         )
+    for other, fact in (
+        (run_root, "Run root"),
+        (worktree_root, "worktree root"),
+        (repository, "selected repository"),
+        (config["beads_workspace"], "central Beads workspace"),
+    ):
+        if (
+            classification_store == other
+            or classification_store in other.parents
+            or other in classification_store.parents
+        ):
+            raise PreparationError(
+                f"Bead {bead_id} classification store overlaps the {fact} unsafely"
+            )
     for root, path, fact in (
         (run_root, artifact, "artifact"),
         (worktree_root, worktree, "worktree"),

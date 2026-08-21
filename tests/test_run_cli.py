@@ -85,6 +85,10 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["preparation_status"], "prepared")
         self.assertEqual(preparation["preflight"]["status"], "completed")
         self.assertEqual(preparation["preflight"]["decision"], "proceed")
+        self.assertEqual(
+            preparation["preflight"]["command"][-2:],
+            ["--classification-store", str(self.root / "classifications")],
+        )
         self.assertEqual(preflight_input["source"], bead["source"])
         self.assertEqual(
             preflight_input["acceptance_criteria"], bead["acceptance_criteria"]
@@ -192,6 +196,18 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertEqual(
             (first_artifact / "publication.json").read_bytes(), first_publication
+        )
+        first_preflight = json.loads(
+            (first_artifact / "preflight" / "output.json").read_text()
+        )
+        second_preflight = json.loads(
+            (second_artifact / "preflight" / "output.json").read_text()
+        )
+        self.assertEqual(first_preflight["classifier"]["source"], "inferred")
+        self.assertEqual(second_preflight["classifier"]["source"], "reused")
+        self.assertEqual(
+            first_preflight["classifier"]["key"],
+            second_preflight["classifier"]["key"],
         )
         self.assertEqual(
             json.loads((second_artifact / "preparation.json").read_text())[
@@ -658,6 +674,47 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("worktree_root", collision.stderr)
         self.assertFalse((self.root / "runs").exists())
 
+    def test_classification_store_is_required_and_independent(self):
+        config = json.loads(self.config.read_text())
+        del config["classification_store"]
+        self.config.write_text(json.dumps(config))
+        missing = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertEqual(missing.returncode, 2)
+        self.assertIn("configuration", missing.stderr)
+        self.assertFalse((self.root / "runs").exists())
+
+        self.write_config()
+        config = json.loads(self.config.read_text())
+        config["classification_store"] = config["run_root"]
+        self.config.write_text(json.dumps(config))
+        overlap = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertEqual(overlap.returncode, 2)
+        self.assertIn("classification store overlaps the Run root", overlap.stderr)
+        self.assertFalse((self.root / "runs").exists())
+
+    def test_unavailable_classification_store_fails_the_gate_with_durable_evidence(
+        self,
+    ):
+        blocked_parent = self.root / "blocked-store-parent"
+        blocked_parent.write_text("fixture\n")
+        config = json.loads(self.config.read_text())
+        config["classification_store"] = str(blocked_parent / "classifications")
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        preflight = json.loads((artifact / "preflight" / "output.json").read_text())
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(preparation["preparation_status"], "failed")
+        self.assertEqual(preparation["preflight"]["decision"], "pause")
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+        self.assertEqual(preflight["classifier"]["source"], "unavailable")
+        self.assertEqual(
+            preflight["classification_error"], "classification store unavailable"
+        )
+
     def test_assignment_command_requires_one_exact_path_placeholder_before_mutation(
         self,
     ):
@@ -1092,6 +1149,7 @@ class RunPreparerCliTest(unittest.TestCase):
             "beads_workspace": str(self.beads),
             "run_root": str(self.root / "runs"),
             "worktree_root": str(self.root / "worktrees"),
+            "classification_store": str(self.root / "classifications"),
             "assignment": {
                 "command": [
                     sys.executable,

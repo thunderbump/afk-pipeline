@@ -7,6 +7,28 @@ from pathlib import Path
 
 scenario = sys.argv[1]
 
+if scenario in {
+    "counted-proceed",
+    "counted-pause",
+    "counted-slow-proceed",
+    "counted-lock-holder",
+    "counted-too-many",
+    "counted-valid-failure",
+}:
+    marker = Path(sys.argv[2])
+    with marker.open("a") as stream:
+        stream.write("invoked\n")
+    if scenario == "counted-slow-proceed":
+        time.sleep(0.25)
+    elif scenario == "counted-lock-holder":
+        time.sleep(2)
+    if scenario == "counted-too-many":
+        scenario = "too-many"
+    elif scenario == "counted-valid-failure":
+        scenario = "valid-failure"
+    else:
+        scenario = "pause" if scenario == "counted-pause" else "proceed"
+
 if scenario == "hang":
     marker = Path(sys.argv[2])
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -62,6 +84,33 @@ elif scenario == "pause":
             ],
         ],
     }
+elif scenario == "too-many":
+    classification = {
+        "schema_version": 1,
+        "requests": [
+            {
+                "index": index,
+                "request": f"Request {index} is proven.",
+                "category": "repository_validation",
+                "route": "repository validation",
+                "rationale": "The repository validation route proves it.",
+            }
+            for index in range(1, 258)
+        ],
+    }
+elif scenario == "valid-failure":
+    classification = {
+        "schema_version": 1,
+        "requests": [
+            {
+                "index": 1,
+                "request": "The terminal decision is recorded and tested.",
+                "category": "repository_validation",
+                "route": "repository validation",
+                "rationale": "The configured repository command proves the behavior.",
+            }
+        ],
+    }
 elif scenario == "invalid-classification":
     classification = {"schema_version": 1, "requests": []}
 else:
@@ -82,3 +131,5 @@ print(
     flush=True,
 )
 print(json.dumps({"type": "agent_end"}), flush=True)
+if scenario == "valid-failure":
+    raise SystemExit(7)

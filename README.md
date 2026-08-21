@@ -23,6 +23,7 @@ schema:
   "beads_workspace": "/absolute/path/to/central-beads",
   "run_root": "/absolute/caller-owned/path/to/runs",
   "worktree_root": "/absolute/caller-owned/path/to/worktrees",
+  "classification_store": "/absolute/caller-owned/path/to/classifications",
   "assignment": {
     "command": ["agent", "--mode", "json", "Read", "{assignment_path}"],
     "timeout_seconds": 1800
@@ -59,6 +60,13 @@ argv element equal to `{bundle_path}`. The preparer replaces that element with
 a private temporary Publication Bundle path and invokes the command without a
 shell. The current adapter is Operations Datastore Admission, but the preparer
 depends only on its small versioned JSON result contract.
+
+The required Classification Store is independent of the Run root, worktree
+root, selected repositories, and central Beads workspace. Preflight stores one
+immutable validated classification for each canonical input and explicit
+classifier policy. The policy includes contract identities, provider, model,
+thinking level, system-prompt digest, and exact adapter-command digest.
+Changing any input or policy fact creates a new key and permits fresh inference.
 
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace. Run admission requires the Bead to have exactly one
@@ -106,11 +114,13 @@ streams, and sealed pause outcome without claiming a valid request ledger.
 Progress prints every validated request category and route plus the terminal
 Preflight decision.
 
-A paused or failed Preflight is terminal for that Run; Run Preparer never
-reclassifies or resumes it in place. After correcting the Bead, configuration,
-or transient failure, invoke `afk run <bead-id>` again. The retry creates a new
-Run ID, worktree, and branch while retaining the earlier Run and worktree for
-inspection.
+A paused or failed Preflight is terminal for that Run and is never resumed in
+place. Invoke `afk run <bead-id>` again to create a new Run ID, worktree, and
+branch while retaining the earlier evidence. An unchanged valid input and
+classifier policy reuse the stored request ledger and decision without starting
+Pi. Correcting the Bead or changing classifier policy creates a different key
+and permits a fresh classification. Reuse makes the first valid classification
+stable; it does not establish that the classification was correct.
 
 For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that
@@ -161,7 +171,8 @@ Classify one Bead's requested acceptance evidence without running an
 implementation agent:
 
 ```sh
-python3 -m afk_preflight preflight.json /new/result-directory
+python3 -m afk_preflight preflight.json /new/result-directory \
+  --classification-store /absolute/caller-owned/path/to/classifications
 ```
 
 Input is one structured JSON object:
@@ -206,15 +217,32 @@ request contains bounded request text, one category, an exact catalog route or
 `unsupported`, and `ambiguous`. Inference cannot authorize execution: local
 contract validation derives `proceed` only when every request belongs to the
 first two categories. Every other valid classification returns `pause`.
+The prompt prefers a supplied repository or pipeline route when that route can
+prove evidence produced by the requested implementation; absence before work
+does not by itself make that evidence unsupported. A classification contains
+at most 256 requests.
+
+The caller-owned Classification Store must be an absolute path and must not
+overlap the new result directory. A per-key lock serializes concurrent first
+calls. Preflight atomically creates the first valid record and never replaces an
+existing record. A malformed existing record or unavailable store fails closed;
+Preflight does not invoke inference to repair or overwrite it. Lock files remain
+as small store-owned coordination records. Interruption while waiting for a
+lock seals an interrupted pause. A failed, timed-out, or interrupted classifier
+never publishes a reusable record. Retention is outside this component.
 
 The new result directory contains accepted `input.json`, raw `events.jsonl`, raw
-`stderr.log`, and an atomically sealed `output.json`. Valid `proceed` and `pause`
-classifications both have `outcome: completed` and exit zero because the
-standalone classification succeeded. Launch, process, event-protocol, or
-structured-output failure seals a non-completed outcome with `decision: pause`
-and exits `1`. Invalid invocation or input exits `2` without replacing evidence.
-The component never accesses Beads, modifies a workspace, rewrites acceptance
-criteria, starts Coordinator, or runs validation.
+`stderr.log`, and an atomically sealed `output.json`. `classifier.source` says
+`inferred`, `reused`, or `unavailable` and includes the key, complete policy
+identity, and safe record name when a record exists. A reused result has no
+agent or process claim and empty raw streams. Valid `proceed` and `pause`
+classifications both have
+`outcome: completed` and exit zero because the standalone classification
+succeeded. Launch, process, event-protocol, structured-output, stored-record, or
+store failure seals a non-completed outcome with `decision: pause` and exits
+`1`. Invalid invocation, input, or overlapping paths exit `2` without replacing
+evidence. The component never accesses Beads, modifies a workspace, rewrites
+acceptance criteria, starts Coordinator, or runs validation.
 
 ## Workflow Run Exporter
 
