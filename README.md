@@ -3,6 +3,85 @@
 Small executable modules for running agent work, validating and reviewing its
 result, responding to feedback, and coordinating the accepted sequence.
 
+## Acceptance Planner
+
+Propose a small child-work graph for one frozen parent Bead without changing
+Beads:
+
+```sh
+python3 -m afk_plan planner.json /new/result-directory
+```
+
+The input contains `schema_version: 1`, a frozen `parent` with `id`, `title`,
+`description`, `acceptance_criteria`, and `labels`, a trusted `catalog`, and a
+`timeout_seconds` value from 1 through 3600. The catalog lists allowed Project
+slugs and their allowed combinations of `execution`, `evidence_route`, and
+`phase`:
+
+```json
+{
+  "schema_version": 1,
+  "parent": {
+    "id": "central-123",
+    "title": "Implement and verify the change",
+    "description": "One frozen parent task.",
+    "acceptance_criteria": "The change is tested and the live route returns 200.",
+    "labels": ["project:example"]
+  },
+  "catalog": {
+    "schema_version": 1,
+    "projects": [
+      {
+        "slug": "example",
+        "routes": [
+          {
+            "owner": "Example implementation agent",
+            "execution": "agent",
+            "evidence_route": "pipeline_run",
+            "phases": ["implementation"]
+          },
+          {
+            "owner": "Example operations owner",
+            "execution": "human",
+            "evidence_route": "human_attestation",
+            "phases": ["closure"]
+          }
+        ]
+      }
+    ]
+  },
+  "timeout_seconds": 300
+}
+```
+
+The default tool-free Pi adapter uses `gpt-5.6-luna` with low thinking. Tests or
+another caller may provide `AFK_PLAN_AGENT_COMMAND` as an exact JSON argv array;
+the structured planning prompt is appended as the final argument. Inference
+proposes criteria, child ownership, routes, and dependency edges. It neither
+creates Beads nor authorizes publication.
+
+The deterministic Plan Contract requires ordered criterion source chunks whose
+whitespace-normalized concatenation exactly reproduces the parent acceptance
+criteria. The parent must have exactly one `project:<slug>` label present in the
+catalog. Every contiguous criterion id must belong to exactly one child. Child
+Projects, owners, and execution/evidence/phase combinations must exist in the trusted
+catalog; dependencies must form a DAG; and closure children must follow an
+implementation child when implementation work exists. Human and external work
+must include a handoff whose authority matches the trusted owner, commit and/or
+environment subject, and matching completion-record type. The contract derives
+`ready-for-agent`/`ready-for-human`, binds the plan to canonical parent and
+catalog SHA-256 digests, and computes a canonical plan digest.
+
+A valid result has `status: proposed`, or `needs_human` when inference records
+ambiguities. Both retain `authorization: null`: contract-valid is not approved
+or publishable. The new result directory contains accepted `input.json`, raw
+`events.jsonl`, raw `stderr.log`, and atomically sealed `output.json`. A valid
+plan exits zero. Process, event-protocol, or invalid-proposal outcomes seal a
+failed, timed-out, or interrupted output with no plan and exit `1`. Invalid
+invocation or input and an existing destination exit `2` without replacing
+evidence. This MVP does not read or write Beads, prepare worktrees, publish
+children, or validate completion of the parent.
+
 ## Run Preparer
 
 From any working directory, prepare and execute one central Bead as a local AFK
