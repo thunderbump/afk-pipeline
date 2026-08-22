@@ -108,6 +108,55 @@ creating a result. Accepted input is copied to `input.json`, and `output.json`
 is sealed last. The component performs no inference, process launch, Git work,
 or Beads access.
 
+## Child Graph Publisher
+
+Publish one immutable accepted plan as central Beads children and dependency
+relationships:
+
+```sh
+python3 -m afk_plan_publish publish.json /new/result-directory
+```
+
+`publish.json` contains exactly:
+
+```json
+{
+  "schema_version": 1,
+  "acceptance_directory": "/absolute/accepted-plan-result",
+  "beads_workspace": "/absolute/central-beads-workspace",
+  "command": ["bd"],
+  "timeout_seconds": 30
+}
+```
+
+The command inherits its environment. Authentication belongs there or in a
+caller-owned command wrapper; do not put secrets in the argv because accepted
+input and command transcripts are durable evidence. The Acceptance evidence,
+Beads workspace, and new result directory must be physically separate.
+
+Before mutation, the publisher revalidates the complete Acceptance Plan Policy
+record and requires the current parent Bead's frozen title, description,
+acceptance criteria, and labels. It identifies children with stable
+`afk-plan:<plan_sha256>:<local_id>` external references. Missing children are
+created with exact project/readiness labels and a parent relationship; existing
+children must still match the accepted plan. Planned `depends_on` edges become
+Beads `blocks` relationships.
+
+Human and external children receive a fixed completion handoff section after
+their actual Bead ID is known; the human form is titled `Human completion
+handoff`. It names the parent, plan digest, child, criteria, expected authority,
+required subject fields, Completion Record shape, and scoped-approval
+invalidation rule. Inference never receives Beads write authority.
+
+Each invocation uses a new result directory. Success seals `decision: published`;
+an exact replay seals `decision: replayed` without duplicate
+children or relationships. An operational failure after publication begins
+seals `outcome: failed`, the known partial mapping, and command transcripts;
+rerunning with a new result directory reconciles through the stable external
+references. Malformed, tampered, unaccepted, or stale parent evidence exits `2`
+before Beads mutation. The publisher does not start child work, validate child
+completion, close children, or accept the parent.
+
 ## Run Preparer
 
 From any working directory, prepare and execute one central Bead as a local AFK
