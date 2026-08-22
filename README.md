@@ -82,6 +82,32 @@ invocation or input and an existing destination exit `2` without replacing
 evidence. This MVP does not read or write Beads, prepare worktrees, publish
 children, or validate completion of the parent.
 
+## Acceptance Plan Policy
+
+Automatically accept one unambiguous canonical plan without writing Beads:
+
+```sh
+python3 -m afk_plan_accept acceptance.json /new/result-directory
+```
+
+Input contains exactly `schema_version: 1`, the original validated
+`planner_input`, and its canonical `plan`. The pure policy reruns the complete
+Plan Contract. It accepts any plan with `status: proposed`, an empty ambiguity
+list, and the contract-derived `authorization: null`. The policy does not judge
+whether one valid split is better than another. Split quality remains a Planner
+prompt concern that can change without changing this deterministic boundary.
+
+An accepted record wraps the unchanged plan and repeats its parent, catalog,
+and plan identities. It adds policy identity `contract-valid-proposed-v1` and
+machine-readable `basis: structural_validity_only`, then computes a canonical
+acceptance digest over that complete record. The record is authorization for a
+later child publisher; it does not itself create children or start work. A valid
+`needs_human` plan seals `outcome: unaccepted`, `decision: needs_human`, and
+exits `1`. Malformed, tampered, or already-authorized plans exit `2` before
+creating a result. Accepted input is copied to `input.json`, and `output.json`
+is sealed last. The component performs no inference, process launch, Git work,
+or Beads access.
+
 ## Run Preparer
 
 From any working directory, prepare and execute one central Bead as a local AFK
