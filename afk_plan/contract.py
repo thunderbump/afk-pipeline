@@ -3,6 +3,7 @@
 import hashlib
 import json
 import re
+from datetime import datetime, timedelta
 
 MAX_TEXT = 32 * 1024
 MAX_CRITERIA = 128
@@ -416,6 +417,18 @@ def string_list(value, name, maximum_items, maximum_bytes):
     if len(value) != len(set(value)):
         raise ValueError(f"{name} must contain unique values")
     return list(value)
+
+
+def utc_timestamp(value, name):
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{name} is invalid")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{name} is invalid") from error
+    if parsed.utcoffset() != timedelta(0):
+        raise ValueError(f"{name} must identify a UTC instant")
+    return value
 
 
 def enum(value, choices, name):

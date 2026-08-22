@@ -136,6 +136,9 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         self.assertIn("`central-child-2`", human["description"])
         self.assertIn("`Brian`", human["description"])
         self.assertIn('"parent_plan":', human["description"])
+        self.assertIn('"outcome": "satisfied"', human["description"])
+        self.assertIn('"producer":', human["description"])
+        self.assertIn('"kind": "human_attestation"', human["description"])
         self.assertIn("changed parent plan", human["description"])
         self.assertIn(
             "A valid Completion Record must be attached before this child closes.",

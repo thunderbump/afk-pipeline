@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 
+from afk_plan.contract import bounded_text, object_with_keys, utc_timestamp
 from afk_plan_accept.contract import accept_plan, validate_accepted_output
 
 
@@ -20,6 +21,76 @@ def load_accepted_plan(directory: Path) -> tuple[dict[str, object], dict[str, ob
     if output["acceptance"] != accepted:
         raise ValueError("accepted-plan record does not match its evidence")
     return request["planner_input"], accepted
+
+
+def validate_published_output(
+    value: object, parent_id: str, acceptance: dict[str, object]
+) -> dict[str, object]:
+    publication = object_with_keys(
+        value,
+        {
+            "schema_version",
+            "outcome",
+            "decision",
+            "source",
+            "started_at",
+            "finished_at",
+            "duration_seconds",
+            "acceptance_sha256",
+            "plan_sha256",
+            "children",
+            "error_category",
+            "artifacts",
+        },
+        "Child Graph Publisher output",
+    )
+    plan = acceptance["plan"]
+    if (
+        publication["schema_version"] != 1
+        or publication["outcome"] != "completed"
+        or publication["decision"] not in {"published", "replayed"}
+        or publication["source"] != {"kind": "bead", "id": parent_id}
+        or publication["acceptance_sha256"] != acceptance["acceptance_sha256"]
+        or publication["plan_sha256"] != plan["plan_sha256"]
+        or publication["error_category"] is not None
+        or publication["artifacts"]
+        != {
+            "input": "input.json",
+            "stdout": "stdout.log.json",
+            "stderr": "stderr.log.json",
+        }
+    ):
+        raise ValueError("Child Graph Publisher output is not successful")
+    for field in ("started_at", "finished_at"):
+        utc_timestamp(publication[field], f"publication {field}")
+    duration = publication["duration_seconds"]
+    if (
+        not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or duration < 0
+    ):
+        raise ValueError("publication duration_seconds is invalid")
+    mappings = publication["children"]
+    if not isinstance(mappings, list) or len(mappings) != len(plan["children"]):
+        raise ValueError("published child mapping does not cover the plan")
+    accepted = []
+    local_ids = set()
+    bead_ids = set()
+    for mapping_value in mappings:
+        mapping = object_with_keys(
+            mapping_value, {"local_id", "bead_id"}, "child mapping"
+        )
+        bounded_text(mapping["local_id"], "child mapping local_id", 128)
+        bounded_text(mapping["bead_id"], "child mapping bead_id", 256)
+        if mapping["local_id"] in local_ids or mapping["bead_id"] in bead_ids:
+            raise ValueError("published child mapping identities must be unique")
+        local_ids.add(mapping["local_id"])
+        bead_ids.add(mapping["bead_id"])
+        accepted.append(mapping)
+    if local_ids != {child["local_id"] for child in plan["children"]}:
+        raise ValueError("published child mapping does not match the plan")
+    publication["children"] = accepted
+    return publication
 
 
 def external_reference(plan_sha256: str, local_id: str) -> str:
@@ -66,9 +137,9 @@ def child_description(
             "schema_version": 1,
             "child": bead_id,
             "parent_plan": plan["plan_sha256"],
-            "outcome": "accepted",
-            "authority": {
-                "kind": child["execution"],
+            "outcome": "satisfied",
+            "producer": {
+                "kind": handoff["completion_record"],
                 "identity": handoff["authority"],
             },
             "criteria": child["criteria"],

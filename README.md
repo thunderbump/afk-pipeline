@@ -157,6 +157,65 @@ references. Malformed, tampered, unaccepted, or stale parent evidence exits `2`
 before Beads mutation. The publisher does not start child work, validate child
 completion, close children, or accept the parent.
 
+## Child Completion Record Validator
+
+Validate one scoped Completion Record against its immutable accepted Plan and
+Child Graph Publisher result without mutating Beads or external state:
+
+```sh
+python3 -m afk_complete completion.json /new/result-directory
+```
+
+`completion.json` contains exactly:
+
+```json
+{
+  "schema_version": 1,
+  "acceptance_directory": "/absolute/accepted-plan-result",
+  "publication_directory": "/absolute/child-publication-result",
+  "expected_subject": {
+    "commit": "<expected commit>",
+    "environment": "<expected environment>"
+  },
+  "record": {
+    "schema_version": 1,
+    "child": "central-child-id",
+    "parent_plan": "<canonical plan digest>",
+    "outcome": "satisfied",
+    "producer": {
+      "kind": "human_attestation",
+      "identity": "Brian"
+    },
+    "criteria": ["criterion-2"],
+    "subject": {
+      "commit": "<expected commit>",
+      "environment": "<expected environment>"
+    },
+    "evidence": ["<bounded evidence reference>"],
+    "accepted_at": "<UTC timestamp>"
+  }
+}
+```
+
+The deterministic validator revalidates the complete Acceptance Policy record,
+the successful Publisher envelope, the exact planned-child mapping, criterion
+coverage, producer identity and kind, required subject fields, caller-frozen
+subject values, evidence references, and UTC timestamp. Producer kinds remain
+distinct: `pipeline_run`, `repository_check`, `external_check`,
+`human_attestation`, and `human_waiver`. The producer kind must match the
+child's accepted evidence route, except that a human-attestation child may
+carry an explicit human waiver.
+
+All kinds except `human_waiver` require `outcome: satisfied` and seal
+`decision: satisfied` with `satisfies_criteria: true`. A human waiver requires
+`outcome: waived`, seals `decision: waived`, and keeps
+`satisfies_criteria: false`; validation never presents it as verified evidence.
+Changing the child, Plan digest, criteria, authority, or expected
+commit/environment fails before result creation. A valid result contains
+`input.json` and atomically sealed `output.json`. The module performs no
+inference, evidence retrieval, Beads access, work execution, child closure, or
+parent acceptance review.
+
 ## Run Preparer
 
 From any working directory, prepare and execute one central Bead as a local AFK
