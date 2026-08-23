@@ -1,20 +1,27 @@
-"""Apply the automatic MVP acceptance policy to one canonical plan."""
+"""Apply deterministic policy to direct routing or one canonical Plan."""
 
 import json
 import sys
 import time
 from pathlib import Path
 
-from afk_plan_accept.contract import POLICY, PlanNeedsHuman, accept_plan
+from afk_plan_accept.contract import (
+    DIRECT_POLICY,
+    POLICY,
+    PlanNeedsHuman,
+    RoutingNeedsHuman,
+    accept_direct,
+    accept_plan,
+)
 from afk_runtime import progress, seal_json, timestamp, write_json
 
 USAGE = "usage: python3 -m afk_plan_accept ACCEPTANCE_JSON RESULT_DIRECTORY"
 HELP = f"""{USAGE}
 
-Accept one unambiguous, contract-valid Acceptance Plan without mutating Beads.
+Accept direct routing or one unambiguous canonical Plan without mutating Beads.
 
 Arguments:
-  ACCEPTANCE_JSON  Exact Planner input and canonical Plan.
+  ACCEPTANCE_JSON  Exact Planner input and direct Routing or canonical Plan.
   RESULT_DIRECTORY  New directory for accepted input and terminal output.
 """
 
@@ -33,16 +40,27 @@ def main() -> int:
     request = acceptance_request(json.loads(input_path.read_text()))
     started_at = timestamp()
     started = time.monotonic()
+    policy = DIRECT_POLICY if "routing" in request else POLICY
     try:
-        acceptance = accept_plan(request["planner_input"], request["plan"])
+        if "routing" in request:
+            acceptance = accept_direct(request["planner_input"], request["routing"])
+            accepted_decision = "direct"
+        else:
+            acceptance = accept_plan(request["planner_input"], request["plan"])
+            accepted_decision = "accepted"
     except PlanNeedsHuman:
         acceptance = None
         outcome = "unaccepted"
         decision = "needs_human"
         error_category = "plan_ambiguity"
+    except RoutingNeedsHuman:
+        acceptance = None
+        outcome = "unaccepted"
+        decision = "needs_human"
+        error_category = "direct_incompatible"
     else:
         outcome = "completed"
-        decision = "accepted"
+        decision = accepted_decision
         error_category = None
     progress(f"Acceptance Plan policy decision: {decision}")
 
@@ -59,7 +77,7 @@ def main() -> int:
         "started_at": started_at,
         "finished_at": timestamp(),
         "duration_seconds": round(time.monotonic() - started, 3),
-        "policy": POLICY,
+        "policy": policy,
         "acceptance": acceptance,
         "error_category": error_category,
         "artifacts": {"input": "input.json"},
@@ -67,15 +85,14 @@ def main() -> int:
     output_path = result_directory / "output.json"
     seal_json(output_path, output)
     progress(f"sealed {outcome} Acceptance Plan policy result at {output_path}")
-    return 0 if decision == "accepted" else 1
+    return 0 if decision in {"accepted", "direct"} else 1
 
 
 def acceptance_request(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != {
-        "schema_version",
-        "planner_input",
-        "plan",
-    }:
+    if not isinstance(value, dict) or set(value) not in (
+        {"schema_version", "planner_input", "plan"},
+        {"schema_version", "planner_input", "routing"},
+    ):
         raise ValueError("acceptance input has an invalid shape")
     if value["schema_version"] != 1:
         raise ValueError("acceptance input schema_version must be 1")

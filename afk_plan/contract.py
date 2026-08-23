@@ -145,6 +145,116 @@ def build_plan(request: dict[str, object], proposal: object) -> dict[str, object
     return {**body, "plan_sha256": digest(body)}
 
 
+def build_routing(
+    request: dict[str, object], proposal_value: object
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    """Build one visible routing decision and an optional existing Plan."""
+    proposal = object_with_keys(
+        proposal_value,
+        {
+            "schema_version",
+            "decision",
+            "criteria",
+            "direct_routes",
+            "children",
+            "ambiguities",
+        },
+        "routing proposal",
+    )
+    if proposal["schema_version"] != 1:
+        raise ValueError("routing proposal schema_version must be 1")
+    enum(proposal["decision"], {"direct", "decompose"}, "routing decision")
+    if proposal["decision"] == "direct":
+        if proposal["children"] != []:
+            raise ValueError("direct routing must not contain children")
+        criteria = validate_criteria(request, proposal["criteria"])
+        ambiguities = validate_ambiguities(proposal["ambiguities"])
+        routes = validate_direct_routes(request, proposal["direct_routes"], criteria)
+        plan = None
+        status = "needs_human" if ambiguities else "proposed"
+    else:
+        if proposal["direct_routes"] != []:
+            raise ValueError("decompose routing must not contain direct routes")
+        plan = build_plan(
+            request,
+            {
+                "schema_version": 1,
+                "criteria": proposal["criteria"],
+                "children": proposal["children"],
+                "ambiguities": proposal["ambiguities"],
+            },
+        )
+        criteria = plan["criteria"]
+        ambiguities = plan["ambiguities"]
+        routes = child_routes(plan["children"], criteria)
+        if direct_pipeline_compatible(request, routes):
+            raise ValueError(
+                "decompose routing requires a cross-project or lifecycle boundary"
+            )
+        status = plan["status"]
+    body = {
+        "schema_version": 1,
+        "status": status,
+        "decision": proposal["decision"],
+        "parent": {
+            "id": request["parent"]["id"],
+            "sha256": digest(request["parent"]),
+        },
+        "catalog_sha256": digest(request["catalog"]),
+        "criteria": criteria,
+        "routes": routes,
+        "ambiguities": ambiguities,
+    }
+    return {**body, "routing_sha256": digest(body)}, plan
+
+
+def validate_direct_routing(
+    request: dict[str, object], value: object
+) -> dict[str, object]:
+    routing = object_with_keys(
+        value,
+        {
+            "schema_version",
+            "status",
+            "decision",
+            "parent",
+            "catalog_sha256",
+            "criteria",
+            "routes",
+            "ambiguities",
+            "routing_sha256",
+        },
+        "direct routing",
+    )
+    if routing["decision"] != "direct" or not isinstance(routing["routes"], list):
+        raise ValueError("routing is not direct")
+    direct_routes = []
+    for route_value in routing["routes"]:
+        route = dict_value(route_value, "direct route")
+        if route.get("target") != {
+            "kind": "source",
+            "id": request["parent"]["id"],
+        }:
+            raise ValueError("direct route target must be the source Bead")
+        direct_routes.append(
+            {key: item for key, item in route.items() if key != "target"}
+        )
+    rebuilt, plan = build_routing(
+        request,
+        {
+            "schema_version": 1,
+            "decision": "direct",
+            "criteria": routing["criteria"],
+            "direct_routes": direct_routes,
+            "children": [],
+            "ambiguities": routing["ambiguities"],
+        },
+    )
+    if plan is not None or rebuilt != routing:
+        raise ValueError("direct routing does not match its deterministic contract")
+    return routing
+
+
 def validate_plan(request: dict[str, object], value: object) -> dict[str, object]:
     plan = object_with_keys(
         value,
@@ -194,7 +304,16 @@ def validate_proposal(request: dict[str, object], value: object) -> dict[str, ob
     )
     if proposal["schema_version"] != 1:
         raise ValueError("proposal schema_version must be 1")
-    criteria = proposal["criteria"]
+    accepted_criteria = validate_criteria(request, proposal["criteria"])
+    children = validate_children(request, proposal["children"], accepted_criteria)
+    ambiguities = validate_ambiguities(proposal["ambiguities"])
+    proposal["criteria"] = accepted_criteria
+    proposal["children"] = children
+    proposal["ambiguities"] = ambiguities
+    return proposal
+
+
+def validate_criteria(request, criteria):
     if not isinstance(criteria, list) or not 1 <= len(criteria) <= MAX_CRITERIA:
         raise ValueError(
             f"proposal criteria must contain 1 through {MAX_CRITERIA} items"
@@ -217,12 +336,89 @@ def validate_proposal(request: dict[str, object], value: object) -> dict[str, ob
             "criterion source_text values must exactly cover acceptance_criteria"
         )
 
-    children = validate_children(request, proposal["children"], accepted_criteria)
-    ambiguities = string_list(proposal["ambiguities"], "proposal ambiguities", 32, 2048)
-    proposal["criteria"] = accepted_criteria
-    proposal["children"] = children
-    proposal["ambiguities"] = ambiguities
-    return proposal
+    return accepted_criteria
+
+
+def validate_ambiguities(value):
+    return string_list(value, "proposal ambiguities", 32, 2048)
+
+
+def validate_direct_routes(request, values, criteria):
+    if not isinstance(values, list) or len(values) != len(criteria):
+        raise ValueError("direct routes must cover every criterion exactly once")
+    projects = {project["slug"]: project for project in request["catalog"]["projects"]}
+    accepted = []
+    for index, (value, criterion) in enumerate(zip(values, criteria, strict=True)):
+        route = object_with_keys(
+            value,
+            {
+                "criterion",
+                "project",
+                "owner",
+                "phase",
+                "execution",
+                "evidence_route",
+            },
+            f"direct route {index + 1}",
+        )
+        if route["criterion"] != criterion["id"]:
+            raise ValueError("direct routes must follow criterion order")
+        if route["project"] not in projects:
+            raise ValueError("direct route project is not in the catalog")
+        bounded_text(route["owner"], "direct route owner", 256)
+        enum(route["phase"], PHASES, "direct route phase")
+        enum(route["execution"], EXECUTIONS, "direct route execution")
+        enum(route["evidence_route"], EVIDENCE_ROUTES, "direct route evidence_route")
+        if not catalog_allows(projects[route["project"]], route):
+            raise ValueError("direct route does not match a catalog route")
+        accepted.append(
+            {
+                "criterion": route["criterion"],
+                "target": {"kind": "source", "id": request["parent"]["id"]},
+                "project": route["project"],
+                "owner": route["owner"],
+                "phase": route["phase"],
+                "execution": route["execution"],
+                "evidence_route": route["evidence_route"],
+            }
+        )
+    return accepted
+
+
+def child_routes(children, criteria):
+    by_criterion = {
+        criterion: child for child in children for criterion in child["criteria"]
+    }
+    return [
+        {
+            "criterion": criterion["id"],
+            "target": {
+                "kind": "child",
+                "id": by_criterion[criterion["id"]]["local_id"],
+            },
+            "project": by_criterion[criterion["id"]]["project"],
+            "owner": by_criterion[criterion["id"]]["owner"],
+            "phase": by_criterion[criterion["id"]]["phase"],
+            "execution": by_criterion[criterion["id"]]["execution"],
+            "evidence_route": by_criterion[criterion["id"]]["evidence_route"],
+        }
+        for criterion in criteria
+    ]
+
+
+def direct_pipeline_compatible(request, routes):
+    source_project = next(
+        label.removeprefix("project:")
+        for label in request["parent"]["labels"]
+        if label.startswith("project:")
+    )
+    return all(
+        route["project"] == source_project
+        and route["execution"] == "agent"
+        and route["phase"] == "implementation"
+        and route["evidence_route"] in {"pipeline_run", "repository_check"}
+        for route in routes
+    )
 
 
 def validate_children(request, values, criteria):

@@ -17,7 +17,7 @@ def load_accepted_plan(directory: Path) -> tuple[dict[str, object], dict[str, ob
     ):
         raise ValueError("Acceptance Plan input has an invalid shape")
     accepted = accept_plan(request["planner_input"], request["plan"])
-    output = validate_accepted_output(request["planner_input"]["parent"]["id"], output)
+    output = validate_accepted_output(request["planner_input"], output)
     if output["acceptance"] != accepted:
         raise ValueError("accepted-plan record does not match its evidence")
     return request["planner_input"], accepted

@@ -6,9 +6,38 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from afk_plan.contract import build_routing
+from afk_plan_accept.contract import validate_accepted_output
 from tests.test_plan_accept_contract import planner_input, proposed_plan
 
 ROOT = Path(__file__).parents[1]
+
+
+def pipeline_direct_routing(request):
+    routing, plan = build_routing(
+        request,
+        {
+            "schema_version": 1,
+            "decision": "direct",
+            "criteria": proposed_plan(request)["criteria"],
+            "direct_routes": [
+                {
+                    "criterion": f"criterion-{index}",
+                    "project": "example",
+                    "owner": "Example agent",
+                    "phase": "implementation",
+                    "execution": "agent",
+                    "evidence_route": "pipeline_run",
+                }
+                for index in (1, 2)
+            ],
+            "children": [],
+            "ambiguities": [],
+        },
+    )
+    if plan is not None:
+        raise AssertionError("direct fixture unexpectedly produced a Plan")
+    return routing
 
 
 class PlanAcceptanceCliTest(unittest.TestCase):
@@ -57,6 +86,167 @@ class PlanAcceptanceCliTest(unittest.TestCase):
         self.assertEqual(output["outcome"], "unaccepted")
         self.assertEqual(output["decision"], "needs_human")
         self.assertIsNone(output["acceptance"])
+
+    def test_accepts_pipeline_compatible_direct_routing_without_a_plan(self):
+        request = planner_input()
+        routing = pipeline_direct_routing(request)
+        self.value = {
+            "schema_version": 1,
+            "planner_input": request,
+            "routing": routing,
+        }
+
+        completed = self.invoke()
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "completed")
+        self.assertEqual(output["decision"], "direct")
+        self.assertEqual(output["source"], {"kind": "bead", "id": "central-example"})
+        self.assertEqual(output["policy"], "pipeline-compatible-direct-v1")
+        self.assertEqual(
+            output["acceptance"]["routing_sha256"], routing["routing_sha256"]
+        )
+        self.assertEqual(output["acceptance"]["routing"], routing)
+        self.assertNotIn("plan", output["acceptance"])
+        self.assertEqual(validate_accepted_output(request, output), output)
+
+        tampered = copy.deepcopy(output)
+        tampered["acceptance"]["routing"]["routing_sha256"] = "0" * 64
+        with self.assertRaises(ValueError):
+            validate_accepted_output(request, tampered)
+
+    def test_tampered_direct_routing_creates_no_policy_result(self):
+        request = planner_input()
+        routing = copy.deepcopy(pipeline_direct_routing(request))
+        routing["routing_sha256"] = "0" * 64
+        self.value = {
+            "schema_version": 1,
+            "planner_input": request,
+            "routing": routing,
+        }
+
+        completed = self.invoke()
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(self.result.exists())
+
+    def test_rejects_incompatible_or_uncertain_direct_routing(self):
+        cases = (
+            (
+                "closure",
+                "example",
+                "Example agent",
+                "agent",
+                "pipeline_run",
+                "closure",
+                [],
+            ),
+            (
+                "human",
+                "example",
+                "Brian",
+                "human",
+                "human_attestation",
+                "implementation",
+                [],
+            ),
+            (
+                "external",
+                "example",
+                "Host operator",
+                "external",
+                "external_check",
+                "implementation",
+                [],
+            ),
+            (
+                "cross-project",
+                "other",
+                "Other agent",
+                "agent",
+                "pipeline_run",
+                "implementation",
+                [],
+            ),
+            (
+                "ambiguous",
+                "example",
+                "Example agent",
+                "agent",
+                "pipeline_run",
+                "implementation",
+                ["The evidence owner is unclear."],
+            ),
+        )
+        for name, project, owner, execution, evidence, phase, ambiguities in cases:
+            with self.subTest(name=name):
+                request = planner_input()
+                request["catalog"]["projects"][0]["routes"].extend(
+                    [
+                        {
+                            "owner": "Brian",
+                            "execution": "human",
+                            "evidence_route": "human_attestation",
+                            "phases": ["implementation"],
+                        },
+                        {
+                            "owner": "Host operator",
+                            "execution": "external",
+                            "evidence_route": "external_check",
+                            "phases": ["implementation"],
+                        },
+                    ]
+                )
+                request["catalog"]["projects"].append(
+                    {
+                        "slug": "other",
+                        "routes": [
+                            {
+                                "owner": "Other agent",
+                                "execution": "agent",
+                                "evidence_route": "pipeline_run",
+                                "phases": ["implementation"],
+                            }
+                        ],
+                    }
+                )
+                direct_routes = [
+                    {
+                        "criterion": f"criterion-{index}",
+                        "project": project,
+                        "owner": owner,
+                        "phase": phase,
+                        "execution": execution,
+                        "evidence_route": evidence,
+                    }
+                    for index in (1, 2)
+                ]
+                routing, _ = build_routing(
+                    request,
+                    {
+                        "schema_version": 1,
+                        "decision": "direct",
+                        "criteria": proposed_plan(request)["criteria"],
+                        "direct_routes": direct_routes,
+                        "children": [],
+                        "ambiguities": ambiguities,
+                    },
+                )
+                self.value = {
+                    "schema_version": 1,
+                    "planner_input": request,
+                    "routing": routing,
+                }
+                self.result = self.root / f"result-{name}"
+
+                completed = self.invoke()
+
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                output = json.loads((self.result / "output.json").read_text())
+                self.assertEqual(output["decision"], "needs_human")
+                self.assertEqual(output["error_category"], "direct_incompatible")
+                self.assertIsNone(output["acceptance"])
 
     def test_tampered_plan_and_existing_destination_do_not_mutate(self):
         self.value["plan"] = copy.deepcopy(self.value["plan"])
