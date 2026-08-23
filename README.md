@@ -901,6 +901,54 @@ The coordinator does not access Beads, prepare a workspace, choose a branch,
 infer worker liveness, retry component failures, publish feedback, manage
 containers, or implement a scheduler or general state-machine framework.
 
+## Parent Acceptance Review
+
+Judge whether a completed child graph collectively satisfies its accepted
+parent Plan:
+
+```sh
+python3 -m afk_parent_review review.json /new/result-directory
+```
+
+The structured input names the immutable accepted-Plan and Child Graph
+Publisher result directories, a caller-frozen child graph, exactly one sealed
+Completion Validator result per planned child, a current caller-frozen subject,
+typed terminal evidence, and a timeout. Every child must be closed. Its
+`parent-child` and `blocks` relationships must exactly match the accepted Plan.
+Completion results must cover every published child exactly once and retain the
+accepted Plan, child, criteria, producer, current subject, evidence references,
+and satisfaction state.
+
+Pipeline terminal evidence is a prepared Run that must belong to the published
+child, end at Coordinator `completed/stop`, contain a valid Committed Change,
+and match the current commit subject. Repository-check evidence must be a passed,
+unchanged-head Validation result at that commit. Human and external authority
+remain visibly typed as Completion Record evidence instead of being relabeled as
+deterministic verification. Completion timestamps cannot predate their pipeline
+Run.
+
+These deterministic checks finish before result creation or inference. The
+default adapter then invokes Pi with `gpt-5.6-luna`, low thinking, and no tools.
+`AFK_PARENT_REVIEW_AGENT_COMMAND` may contain a JSON argv override for testing
+or deployment. The model sees only the verified fan-in summary; it does not
+read repositories, retrieve evidence, mutate Beads, run work, or ask for an
+unchanged scoped human approval again.
+
+The immutable result directory contains `input.json`, the deterministic
+`fan-in.json`, raw `events.jsonl`, raw `stderr.log`, and an atomically sealed
+`output.json`. A completed result decides `accepted` or `incomplete`, gives one
+decision per canonical parent criterion, and lists exactly one gap per
+incomplete criterion. An incomplete result also proposes one advisory follow-up
+child using the existing Plan child shape: project, owner, phase, execution,
+evidence route, dependencies, and handoff are checked against the trusted
+catalog before sealing. That proposal has no publication or work authority. A
+human waiver remains non-satisfying and cannot be accepted by the model.
+
+Exit status is `0` only for an accepted parent, `1` for incomplete or sealed
+agent failure, and `2` for invalid invocation, configuration, or evidence. A
+new evidence set produces a new attempt; existing evidence and attempts are
+never rewritten.
+
 ## Check
 
 Install the repository's Ruff commit hooks once per checkout:

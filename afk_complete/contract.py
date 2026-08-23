@@ -1,5 +1,8 @@
 """Revalidate a published child and its scoped Completion Record."""
 
+import json
+from pathlib import Path
+
 from afk_plan.contract import bounded_text, object_with_keys, string_list, utc_timestamp
 
 PRODUCER_KINDS = {
@@ -10,6 +13,24 @@ PRODUCER_KINDS = {
     "human_waiver",
 }
 SUBJECT_FIELDS = {"commit", "environment"}
+OUTPUT_FIELDS = {
+    "schema_version",
+    "outcome",
+    "decision",
+    "source",
+    "started_at",
+    "finished_at",
+    "duration_seconds",
+    "acceptance_sha256",
+    "plan_sha256",
+    "local_id",
+    "criteria",
+    "evidence_basis",
+    "satisfies_criteria",
+    "record",
+    "error_category",
+    "artifacts",
+}
 
 
 def validate_record(
@@ -87,3 +108,94 @@ def validate_subject(value: object, name: str) -> dict[str, str]:
     for field, item in accepted.items():
         bounded_text(item, f"{name}.{field}", 1024)
     return accepted
+
+
+def validate_output(
+    value: object,
+    child: dict[str, object],
+    child_id: str,
+    acceptance_sha256: str,
+    plan_sha256: str,
+    expected_subject: dict[str, str],
+) -> dict[str, object]:
+    """Validate a sealed successful Completion Validator result for fan-in."""
+    output = object_with_keys(value, OUTPUT_FIELDS, "Completion Validator output")
+    record, basis, satisfies = validate_record(
+        output["record"],
+        child,
+        child_id,
+        plan_sha256,
+        expected_subject,
+    )
+    if (
+        output["schema_version"] != 1
+        or output["outcome"] != "completed"
+        or output["decision"] != record["outcome"]
+        or output["source"] != {"kind": "bead", "id": child_id}
+        or output["acceptance_sha256"] != acceptance_sha256
+        or output["plan_sha256"] != plan_sha256
+        or output["local_id"] != child["local_id"]
+        or output["criteria"] != child["criteria"]
+        or output["evidence_basis"] != basis
+        or output["satisfies_criteria"] is not satisfies
+        or output["error_category"] is not None
+        or output["artifacts"] != {"input": "input.json"}
+    ):
+        raise ValueError("Completion Validator output does not match its child")
+    for field in ("started_at", "finished_at"):
+        utc_timestamp(output[field], f"Completion Validator {field}")
+    duration = output["duration_seconds"]
+    if (
+        not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or duration < 0
+    ):
+        raise ValueError("Completion Validator duration_seconds is invalid")
+    output["record"] = record
+    return output
+
+
+def load_result(
+    directory: Path,
+    child: dict[str, object],
+    child_id: str,
+    acceptance_sha256: str,
+    plan_sha256: str,
+    acceptance_directory: Path,
+    publication_directory: Path,
+    expected_subject: dict[str, str],
+) -> dict[str, object]:
+    """Load and revalidate one immutable Completion Validator attempt."""
+    request = object_with_keys(
+        json.loads((directory / "input.json").read_text()),
+        {
+            "schema_version",
+            "acceptance_directory",
+            "publication_directory",
+            "expected_subject",
+            "record",
+        },
+        "Completion Validator input",
+    )
+    if (
+        request["schema_version"] != 1
+        or not Path(request["acceptance_directory"]).is_absolute()
+        or not Path(request["publication_directory"]).is_absolute()
+        or Path(request["acceptance_directory"]).resolve() != acceptance_directory
+        or Path(request["publication_directory"]).resolve() != publication_directory
+    ):
+        raise ValueError("Completion Validator input does not match parent evidence")
+    subject = validate_subject(request["expected_subject"], "expected_subject")
+    if subject != expected_subject:
+        raise ValueError("Completion Validator subject is stale at parent review")
+    output = validate_output(
+        json.loads((directory / "output.json").read_text()),
+        child,
+        child_id,
+        acceptance_sha256,
+        plan_sha256,
+        subject,
+    )
+    if output["record"] != request["record"]:
+        raise ValueError("Completion Validator output does not match its input")
+    return output
