@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -273,16 +274,41 @@ def open_attempt(scope, evidence):
     ).hexdigest()
     attempt = scope["result_root"] / f"{scope['mapping']['bead_id']}-{digest[:16]}"
     request_path = attempt / "request.json"
-    if attempt.exists():
-        request = json.loads(request_path.read_text())
-        if request.get("identity") != identity or not isinstance(
-            request.get("record"), dict
+    if attempt.exists() and not attempt.is_dir():
+        raise AttestationError(
+            "existing attestation attempt conflicts with this approval"
+        )
+    attempt.mkdir(exist_ok=True)
+    request = None
+    if request_path.exists():
+        try:
+            request = json.loads(request_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            # An interrupted initial write is safe to replace only while no later
+            # artifact can have relied on it.
+            if any(
+                path.name not in {"request.json", "request.json.tmp"}
+                for path in attempt.iterdir()
+            ):
+                raise AttestationError(
+                    "existing attestation attempt has a corrupt request"
+                )
+    if request is not None:
+        if (
+            not isinstance(request, dict)
+            or request.get("identity") != identity
+            or not isinstance(request.get("record"), dict)
         ):
-            raise AttestationError(
-                "existing attestation attempt conflicts with this approval"
-            )
-        return attempt, request["record"]
-    attempt.mkdir()
+            if any(
+                path.name not in {"request.json", "request.json.tmp"}
+                for path in attempt.iterdir()
+            ):
+                raise AttestationError(
+                    "existing attestation attempt conflicts with this approval"
+                )
+            request = None
+        else:
+            return attempt, request["record"]
     child = scope["child"]
     record = {
         "schema_version": 1,
@@ -298,7 +324,7 @@ def open_attempt(scope, evidence):
         "evidence": evidence,
         "accepted_at": timestamp(),
     }
-    write_json(
+    seal_json(
         request_path, {"schema_version": 1, "identity": identity, "record": record}
     )
     return attempt, record
@@ -395,9 +421,16 @@ def reconcile(scope, record, attempt, adapter):
         raise AttestationError("child is not in a supported state", "current_state")
 
     completion = attempt / "completion"
+    completion_stage = attempt / "completion.in-progress"
+    # afk_complete requires a new result directory. A directory without its
+    # atomically sealed output is only an interrupted validator run, not proof
+    # that validation completed.
+    if completion.exists() and not (completion / "output.json").is_file():
+        remove_partial_completion(completion)
     if not completion.exists():
+        remove_partial_completion(completion_stage)
         completion_input = attempt / "completion.json"
-        write_json(
+        seal_json(
             completion_input,
             {
                 "schema_version": 1,
@@ -415,7 +448,7 @@ def reconcile(scope, record, attempt, adapter):
                 "-m",
                 "afk_complete",
                 str(completion_input),
-                str(completion),
+                str(completion_stage),
             ],
             cwd=Path(__file__).parent,
             text=True,
@@ -434,6 +467,12 @@ def reconcile(scope, record, attempt, adapter):
             raise AttestationError(
                 "Completion Record validation failed", "completion_validation"
             )
+        if not (completion_stage / "output.json").is_file():
+            raise AttestationError(
+                "Completion Record validation did not seal a result",
+                "completion_validation",
+            )
+        completion_stage.rename(completion)
     try:
         output = load_result(
             completion,
@@ -454,6 +493,17 @@ def reconcile(scope, record, attempt, adapter):
         adapter.one("comments", "add", child_id, encoded, "--json")
     if status != "closed":
         adapter.one("close", child_id, "--json")
+
+
+def remove_partial_completion(path):
+    if not path.exists():
+        return
+    if path.is_symlink() or not path.is_dir():
+        raise AttestationError(
+            "partial Completion Record result is not a directory",
+            "completion_validation",
+        )
+    shutil.rmtree(path)
 
 
 def finish(

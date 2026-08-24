@@ -3,8 +3,10 @@ import os
 import subprocess
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
+import afk_attest
 from tests import test_completion_cli as completion_helpers
 
 ROOT = Path(__file__).parents[1]
@@ -64,6 +66,17 @@ class AttestCliTest(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def open_attempt(self):
+        arguments = SimpleNamespace(
+            child_id=self.child_id,
+            publication=self.publication,
+            subject=["commit=abc123", "environment=local production"],
+            evidence=["bead-comment:central-example#approval-1"],
+            config=self.config,
+        )
+        scope = afk_attest.load_scope(arguments)
+        return afk_attest.open_attempt(scope, arguments.evidence)[0]
 
     def test_preview_and_decline_do_not_create_evidence_or_read_beads(self):
         before = self.state.read_text()
@@ -127,6 +140,32 @@ class AttestCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         state = json.loads(self.state.read_text())
         self.assertEqual(state["children"][1]["status"], "closed")
+
+    def test_retry_initializes_an_attempt_interrupted_before_request_was_sealed(self):
+        attempt = self.open_attempt()
+        (attempt / "request.json").unlink()
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue((attempt / "request.json").is_file())
+        self.assertEqual(
+            json.loads((attempt / "output.json").read_text())["decision"], "attested"
+        )
+
+    def test_retry_replaces_an_unsealed_completion_result(self):
+        attempt = self.open_attempt()
+        completion = attempt / "completion"
+        completion.mkdir()
+        (completion / "input.json").write_text('{"partial":')
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads((completion / "output.json").read_text())["outcome"],
+            "completed",
+        )
 
     def test_retry_reconciles_attachment_after_interrupted_close(self):
         state = json.loads(self.state.read_text())
