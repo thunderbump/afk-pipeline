@@ -21,7 +21,8 @@ def valid_response():
 
 
 def commit_response():
-    Path("README.md").write_text("reviewed code\nresponse applied\n")
+    readme = Path("README.md")
+    readme.write_text(readme.read_text() + "response applied\n")
     subprocess.run(["git", "add", "README.md"], check=True)
     subprocess.run(
         ["git", "commit", "--quiet", "-m", "Respond to feedback"], check=True

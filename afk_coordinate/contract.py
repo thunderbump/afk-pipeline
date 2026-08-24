@@ -117,6 +117,8 @@ def validate_checkpoint(state):
         "history",
         "terminal",
     }
+    if isinstance(state, dict) and "continuation" in state:
+        expected.add("continuation")
     if (
         not isinstance(state, dict)
         or set(state) != expected
@@ -124,6 +126,8 @@ def validate_checkpoint(state):
         or state.get("status") not in {"running", "completed", "failed"}
     ):
         raise ValueError("invalid coordinator checkpoint")
+    if "continuation" in state:
+        validate_continuation(state["continuation"])
     sequence = state.get("next_sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         raise ValueError("invalid coordinator checkpoint")
@@ -157,6 +161,38 @@ def validate_checkpoint(state):
     validate_terminal_history(state)
     validate_history_position(state)
     return state
+
+
+def validate_continuation(value):
+    expected = {
+        "schema_version",
+        "additional_responses",
+        "completed_responses",
+        "effective_max_responses",
+        "prior_output",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("schema_version") != 1
+    ):
+        raise ValueError("invalid continuation input")
+    additional = value["additional_responses"]
+    completed = value["completed_responses"]
+    effective = value["effective_max_responses"]
+    if (
+        not isinstance(additional, int)
+        or isinstance(additional, bool)
+        or additional <= 0
+        or not isinstance(completed, int)
+        or isinstance(completed, bool)
+        or completed < 0
+        or effective != completed + additional
+        or not isinstance(value["prior_output"], str)
+        or not value["prior_output"]
+    ):
+        raise ValueError("invalid continuation input")
+    return value
 
 
 def valid_invocation_record(record, terminal):

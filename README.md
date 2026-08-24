@@ -989,6 +989,26 @@ The abandoned invocation remains in history and the retry receives a new
 numbered directory. This flag is an external liveness assertion; the
 coordinator does not inspect or terminate the old process.
 
+An exhausted run can receive a new, additive Feedback Response allowance:
+
+```sh
+python3 -m afk_coordinate run.json /existing/run-directory \
+  --continue-exhausted ADDITIONAL_RESPONSES
+```
+
+`ADDITIONAL_RESPONSES` must be a positive integer. The coordinator starts with
+the terminal Finding Assessment, does not repeat Attempt, and keeps the
+original `state.json` and `output.json` unchanged. Each continuation records its
+accepted allowance, effective limit, checkpoint, and terminal output under
+`continuations/NN/`. Repeating the command with the same allowance resumes an
+active continuation. A continuation that exhausts its allowance can receive a
+later additive allowance in the next numbered directory.
+
+Only a clean exhausted run can continue. Stopped and failed runs are immutable,
+and continuation refuses if the workspace no longer matches the repository
+state captured by the terminal Finding Assessment. This keeps manual repairs or
+other external commits from being silently folded into old review evidence.
+
 `stop` and `exhausted` Iteration Policy decisions atomically seal terminal
 `output.json` with `outcome: completed`. A sealed non-success from any module
 seals `outcome: failed`. Exit status is `0` for a completed run, `1` for a

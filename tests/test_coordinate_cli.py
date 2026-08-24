@@ -32,12 +32,11 @@ class PublicCoordinatorCliTest(unittest.TestCase):
             check=False,
         )
 
-        usage = (
-            "usage: python3 -m afk_coordinate RUN_JSON RUN_DIRECTORY [--abandon-active]"
-        )
+        usage = "usage: python3 -m afk_coordinate RUN_JSON RUN_DIRECTORY"
         self.assertEqual(help_result.returncode, 0, help_result.stderr)
         self.assertIn(usage, help_result.stdout)
         self.assertIn("resume", help_result.stdout)
+        self.assertIn("ADDITIONAL_RESPONSES", help_result.stdout)
         self.assertEqual(help_result.stderr, "")
         self.assertEqual(malformed.returncode, 2)
         self.assertIn(usage, malformed.stderr)
@@ -199,6 +198,292 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertTrue(assignment_path.is_file())
+
+    def test_exhausted_run_adds_responses_without_repeating_attempt(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "continued-run"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        original_state = (run / "state.json").read_bytes()
+        original_output = (run / "output.json").read_bytes()
+
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="commit",
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+        continuation = run / "continuations" / "01"
+        self.assertEqual(
+            json.loads((continuation / "input.json").read_text()),
+            {
+                "schema_version": 1,
+                "additional_responses": 1,
+                "completed_responses": 0,
+                "effective_max_responses": 1,
+                "prior_output": "../../output.json",
+            },
+        )
+        output = json.loads((continuation / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(output["history"][6]["component"], "response")
+        self.assertEqual(
+            [item["component"] for item in output["history"]].count("attempt"), 1
+        )
+        self.assertEqual((run / "state.json").read_bytes(), original_state)
+        self.assertEqual((run / "output.json").read_bytes(), original_output)
+        self.assertEqual(
+            json.loads((run / "12-iteration" / "input.json").read_text())[
+                "max_responses"
+            ],
+            1,
+        )
+
+    def test_exhausted_continuation_resumes_after_coordinator_interruption(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "interrupted-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        environment = self.environment(
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="delayed-commit",
+        )
+        coordinator = subprocess.Popen(
+            self.command(request_path, run, "--continue-exhausted", "1"),
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        continuation = run / "continuations" / "01"
+        self.wait_for_active_state(continuation / "state.json", "response")
+        os.kill(coordinator.pid, signal.SIGKILL)
+        coordinator.wait(timeout=5)
+        self.wait_for_file(run / "07-response" / "output.json")
+
+        resumed = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+        )
+
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        output = json.loads((continuation / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(
+            [record["component"] for record in output["history"]].count("response"),
+            1,
+        )
+        self.assertFalse((run / "08-response").exists())
+
+    def test_active_continuation_refuses_a_rewritten_response_allowance(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "tampered-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        environment = self.environment(
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="delayed-commit",
+        )
+        coordinator = subprocess.Popen(
+            self.command(request_path, run, "--continue-exhausted", "1"),
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        continuation = run / "continuations" / "01"
+        state_path = continuation / "state.json"
+        self.wait_for_active_state(state_path, "response")
+        os.kill(coordinator.pid, signal.SIGKILL)
+        coordinator.wait(timeout=5)
+        self.wait_for_file(run / "07-response" / "output.json")
+        continuation_input = json.loads((continuation / "input.json").read_text())
+        continuation_input["additional_responses"] = 2
+        continuation_input["effective_max_responses"] = 2
+        self.write_json(continuation / "input.json", continuation_input)
+        before = state_path.read_bytes()
+
+        resumed = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "2",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+        )
+
+        self.assertEqual(resumed.returncode, 2)
+        self.assertIn("continuation input", resumed.stderr)
+        self.assertEqual(state_path.read_bytes(), before)
+
+    def test_each_exhausted_continuation_adds_a_fresh_response_allowance(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "multiple-continuations"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        first = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="findings",
+            assessment_scenario="address",
+            response_scenario="commit",
+        )
+        first_output = (run / "continuations" / "01" / "output.json").read_bytes()
+
+        second = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "2",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="commit",
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(second.returncode, 0, second.stderr)
+        second_directory = run / "continuations" / "02"
+        self.assertEqual(
+            json.loads((second_directory / "input.json").read_text()),
+            {
+                "schema_version": 1,
+                "additional_responses": 2,
+                "completed_responses": 1,
+                "effective_max_responses": 3,
+                "prior_output": "../01/output.json",
+            },
+        )
+        output = json.loads((second_directory / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(
+            [record["component"] for record in output["history"]].count("response"),
+            2,
+        )
+        self.assertEqual(
+            (run / "continuations" / "01" / "output.json").read_bytes(),
+            first_output,
+        )
+
+    def test_stopped_run_refuses_continuation_without_changing_terminal_evidence(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "stopped-run"
+        stopped = self.invoke(request_path, run)
+        state = (run / "state.json").read_bytes()
+        output = (run / "output.json").read_bytes()
+
+        continued = self.invoke(request_path, run, "--continue-exhausted", "1")
+
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(continued.returncode, 2)
+        self.assertIn("only an exhausted", continued.stderr)
+        self.assertEqual((run / "state.json").read_bytes(), state)
+        self.assertEqual((run / "output.json").read_bytes(), output)
+        self.assertFalse((run / "continuations").exists())
+
+    def test_failed_run_refuses_continuation_without_changing_terminal_evidence(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "raise SystemExit(7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "failed-continuation-origin"
+        failed = self.invoke(request_path, run)
+        state = (run / "state.json").read_bytes()
+        output = (run / "output.json").read_bytes()
+
+        continued = self.invoke(request_path, run, "--continue-exhausted", "1")
+
+        self.assertEqual(failed.returncode, 1, failed.stderr)
+        self.assertEqual(continued.returncode, 2)
+        self.assertIn("only an exhausted", continued.stderr)
+        self.assertEqual((run / "state.json").read_bytes(), state)
+        self.assertEqual((run / "output.json").read_bytes(), output)
+        self.assertFalse((run / "continuations").exists())
+
+    def test_advanced_workspace_refuses_continuation_before_allocating_a_ledger(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "advanced-workspace"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        original_state = (run / "state.json").read_bytes()
+        original_output = (run / "output.json").read_bytes()
+        (self.workspace / "README.md").write_text("externally advanced\n")
+        self.git("add", "README.md")
+        self.git("commit", "--quiet", "-m", "External repair")
+
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(continued.returncode, 2)
+        self.assertIn(
+            "workspace must match the assessed repository state", continued.stderr
+        )
+        self.assertEqual((run / "state.json").read_bytes(), original_state)
+        self.assertEqual((run / "output.json").read_bytes(), original_output)
+        self.assertFalse((run / "continuations").exists())
+
+    def test_continuation_requires_a_positive_additional_response_count(self):
+        for value in ("0", "-1", "not-a-number"):
+            with self.subTest(value=value):
+                result = self.invoke(
+                    self.root / "missing-request.json",
+                    self.root / "missing-run",
+                    "--continue-exhausted",
+                    value,
+                )
+
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(
+                    "ADDITIONAL_RESPONSES must be a positive integer", result.stderr
+                )
+                self.assertFalse((self.root / "missing-run").exists())
 
     def test_restart_consumes_a_result_sealed_after_the_coordinator_crashed(self):
         assignment_path, request_path = self.prepare_run(max_responses=0)
@@ -688,9 +973,11 @@ class CoordinatorCliTest(unittest.TestCase):
         ]
 
     def wait_for_active(self, run, component):
+        self.wait_for_active_state(run / "state.json", component)
+
+    def wait_for_active_state(self, state_path, component):
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            state_path = run / "state.json"
             if state_path.exists():
                 state = json.loads(state_path.read_text())
                 active = state["active_invocation"]
