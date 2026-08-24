@@ -12,6 +12,14 @@ MAX_PROJECTS = 64
 MAX_ROUTES = 16
 DOMAIN_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,127}\Z")
 EXECUTIONS = {"agent", "human", "external"}
+EXECUTORS = {"afk_run", "caller_agent", "outside_help"}
+OUTSIDE_HELP_REASONS = {
+    "missing_authority",
+    "missing_credentials",
+    "human_judgment",
+    "physical_action",
+    "unavailable_system",
+}
 EVIDENCE_ROUTES = {
     "pipeline_run",
     "repository_check",
@@ -25,8 +33,8 @@ def validate_input(value: object) -> dict[str, object]:
     request = object_with_keys(
         value, {"schema_version", "parent", "catalog", "timeout_seconds"}, "input"
     )
-    if request["schema_version"] != 1:
-        raise ValueError("input schema_version must be 1")
+    if request["schema_version"] not in {1, 2}:
+        raise ValueError("input schema_version must be 1 or 2")
     timeout = request["timeout_seconds"]
     if (
         not isinstance(timeout, int)
@@ -35,7 +43,7 @@ def validate_input(value: object) -> dict[str, object]:
     ):
         raise ValueError("timeout_seconds must be an integer from 1 through 3600")
     request["parent"] = validate_parent(request["parent"])
-    request["catalog"] = validate_catalog(request["catalog"])
+    request["catalog"] = validate_catalog(request["catalog"], request["schema_version"])
     project_labels = [
         label.removeprefix("project:")
         for label in request["parent"]["labels"]
@@ -63,10 +71,10 @@ def validate_parent(value: object) -> dict[str, object]:
     return parent
 
 
-def validate_catalog(value: object) -> dict[str, object]:
+def validate_catalog(value: object, version: int = 1) -> dict[str, object]:
     catalog = object_with_keys(value, {"schema_version", "projects"}, "catalog")
-    if catalog["schema_version"] != 1:
-        raise ValueError("catalog schema_version must be 1")
+    if catalog["schema_version"] != version:
+        raise ValueError("catalog schema_version must match its input")
     projects = catalog["projects"]
     if not isinstance(projects, list) or not 1 <= len(projects) <= MAX_PROJECTS:
         raise ValueError(
@@ -92,21 +100,29 @@ def validate_catalog(value: object) -> dict[str, object]:
         route_keys = set()
         accepted_routes = []
         for route_index, route_value in enumerate(routes):
-            route = object_with_keys(
-                route_value,
-                {"owner", "execution", "evidence_route", "phases"},
-                f"catalog.projects[{index}].routes[{route_index}]",
+            route = dict_value(
+                route_value, f"catalog.projects[{index}].routes[{route_index}]"
             )
+            execution_name = execution_field(version)
+            required = {"owner", execution_name, "evidence_route", "phases"}
+            valid_fields = set(route) == required or (
+                version == 2 and set(route) == required | {"outside_help_reason"}
+            )
+            if not valid_fields:
+                raise ValueError(
+                    f"catalog.projects[{index}].routes[{route_index}] has invalid fields"
+                )
             bounded_text(route["owner"], "catalog owner", 256)
-            enum(route["execution"], EXECUTIONS, "catalog execution")
+            validate_executor(route, version, "catalog")
             enum(route["evidence_route"], EVIDENCE_ROUTES, "catalog evidence_route")
             phases = string_list(route["phases"], "catalog phases", len(PHASES), 32)
             if not set(phases) <= PHASES:
                 raise ValueError("catalog phase is invalid")
             route_key = (
                 route["owner"],
-                route["execution"],
+                route[execution_name],
                 route["evidence_route"],
+                route.get("outside_help_reason"),
             )
             if route_key in route_keys:
                 raise ValueError("catalog routes must be unique per project")
@@ -126,12 +142,15 @@ def build_plan(request: dict[str, object], proposal: object) -> dict[str, object
         children.append(
             {
                 **child,
-                "readiness": readiness_for_execution(child["execution"]),
+                "readiness": readiness_for_execution(
+                    child[execution_field(request["schema_version"])],
+                    request["schema_version"],
+                ),
             }
         )
     body = {
-        "schema_version": 1,
-        "status": "needs_human" if proposal["ambiguities"] else "proposed",
+        "schema_version": request["schema_version"],
+        "status": routing_status(request["schema_version"], proposal["ambiguities"]),
         "parent": {
             "id": request["parent"]["id"],
             "sha256": digest(request["parent"]),
@@ -161,8 +180,8 @@ def build_routing(
         },
         "routing proposal",
     )
-    if proposal["schema_version"] != 1:
-        raise ValueError("routing proposal schema_version must be 1")
+    if proposal["schema_version"] != request["schema_version"]:
+        raise ValueError("routing proposal schema_version must match its input")
     enum(proposal["decision"], {"direct", "decompose"}, "routing decision")
     if proposal["decision"] == "direct":
         if proposal["children"] != []:
@@ -171,14 +190,14 @@ def build_routing(
         ambiguities = validate_ambiguities(proposal["ambiguities"])
         routes = validate_direct_routes(request, proposal["direct_routes"], criteria)
         plan = None
-        status = "needs_human" if ambiguities else "proposed"
+        status = routing_status(request["schema_version"], ambiguities)
     else:
         if proposal["direct_routes"] != []:
             raise ValueError("decompose routing must not contain direct routes")
         plan = build_plan(
             request,
             {
-                "schema_version": 1,
+                "schema_version": request["schema_version"],
                 "criteria": proposal["criteria"],
                 "children": proposal["children"],
                 "ambiguities": proposal["ambiguities"],
@@ -193,7 +212,7 @@ def build_routing(
             )
         status = plan["status"]
     body = {
-        "schema_version": 1,
+        "schema_version": request["schema_version"],
         "status": status,
         "decision": proposal["decision"],
         "parent": {
@@ -242,7 +261,7 @@ def validate_direct_routing(
     rebuilt, plan = build_routing(
         request,
         {
-            "schema_version": 1,
+            "schema_version": request["schema_version"],
             "decision": "direct",
             "criteria": routing["criteria"],
             "direct_routes": direct_routes,
@@ -278,7 +297,10 @@ def validate_plan(request: dict[str, object], value: object) -> dict[str, object
         child = dict_value(child_value, f"plan.children[{index}]")
         if "readiness" not in child:
             raise ValueError("plan child readiness is missing")
-        expected_readiness = readiness_for_execution(child.get("execution"))
+        expected_readiness = readiness_for_execution(
+            child.get(execution_field(request["schema_version"])),
+            request["schema_version"],
+        )
         if child["readiness"] != expected_readiness:
             raise ValueError("plan child readiness does not match execution")
         proposal_children.append(
@@ -302,8 +324,8 @@ def validate_proposal(request: dict[str, object], value: object) -> dict[str, ob
     proposal = object_with_keys(
         value, {"schema_version", "criteria", "children", "ambiguities"}, "proposal"
     )
-    if proposal["schema_version"] != 1:
-        raise ValueError("proposal schema_version must be 1")
+    if proposal["schema_version"] != request["schema_version"]:
+        raise ValueError("proposal schema_version must match its input")
     accepted_criteria = validate_criteria(request, proposal["criteria"])
     children = validate_children(request, proposal["children"], accepted_criteria)
     ambiguities = validate_ambiguities(proposal["ambiguities"])
@@ -349,25 +371,29 @@ def validate_direct_routes(request, values, criteria):
     projects = {project["slug"]: project for project in request["catalog"]["projects"]}
     accepted = []
     for index, (value, criterion) in enumerate(zip(values, criteria, strict=True)):
-        route = object_with_keys(
-            value,
-            {
-                "criterion",
-                "project",
-                "owner",
-                "phase",
-                "execution",
-                "evidence_route",
-            },
-            f"direct route {index + 1}",
+        route = dict_value(value, f"direct route {index + 1}")
+        execution_name = execution_field(request["schema_version"])
+        required = {
+            "criterion",
+            "project",
+            "owner",
+            "phase",
+            execution_name,
+            "evidence_route",
+        }
+        valid_fields = set(route) == required or (
+            request["schema_version"] == 2
+            and set(route) == required | {"outside_help_reason"}
         )
+        if not valid_fields:
+            raise ValueError(f"direct route {index + 1} has invalid fields")
         if route["criterion"] != criterion["id"]:
             raise ValueError("direct routes must follow criterion order")
         if route["project"] not in projects:
             raise ValueError("direct route project is not in the catalog")
         bounded_text(route["owner"], "direct route owner", 256)
         enum(route["phase"], PHASES, "direct route phase")
-        enum(route["execution"], EXECUTIONS, "direct route execution")
+        validate_executor(route, request["schema_version"], "direct route")
         enum(route["evidence_route"], EVIDENCE_ROUTES, "direct route evidence_route")
         if not catalog_allows(projects[route["project"]], route):
             raise ValueError("direct route does not match a catalog route")
@@ -378,8 +404,13 @@ def validate_direct_routes(request, values, criteria):
                 "project": route["project"],
                 "owner": route["owner"],
                 "phase": route["phase"],
-                "execution": route["execution"],
+                execution_name: route[execution_name],
                 "evidence_route": route["evidence_route"],
+                **(
+                    {"outside_help_reason": route["outside_help_reason"]}
+                    if "outside_help_reason" in route
+                    else {}
+                ),
             }
         )
     return accepted
@@ -399,8 +430,21 @@ def child_routes(children, criteria):
             "project": by_criterion[criterion["id"]]["project"],
             "owner": by_criterion[criterion["id"]]["owner"],
             "phase": by_criterion[criterion["id"]]["phase"],
-            "execution": by_criterion[criterion["id"]]["execution"],
+            **{
+                key: by_criterion[criterion["id"]][key]
+                for key in ("execution", "executor")
+                if key in by_criterion[criterion["id"]]
+            },
             "evidence_route": by_criterion[criterion["id"]]["evidence_route"],
+            **(
+                {
+                    "outside_help_reason": by_criterion[criterion["id"]][
+                        "outside_help_reason"
+                    ]
+                }
+                if "outside_help_reason" in by_criterion[criterion["id"]]
+                else {}
+            ),
         }
         for criterion in criteria
     ]
@@ -414,7 +458,8 @@ def direct_pipeline_compatible(request, routes):
     )
     return all(
         route["project"] == source_project
-        and route["execution"] == "agent"
+        and route[execution_field(request["schema_version"])]
+        == ("agent" if request["schema_version"] == 1 else "afk_run")
         and route["phase"] == "implementation"
         and route["evidence_route"] in {"pipeline_run", "repository_check"}
         for route in routes
@@ -426,6 +471,7 @@ def validate_children(request, values, criteria):
         raise ValueError(
             f"proposal children must contain 1 through {MAX_CHILDREN} items"
         )
+    version = request.get("schema_version", 1)
     projects = {project["slug"]: project for project in request["catalog"]["projects"]}
     criterion_ids = {criterion["id"] for criterion in criteria}
     child_ids = set()
@@ -433,6 +479,7 @@ def validate_children(request, values, criteria):
     assigned = []
     for index, value in enumerate(values):
         child = dict_value(value, f"child {index + 1}")
+        execution_name = execution_field(version)
         required = {
             "local_id",
             "title",
@@ -441,11 +488,15 @@ def validate_children(request, values, criteria):
             "project",
             "owner",
             "phase",
-            "execution",
+            execution_name,
             "evidence_route",
             "depends_on",
         }
-        allowed = required | {"handoff"}
+        allowed = (
+            required | {"handoff"}
+            if version == 1
+            else required | {"outside_help_reason"}
+        )
         if set(child) != required and set(child) != allowed:
             raise ValueError(f"child {index + 1} has invalid fields")
         local_id = child["local_id"]
@@ -469,20 +520,21 @@ def validate_children(request, values, criteria):
             raise ValueError("child project is not in the catalog")
         bounded_text(child["owner"], "child owner", 256)
         enum(child["phase"], PHASES, "child phase")
-        enum(child["execution"], EXECUTIONS, "child execution")
+        validate_executor(child, version, "child")
         enum(child["evidence_route"], EVIDENCE_ROUTES, "child evidence_route")
         if not catalog_allows(projects[child["project"]], child):
             raise ValueError("child does not match a catalog route")
         child["depends_on"] = string_list(
             child["depends_on"], "child depends_on", MAX_CHILDREN, 128
         )
-        if child["execution"] == "agent":
-            if "handoff" in child:
-                raise ValueError("agent child must not have a handoff")
-        else:
-            child["handoff"] = validate_handoff(
-                child.get("handoff"), child["owner"], child["evidence_route"]
-            )
+        if version == 1:
+            if child["execution"] == "agent":
+                if "handoff" in child:
+                    raise ValueError("agent child must not have a handoff")
+            else:
+                child["handoff"] = validate_handoff(
+                    child.get("handoff"), child["owner"], child["evidence_route"]
+                )
         accepted.append(child)
     if sorted(assigned) != sorted(criterion_ids):
         raise ValueError("every criterion must be assigned exactly once")
@@ -557,17 +609,46 @@ def validate_graph(children):
 
 
 def catalog_allows(project, child):
+    execution_name = "executor" if "executor" in child else "execution"
     return any(
         route["owner"] == child["owner"]
-        and route["execution"] == child["execution"]
+        and route[execution_name] == child[execution_name]
         and route["evidence_route"] == child["evidence_route"]
+        and route.get("outside_help_reason") == child.get("outside_help_reason")
         and child["phase"] in route["phases"]
         for route in project["routes"]
     )
 
 
-def readiness_for_execution(execution: object) -> str:
+def readiness_for_execution(execution: object, version: int = 1) -> str:
+    if version == 2:
+        return (
+            "ready-for-agent"
+            if execution in {"afk_run", "caller_agent"}
+            else "ready-for-human"
+        )
     return "ready-for-agent" if execution == "agent" else "ready-for-human"
+
+
+def execution_field(version: int) -> str:
+    return "execution" if version == 1 else "executor"
+
+
+def validate_executor(route: dict[str, object], version: int, name: str) -> None:
+    field = execution_field(version)
+    choices = EXECUTIONS if version == 1 else EXECUTORS
+    enum(route.get(field), choices, f"{name} {field}")
+    reason = route.get("outside_help_reason")
+    if version == 2 and route[field] == "outside_help":
+        enum(reason, OUTSIDE_HELP_REASONS, f"{name} outside_help_reason")
+    elif reason is not None:
+        raise ValueError(f"{name} outside_help_reason requires outside_help")
+
+
+def routing_status(version: int, ambiguities: list[str]) -> str:
+    if not ambiguities:
+        return "proposed"
+    return "needs_human" if version == 1 else "needs_clarification"
 
 
 def digest(value: object) -> str:

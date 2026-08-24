@@ -68,6 +68,27 @@ class PlanCliTest(unittest.TestCase):
         self.assertTrue((self.result / "events.jsonl").stat().st_size > 0)
         self.assertFalse((self.result / "output.json.tmp").exists())
 
+    def test_seals_capability_oriented_direct_routing(self):
+        self.request["schema_version"] = 2
+        self.request["catalog"]["schema_version"] = 2
+        self.request["catalog"]["projects"][0]["routes"] = [
+            {
+                "owner": "AFK Run",
+                "executor": "afk_run",
+                "evidence_route": "pipeline_run",
+                "phases": ["implementation"],
+            }
+        ]
+
+        completed = self.invoke("capability-direct")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(output["routing"]["schema_version"], 2)
+        self.assertEqual(output["routing"]["status"], "proposed")
+        self.assertEqual(output["routing"]["routes"][0]["executor"], "afk_run")
+        self.assertNotIn("execution", output["routing"]["routes"][0])
+
     def test_pipeline_compatible_work_cannot_create_an_unnecessary_child_graph(self):
         completed = self.invoke("unnecessary-decomposition")
 

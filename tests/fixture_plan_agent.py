@@ -95,6 +95,30 @@ if scenario == "invalid-events":
 
 if scenario == "direct":
     value = direct_proposal()
+elif scenario == "capability-direct":
+    value = {
+        "schema_version": 2,
+        "decision": "direct",
+        "criteria": [
+            {
+                "id": "criterion-1",
+                "source_text": "The change is implemented and tested.",
+                "statement": "Implement and test the change.",
+            }
+        ],
+        "direct_routes": [
+            {
+                "criterion": "criterion-1",
+                "project": "afk-pipeline",
+                "owner": "AFK Run",
+                "phase": "implementation",
+                "executor": "afk_run",
+                "evidence_route": "pipeline_run",
+            }
+        ],
+        "children": [],
+        "ambiguities": [],
+    }
 elif scenario == "unnecessary-decomposition":
     value = unnecessary_decomposition()
 elif scenario == "direct-retry-protocol":
