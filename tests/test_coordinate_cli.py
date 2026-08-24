@@ -346,6 +346,29 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertEqual(output["decision"], "stop")
 
+    def test_abandon_without_an_active_continuation_refuses_before_allocation(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "no-active-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+
+        abandoned = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            "--abandon-active",
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(abandoned.returncode, 2)
+        self.assertIn("there is no active invocation to abandon", abandoned.stderr)
+        self.assertFalse((run / "continuations").exists())
+
     def test_active_continuation_refuses_a_rewritten_response_allowance(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         run = self.root / "tampered-continuation"

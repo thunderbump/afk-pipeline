@@ -87,7 +87,11 @@ def main():
         state = load_checkpoint(run_directory, request, assignment)
         if continuing:
             request, state, state_path, terminal_output_path = start_continuation(
-                run_directory, request, state, additional_responses
+                run_directory,
+                request,
+                state,
+                additional_responses,
+                abandon_active,
             )
         if abandon_active and state["active_invocation"] is None:
             raise ValueError("there is no active invocation to abandon")
@@ -190,7 +194,13 @@ def main():
     return finalize(run_directory, state, terminal_output_path)
 
 
-def start_continuation(run_directory, request, state, additional_responses):
+def start_continuation(
+    run_directory,
+    request,
+    state,
+    additional_responses,
+    abandon_active=False,
+):
     """Create one explicit continuation without changing the original terminal."""
     validate_terminal_pair(state, run_directory / "output.json")
     continuation_root = run_directory / "continuations"
@@ -238,6 +248,8 @@ def start_continuation(run_directory, request, state, additional_responses):
         expected_max_responses = continuation_input["effective_max_responses"]
         prior_output = f"../{continuation_directory.name}/output.json"
 
+    if abandon_active:
+        raise ValueError("there is no active invocation to abandon")
     require_exhausted(run_directory, state, expected_max_responses)
     completed_responses = sum(
         record["component"] == "response" and record["outcome"] == "completed"
