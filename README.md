@@ -1004,6 +1004,27 @@ accepted allowance, effective limit, checkpoint, and terminal output under
 active continuation. A continuation that exhausts its allowance can receive a
 later additive allowance in the next numbered directory.
 
+For a prepared Run with configured Publication Bundle admission, use the
+repository-owned continuation and publication entry point:
+
+```sh
+/path/to/afk-pipeline/afk continue /absolute/path/to/sealed-run \
+  ADDITIONAL_RESPONSES --config /absolute/path/to/config.json
+```
+
+This validates the original terminal and every numbered continuation before
+executing work, leaves the original `state.json` and `output.json` byte-for-byte
+unchanged, and publishes the newest sealed continuation through the same private
+v2 Publication Bundle and fail-closed Admission seam as `afk run`. Publication
+streams and `publication.json` are retained in that continuation directory.
+The bundle Run ID appends `.continuation.NN`, giving each terminal continuation
+an immutable Admission identity while preserving deterministic replay. A
+publication failure remains unsuccessful without changing Coordinator facts.
+Repeating the command after a clean stop republishes that same newest terminal,
+allowing Admission to report `replayed`; an exhausted newest continuation
+instead receives the next additive allowance. `--abandon-active` carries the
+same explicit liveness assertion as Coordinator.
+
 If an active continuation worker is confirmed gone before sealing output, the
 caller can apply the same liveness assertion used by an original run:
 

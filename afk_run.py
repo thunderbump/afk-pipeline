@@ -44,6 +44,7 @@ def main(argv=None):
         prog="afk",
         usage=(
             "afk run <bead-id> [--config PATH] | "
+            "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
             "afk attest CHILD_ID --publication DIRECTORY --subject FIELD=VALUE "
             "--evidence VALUE [--accept] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"
@@ -54,6 +55,15 @@ def main(argv=None):
     run_parser = subparsers.add_parser("run", help="prepare and execute a Bead")
     run_parser.add_argument("bead_id", metavar="<bead-id>")
     run_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    continue_parser = subparsers.add_parser(
+        "continue", help="continue and publish one exhausted sealed Run"
+    )
+    continue_parser.add_argument("source", type=Path, metavar="<sealed-run>")
+    continue_parser.add_argument(
+        "additional_responses", type=int, metavar="ADDITIONAL_RESPONSES"
+    )
+    continue_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    continue_parser.add_argument("--abandon-active", action="store_true")
     from afk_attest import add_parser as add_attest_parser
 
     add_attest_parser(subparsers)
@@ -77,6 +87,13 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
         return run(arguments.bead_id, arguments.config)
+    if arguments.operation == "continue":
+        return continue_run(
+            arguments.source,
+            arguments.additional_responses,
+            arguments.config,
+            arguments.abandon_active,
+        )
     if arguments.operation == "attest":
         from afk_attest import attest
 
@@ -117,6 +134,123 @@ def main(argv=None):
         print(json.dumps(result))
         return 0
     return 2
+
+
+def continue_run(source, additional_responses, config_path, abandon_active=False):
+    """Continue a prepared exhausted Run and publish its newest terminal."""
+    from afk_export import ExportError, ExportUsageError, load_source
+
+    if (
+        not isinstance(additional_responses, int)
+        or isinstance(additional_responses, bool)
+        or additional_responses <= 0
+    ):
+        print(
+            "afk continue: ADDITIONAL_RESPONSES must be a positive integer",
+            file=sys.stderr,
+        )
+        return 2
+    try:
+        config = load_config(config_path)
+        if config.get("publication") is None:
+            raise PreparationError("continuation publication is not configured")
+        source = source.absolute().resolve(strict=True)
+        if not (source / "preparation.json").is_file():
+            raise PreparationError("continuation requires a prepared Run")
+        observed = load_source(
+            source, None, None, None, allow_running_continuation=True
+        )
+        preparation = json.loads((source / "preparation.json").read_text())
+        project = config["projects"].get(observed["identity"]["project"])
+        if (
+            project is None
+            or project["repository"]
+            != Path(preparation["repository"]["path"]).resolve()
+        ):
+            raise PreparationError("continuation Run does not match configured project")
+        coordinator = observed["coordinator"]
+        original_state = (coordinator / "state.json").read_bytes()
+        original_output = (coordinator / "output.json").read_bytes()
+        continuations = observed.get("continuations", [])
+
+        # Once a continuation has stopped, the same repository-owned entry point
+        # is the replay seam.  It republishes the already validated newest
+        # terminal rather than asking Coordinator to mutate an immutable stop.
+        replay = bool(continuations) and observed["output"].get("decision") == "stop"
+        if replay:
+            accepted = json.loads((continuations[-1] / "input.json").read_text())
+            if accepted["additional_responses"] != additional_responses:
+                raise PreparationError(
+                    "stopped continuation allowance does not match the replay request"
+                )
+            if abandon_active:
+                raise PreparationError("there is no active invocation to abandon")
+            coordinator_code = 0
+        else:
+            command = [
+                sys.executable,
+                "-m",
+                "afk_coordinate",
+                str(source / "coordinator-request.json"),
+                str(coordinator),
+                "--continue-exhausted",
+                str(additional_responses),
+            ]
+            if abandon_active:
+                command.append("--abandon-active")
+            completed = subprocess.run(
+                command,
+                cwd=Path(__file__).parent,
+                env=worker_environment(),
+                check=False,
+            )
+            coordinator_code = normalize_exit_code(completed.returncode)
+
+        if (coordinator / "state.json").read_bytes() != original_state or (
+            coordinator / "output.json"
+        ).read_bytes() != original_output:
+            raise PreparationError("Coordinator changed original terminal evidence")
+
+        try:
+            latest = load_source(source, None, None, None)
+        except ExportError:
+            if coordinator_code != 0:
+                return coordinator_code
+            raise
+        latest_continuations = latest.get("continuations", [])
+        if not latest_continuations:
+            return coordinator_code
+        newest = latest_continuations[-1]
+        prior_newest = continuations[-1] if continuations else None
+        if coordinator_code != 0 and newest == prior_newest:
+            return coordinator_code
+        publication = publish_terminal_run(
+            source, config["publication"], evidence_directory=newest
+        )
+        print(f"artifact root: {source}", flush=True)
+        terminal_code = (
+            0
+            if latest["output"].get("outcome") == "completed"
+            and latest["output"].get("decision") == "stop"
+            else 1
+        )
+        return (
+            1
+            if terminal_code == 0 and publication["status"] != "succeeded"
+            else terminal_code
+        )
+    except (
+        PreparationError,
+        ExportError,
+        ExportUsageError,
+        OSError,
+        TypeError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+    ) as error:
+        print(f"afk continue: {error}", file=sys.stderr)
+        return 2
 
 
 def run(bead_id, config_path):
@@ -638,7 +772,7 @@ def publish_configured_run(bead_id, artifact, config):
     return publication["status"] == "succeeded"
 
 
-def publish_terminal_run(source, config):
+def publish_terminal_run(source, config, evidence_directory=None):
     """Export one sealed Run, invoke Admission, and seal private result evidence."""
     from afk_export import ExportError, ExportUsageError, export_run
 
@@ -646,8 +780,9 @@ def publish_terminal_run(source, config):
     exit_code = None
     admission_outcome = None
     error_category = None
-    stdout_path = source / "publication.stdout"
-    stderr_path = source / "publication.stderr"
+    evidence_directory = source if evidence_directory is None else evidence_directory
+    stdout_path = evidence_directory / "publication.stdout"
+    stderr_path = evidence_directory / "publication.stderr"
     try:
         with tempfile.TemporaryDirectory(prefix="afk-publication-") as temporary:
             bundle = Path(temporary) / "bundle"
@@ -686,7 +821,7 @@ def publish_terminal_run(source, config):
         "process": {"exit_code": exit_code},
         "error_category": error_category,
     }
-    seal_json(source / "publication.json", result)
+    seal_json(evidence_directory / "publication.json", result)
     return result
 
 

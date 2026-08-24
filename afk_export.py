@@ -15,6 +15,7 @@ from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
     validate_component_output,
+    validate_continuation,
     validate_output,
     validate_request,
 )
@@ -331,7 +332,7 @@ def load_optional_preflight(source, preparation):
     }
 
 
-def load_source(source, project, run_id, bead_id):
+def load_source(source, project, run_id, bead_id, allow_running_continuation=False):
     require_directory(source)
     preparation_path = source / "preparation.json"
     if preparation_path.exists() or preparation_path.is_symlink():
@@ -386,12 +387,27 @@ def load_source(source, project, run_id, bead_id):
     if prepared_bead is not None:
         validate_public_identity(prepared_bead, SAFE_ID, "Bead")
 
-    state = validate_checkpoint(read_json(coordinator / "state.json"))
-    output = validate_output(read_json(coordinator / "output.json"))
-    if state["status"] == "running" or output != output_from_state(state):
+    original_state = validate_checkpoint(read_json(coordinator / "state.json"))
+    original_output = validate_output(read_json(coordinator / "output.json"))
+    if original_state["status"] == "running" or original_output != output_from_state(
+        original_state
+    ):
         raise ExportError("Coordinator terminal evidence disagrees")
     if preparation is not None:
-        validate_preparer_terminal(preparation, output)
+        validate_preparer_terminal(preparation, original_output)
+    state, output, terminal_directory, continuations = load_continuation_lineage(
+        coordinator,
+        request,
+        original_state,
+        original_output,
+        allow_running=allow_running_continuation,
+    )
+    if continuations:
+        identity = {
+            **identity,
+            "run_id": f"{identity['run_id']}.continuation.{continuations[-1].name}",
+        }
+        validate_public_identity(identity["run_id"], SAFE_ID, "continuation Run ID")
     redactions = {str(source.resolve()), assignment["workspace"]}
     if preparation is not None:
         redactions.update(
@@ -409,12 +425,57 @@ def load_source(source, project, run_id, bead_id):
         "state": state,
         "output": output,
         "coordinator": coordinator,
+        "terminal_directory": terminal_directory,
+        "continuations": continuations,
         "redactions": {
             value
             for value in redactions
             if isinstance(value, str) and value.startswith("/")
         },
     }
+
+
+def load_continuation_lineage(coordinator, request, state, output, allow_running=False):
+    """Validate every continuation and select the newest sealed terminal."""
+    from afk_coordinate.__main__ import (
+        existing_continuations,
+        require_exhausted,
+        validate_continuation_link,
+    )
+
+    directories = existing_continuations(coordinator / "continuations")
+    prior_output = "../../output.json"
+    expected_max_responses = request["max_responses"]
+    observed = []
+    terminal_directory = coordinator
+    for directory in directories:
+        require_exhausted(
+            coordinator, state, expected_max_responses, check_workspace=False
+        )
+        continuation_input = validate_continuation(read_json(directory / "input.json"))
+        continuation_state = validate_checkpoint(read_json(directory / "state.json"))
+        validate_continuation_link(
+            state, continuation_state, continuation_input, prior_output
+        )
+        if continuation_state["status"] == "running":
+            if (
+                not allow_running
+                or directory != directories[-1]
+                or (directory / "output.json").exists()
+            ):
+                raise ExportError("newest continuation is not terminal")
+            observed.append(directory)
+            break
+        continuation_output = validate_output(read_json(directory / "output.json"))
+        if continuation_output != output_from_state(continuation_state):
+            raise ExportError("continuation terminal evidence disagrees")
+        state = continuation_state
+        output = continuation_output
+        terminal_directory = directory
+        observed.append(directory)
+        expected_max_responses = continuation_input["effective_max_responses"]
+        prior_output = f"../{directory.name}/output.json"
+    return state, output, terminal_directory, observed
 
 
 def validate_preparation(source, value):
@@ -713,6 +774,16 @@ def artifact_candidates(observed):
                 "application/json",
                 0,
             )
+        for continuation in observed.get("continuations", []):
+            relative = continuation.relative_to(observed["coordinator"]).as_posix()
+            for name in ("input.json", "state.json", "output.json"):
+                add(
+                    f"{coordinator_prefix}{relative}/{name}",
+                    f"continuation:{continuation.name}",
+                    "json",
+                    "application/json",
+                    0,
+                )
         for entry in observed["state"]["history"]:
             if entry["outcome"] == "abandoned":
                 continue

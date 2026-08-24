@@ -249,6 +249,80 @@ class CoordinatorCliTest(unittest.TestCase):
             1,
         )
 
+    def test_export_selects_newest_terminal_and_preserves_continuation_lineage(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "published-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        original_state = (run / "state.json").read_bytes()
+        original_output = (run / "output.json").read_bytes()
+        stopped = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="commit",
+        )
+        bundle = self.root / "continuation-bundle"
+
+        exported = subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(run),
+                str(bundle),
+                "--project",
+                "fixture",
+                "--run-id",
+                "continued-1",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(stopped.returncode, 0, stopped.stderr)
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        record = json.loads((bundle / "workflow-run.json").read_text())
+        self.assertEqual(record["identity"]["run_id"], "continued-1.continuation.01")
+        self.assertEqual(record["terminal"], {"decision": "stop"})
+        sources = {item["source"]["path"] for item in record["artifacts"]}
+        self.assertIn("state.json", sources)
+        self.assertIn("continuations/01/output.json", sources)
+        self.assertEqual((run / "state.json").read_bytes(), original_state)
+        self.assertEqual((run / "output.json").read_bytes(), original_output)
+
+        continuation_input = run / "continuations" / "01" / "input.json"
+        malformed = json.loads(continuation_input.read_text())
+        malformed["prior_output"] = "../../wrong.json"
+        continuation_input.write_text(json.dumps(malformed))
+        rejected = subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(run),
+                str(self.root / "malformed-bundle"),
+                "--project",
+                "fixture",
+                "--run-id",
+                "continued-1",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(rejected.returncode, 1)
+        self.assertFalse((self.root / "malformed-bundle").exists())
+
     def test_exhausted_continuation_resumes_after_coordinator_interruption(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         run = self.root / "interrupted-continuation"

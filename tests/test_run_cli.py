@@ -15,6 +15,142 @@ ROOT = Path(__file__).parents[1]
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
 
+class ContinuationPublicationTest(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.source = Path(self.temporary.name) / "run"
+        self.coordinator = self.source / "coordinator"
+        self.continuation = self.coordinator / "continuations" / "01"
+        self.continuation.mkdir(parents=True)
+        (self.coordinator / "state.json").write_bytes(b"original-state")
+        (self.coordinator / "output.json").write_bytes(b"original-output")
+        (self.source / "preparation.json").write_text(
+            json.dumps({"repository": {"path": str(self.source / "repository")}})
+        )
+        (self.source / "coordinator-request.json").write_text("{}")
+        (self.continuation / "input.json").write_text(
+            json.dumps({"additional_responses": 1})
+        )
+        self.config = {
+            "publication": {"command": ["publisher"], "timeout_seconds": 1},
+            "projects": {"fixture": {"repository": self.source / "repository"}},
+        }
+
+    def observed(self, decision, continuations):
+        return {
+            "identity": {"project": "fixture", "run_id": "run-1"},
+            "coordinator": self.coordinator,
+            "continuations": continuations,
+            "output": {"outcome": "completed", "decision": decision},
+        }
+
+    def test_clean_stop_and_repeated_exhaustion_publish_newest_terminal(self):
+        for decision, expected_code in (("stop", 0), ("exhausted", 1)):
+            with self.subTest(decision=decision):
+                before = self.observed("exhausted", [])
+                after = self.observed(decision, [self.continuation])
+                publication = {"status": "succeeded"}
+                with (
+                    mock.patch("afk_run.load_config", return_value=self.config),
+                    mock.patch("afk_export.load_source", side_effect=[before, after]),
+                    mock.patch("afk_run.subprocess.run") as coordinator,
+                    mock.patch(
+                        "afk_run.publish_terminal_run", return_value=publication
+                    ) as publish,
+                ):
+                    coordinator.return_value.returncode = 0
+                    code = afk_run.continue_run(
+                        self.source, 1, self.source / "config.json"
+                    )
+
+                self.assertEqual(code, expected_code)
+                publish.assert_called_once_with(
+                    self.source.resolve(),
+                    self.config["publication"],
+                    evidence_directory=self.continuation,
+                )
+                self.assertEqual(
+                    (self.coordinator / "state.json").read_bytes(), b"original-state"
+                )
+                self.assertEqual(
+                    (self.coordinator / "output.json").read_bytes(), b"original-output"
+                )
+
+    def test_stopped_continuation_replays_without_coordinator_mutation(self):
+        stopped = self.observed("stop", [self.continuation])
+        with (
+            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch("afk_export.load_source", side_effect=[stopped, stopped]),
+            mock.patch("afk_run.subprocess.run") as coordinator,
+            mock.patch(
+                "afk_run.publish_terminal_run", return_value={"status": "succeeded"}
+            ) as publish,
+        ):
+            code = afk_run.continue_run(self.source, 1, self.source / "config.json")
+
+        self.assertEqual(code, 0)
+        coordinator.assert_not_called()
+        publish.assert_called_once()
+
+    def test_publication_failure_evidence_is_retained_with_the_continuation(self):
+        with (
+            mock.patch(
+                "afk_export.export_run",
+                return_value={
+                    "identity": {
+                        "project": "fixture",
+                        "run_id": "run-1.continuation.01",
+                    }
+                },
+            ),
+            mock.patch(
+                "afk_run.invoke_admission",
+                return_value=(1, "rejected", "admission_rejected"),
+            ),
+        ):
+            result = afk_run.publish_terminal_run(
+                self.source,
+                self.config["publication"],
+                evidence_directory=self.continuation,
+            )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error_category"], "admission_rejected")
+        self.assertEqual(
+            json.loads((self.continuation / "publication.json").read_text()), result
+        )
+        self.assertFalse((self.source / "publication.json").exists())
+
+    def test_continuation_publication_failure_is_non_successful(self):
+        stopped = self.observed("stop", [self.continuation])
+        with (
+            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch("afk_export.load_source", side_effect=[stopped, stopped]),
+            mock.patch(
+                "afk_run.publish_terminal_run", return_value={"status": "failed"}
+            ),
+        ):
+            code = afk_run.continue_run(self.source, 1, self.source / "config.json")
+
+        self.assertEqual(code, 1)
+
+    def test_malformed_lineage_refuses_without_publication(self):
+        from afk_export import ExportError
+
+        with (
+            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch(
+                "afk_export.load_source", side_effect=ExportError("malformed lineage")
+            ),
+            mock.patch("afk_run.publish_terminal_run") as publish,
+        ):
+            code = afk_run.continue_run(self.source, 1, self.source / "config.json")
+
+        self.assertEqual(code, 2)
+        publish.assert_not_called()
+
+
 class RunPreparerCliTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
