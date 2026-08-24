@@ -36,6 +36,7 @@ V2_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
 V2_MAX_BUNDLE_BYTES = 32 * 1024 * 1024
 V2_MAX_ARTIFACT_NAME_BYTES = 255
 MAX_MANIFEST_BYTES = 64 * 1024
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 EVENT_TYPES = {
     "session",
     "agent_start",
@@ -720,26 +721,38 @@ def validate_prepared_preflight(prepared, preflight_input, preflight_output):
 
 def validate_prepared_routing(source, prepared):
     """Validate and retain the complete, contract-bound v2 routing stage."""
-    # O_NOFOLLOW protects only the final output.json path component. Require both
-    # invocation parents to be real Run directories before reading either typed
-    # envelope so a symlink cannot import evidence from outside the Run.
+    # Anchor every routing read to open descriptors. A concurrently replaced Run
+    # or invocation pathname then cannot redirect output.json outside the Run.
+    descriptors = []
     try:
-        require_directory(source / "planner")
-        require_directory(source / "policy")
-        planner_input = validate_plan_input(read_json(source / "planner-input.json"))
-        planner_raw = read_bytes(source / "planner" / "output.json", MAX_JSON_BYTES)
+        source_descriptor = os.open(source, DIRECTORY_FLAGS)
+        descriptors.append(source_descriptor)
+        planner_descriptor = os.open(
+            "planner", DIRECTORY_FLAGS, dir_fd=source_descriptor
+        )
+        descriptors.append(planner_descriptor)
+        policy_descriptor = os.open("policy", DIRECTORY_FLAGS, dir_fd=source_descriptor)
+        descriptors.append(policy_descriptor)
+
+        planner_input = validate_plan_input(
+            read_json_at(source_descriptor, "planner-input.json")
+        )
+        planner_raw = read_bytes_at(planner_descriptor, "output.json", MAX_JSON_BYTES)
         planner_output = validate_planner_output(
             planner_input, json.loads(decode_text(planner_raw))
         )
         evidence_name = "routing" if planner_output["plan"] is None else "plan"
         evidence = planner_output[evidence_name]
-        policy_input = read_json(source / "policy-input.json")
-        policy_raw = read_bytes(source / "policy" / "output.json", MAX_JSON_BYTES)
+        policy_input = read_json_at(source_descriptor, "policy-input.json")
+        policy_raw = read_bytes_at(policy_descriptor, "output.json", MAX_JSON_BYTES)
         policy_output = validate_policy_output(
             planner_input, policy_input, json.loads(decode_text(policy_raw))
         )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
         raise ExportError("invalid prepared Acceptance Routing evidence") from error
+    finally:
+        for descriptor in reversed(descriptors):
+            os.close(descriptor)
     if (
         not isinstance(prepared, dict)
         or set(prepared) != {"planner", "policy"}
@@ -1678,8 +1691,23 @@ def read_json(path):
     return json.loads(decode_text(read_bytes(path, MAX_JSON_BYTES)))
 
 
+def read_json_at(directory_descriptor, name):
+    return json.loads(
+        decode_text(read_bytes_at(directory_descriptor, name, MAX_JSON_BYTES))
+    )
+
+
 def read_bytes(path, limit, expected_facts=None):
     descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    return read_open_descriptor(descriptor, limit, expected_facts)
+
+
+def read_bytes_at(directory_descriptor, name, limit, expected_facts=None):
+    descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
+    return read_open_descriptor(descriptor, limit, expected_facts)
+
+
+def read_open_descriptor(descriptor, limit, expected_facts=None):
     try:
         facts = os.fstat(descriptor)
         if expected_facts is not None and (

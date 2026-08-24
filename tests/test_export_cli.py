@@ -1055,6 +1055,72 @@ class ExportCliTests(unittest.TestCase):
                 self.assertFalse(destination.exists())
                 self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_v2_routing_reads_remain_anchored_during_directory_swap(self):
+        for directory in ("planner", "policy"):
+            with (
+                self.subTest(directory=directory),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                planner_raw, policy_raw = self.add_acceptance_routing(source, "direct")
+                prepared = json.loads((source / "preparation.json").read_text())[
+                    "routing"
+                ]
+                target_path = source / directory
+                target_facts = target_path.stat()
+                target_identity = (target_facts.st_dev, target_facts.st_ino)
+                external = root / f"external-{directory}"
+                external.mkdir()
+                external_raw = planner_raw if directory == "planner" else policy_raw
+                (external / "output.json").write_bytes(external_raw + b"\n")
+                displaced = root / f"displaced-{directory}"
+                real_open = os.open
+                state = {"swapped": False}
+
+                def swap_then_open(
+                    path,
+                    flags,
+                    mode=0o777,
+                    *,
+                    dir_fd=None,
+                    target_identity=target_identity,
+                    target_name=directory,
+                    target_path=target_path,
+                    displaced=displaced,
+                    external=external,
+                    real_open=real_open,
+                    state=state,
+                ):
+                    opened_facts = os.fstat(dir_fd) if dir_fd is not None else None
+                    anchored_target = (
+                        opened_facts is not None
+                        and (
+                            opened_facts.st_dev,
+                            opened_facts.st_ino,
+                        )
+                        == target_identity
+                    )
+                    named_target = (
+                        dir_fd is None and Path(path).parent.name == target_name
+                    )
+                    if (
+                        not state["swapped"]
+                        and Path(path).name == "output.json"
+                        and (anchored_target or named_target)
+                    ):
+                        state["swapped"] = True
+                        target_path.rename(displaced)
+                        target_path.symlink_to(external, target_is_directory=True)
+                    return real_open(path, flags, mode, dir_fd=dir_fd)
+
+                with mock.patch("afk_export.os.open", side_effect=swap_then_open):
+                    routing = afk_export.validate_prepared_routing(source, prepared)
+
+                self.assertTrue(state["swapped"])
+                expected_raw = planner_raw if directory == "planner" else policy_raw
+                self.assertEqual(routing[f"{directory}_raw"], expected_raw)
+
     def test_unsupported_schema_is_rejected_before_destination_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
