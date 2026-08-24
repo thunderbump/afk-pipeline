@@ -113,7 +113,7 @@ def export_run(
         raise ExportUsageError("unsupported Publication Bundle schema")
     source_input = Path(source_path).absolute()
     destination_input = Path(destination_path).absolute()
-    require_directory(source_input)
+    source_facts = require_directory(source_input)
     if destination_input.exists() or destination_input.is_symlink():
         raise ExportError("bundle destination already exists")
     if not destination_input.parent.is_dir():
@@ -126,23 +126,42 @@ def export_run(
         or destination in source.parents
     ):
         raise ExportError("source and destination must not overlap")
-    observed = (
-        load_source(
-            source,
-            project,
-            run_id,
-            bead_id,
-            terminal_continuation=terminal_continuation,
+    try:
+        # Keep the validated Run open throughout loading. Routing evidence can
+        # then be read from this directory rather than a pathname redirected by
+        # a concurrent Run or ancestor replacement.
+        source_descriptor = os.open(source, DIRECTORY_FLAGS)
+    except OSError as error:
+        raise ExportError("Run source is unavailable") from error
+    opened_source_facts = os.fstat(source_descriptor)
+    if (opened_source_facts.st_dev, opened_source_facts.st_ino) != (
+        source_facts.st_dev,
+        source_facts.st_ino,
+    ):
+        os.close(source_descriptor)
+        raise ExportError("Run source changed during validation")
+    try:
+        observed = (
+            load_source(
+                source,
+                project,
+                run_id,
+                bead_id,
+                terminal_continuation=terminal_continuation,
+                source_descriptor=source_descriptor,
+            )
+            if schema_version == 1
+            else load_source_v2(
+                source,
+                project,
+                run_id,
+                bead_id,
+                terminal_continuation=terminal_continuation,
+                source_descriptor=source_descriptor,
+            )
         )
-        if schema_version == 1
-        else load_source_v2(
-            source,
-            project,
-            run_id,
-            bead_id,
-            terminal_continuation=terminal_continuation,
-        )
-    )
+    finally:
+        os.close(source_descriptor)
     record, payloads = (
         normalize_run(observed) if schema_version == 1 else normalize_run_v2(observed)
     )
@@ -186,7 +205,14 @@ def export_run(
     }
 
 
-def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None):
+def load_source_v2(
+    source,
+    project,
+    run_id,
+    bead_id,
+    terminal_continuation=None,
+    source_descriptor=None,
+):
     """Load either a terminal Coordinator Run or a terminal Preflight pause."""
     preparation_path = source / "preparation.json"
     if not preparation_path.exists() and not preparation_path.is_symlink():
@@ -196,6 +222,7 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
             run_id,
             bead_id,
             terminal_continuation=terminal_continuation,
+            source_descriptor=source_descriptor,
         )
         observed["run_root"] = source
         observed["preflight"] = None
@@ -213,7 +240,14 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
     }:
         if terminal_continuation is not None:
             raise ExportError("terminal Acceptance Routing has no continuation")
-        return load_terminal_routing(source, preparation, project, run_id, bead_id)
+        return load_terminal_routing(
+            source,
+            preparation,
+            project,
+            run_id,
+            bead_id,
+            source_descriptor=source_descriptor,
+        )
     if preparation_status != "paused":
         if "preflight" in preparation:
             require_directory(source / "preflight")
@@ -223,6 +257,7 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
             run_id,
             bead_id,
             terminal_continuation=terminal_continuation,
+            source_descriptor=source_descriptor,
         )
         observed["run_root"] = source
         observed["preflight"] = load_optional_preflight(source, preparation)
@@ -328,7 +363,14 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
     }
 
 
-def load_terminal_routing(source, preparation, project, run_id, bead_id):
+def load_terminal_routing(
+    source,
+    preparation,
+    project,
+    run_id,
+    bead_id,
+    source_descriptor=None,
+):
     """Load a sealed v2 route that intentionally stopped before Coordinator."""
     expected = {
         "schema_version",
@@ -386,7 +428,9 @@ def load_terminal_routing(source, preparation, project, run_id, bead_id):
     request = validate_request(read_json(source / "coordinator-request.json"))
     if assignment.get("source") != {"kind": "bead", "id": bead["id"]}:
         raise ExportError("Acceptance Routing Bead identity disagrees")
-    routing = validate_prepared_routing(source, preparation["routing"])
+    routing = validate_prepared_routing(
+        source, preparation["routing"], source_descriptor=source_descriptor
+    )
     decision = routing["policy"]["decision"]
     expected_status = {
         "accepted": "routed",
@@ -479,6 +523,7 @@ def load_source(
     bead_id,
     allow_running_continuation=False,
     terminal_continuation=None,
+    source_descriptor=None,
 ):
     require_directory(source)
     preparation_path = source / "preparation.json"
@@ -504,7 +549,9 @@ def load_source(
         acceptance_routing = None
         if "routing" in preparation:
             acceptance_routing = validate_prepared_routing(
-                source, preparation["routing"]
+                source,
+                preparation["routing"],
+                source_descriptor=source_descriptor,
             )
             if acceptance_routing["policy"]["decision"] != "direct":
                 raise ExportError("Coordinator Run lacks an accepted direct route")
@@ -719,23 +766,30 @@ def validate_prepared_preflight(prepared, preflight_input, preflight_output):
         raise ExportError("invalid prepared Preflight evidence")
 
 
-def validate_prepared_routing(source, prepared):
+def validate_prepared_routing(source, prepared, source_descriptor=None):
     """Validate and retain the complete, contract-bound v2 routing stage."""
-    # Anchor every routing read to open descriptors. A concurrently replaced Run
-    # or invocation pathname then cannot redirect output.json outside the Run.
+    # Duplicate the export's initially validated Run descriptor when available.
+    # Reopening source by pathname would allow a Run or ancestor replacement to
+    # redirect all otherwise descriptor-relative routing reads.
     descriptors = []
     try:
-        source_descriptor = os.open(source, DIRECTORY_FLAGS)
-        descriptors.append(source_descriptor)
+        routing_source_descriptor = (
+            os.open(source, DIRECTORY_FLAGS)
+            if source_descriptor is None
+            else os.dup(source_descriptor)
+        )
+        descriptors.append(routing_source_descriptor)
         planner_descriptor = os.open(
-            "planner", DIRECTORY_FLAGS, dir_fd=source_descriptor
+            "planner", DIRECTORY_FLAGS, dir_fd=routing_source_descriptor
         )
         descriptors.append(planner_descriptor)
-        policy_descriptor = os.open("policy", DIRECTORY_FLAGS, dir_fd=source_descriptor)
+        policy_descriptor = os.open(
+            "policy", DIRECTORY_FLAGS, dir_fd=routing_source_descriptor
+        )
         descriptors.append(policy_descriptor)
 
         planner_input = validate_plan_input(
-            read_json_at(source_descriptor, "planner-input.json")
+            read_json_at(routing_source_descriptor, "planner-input.json")
         )
         planner_raw = read_bytes_at(planner_descriptor, "output.json", MAX_JSON_BYTES)
         planner_output = validate_planner_output(
@@ -743,7 +797,7 @@ def validate_prepared_routing(source, prepared):
         )
         evidence_name = "routing" if planner_output["plan"] is None else "plan"
         evidence = planner_output[evidence_name]
-        policy_input = read_json_at(source_descriptor, "policy-input.json")
+        policy_input = read_json_at(routing_source_descriptor, "policy-input.json")
         policy_raw = read_bytes_at(policy_descriptor, "output.json", MAX_JSON_BYTES)
         policy_output = validate_policy_output(
             planner_input, policy_input, json.loads(decode_text(policy_raw))
@@ -1685,6 +1739,7 @@ def require_directory(path):
     facts = path.lstat()
     if stat.S_ISLNK(facts.st_mode) or not stat.S_ISDIR(facts.st_mode):
         raise ExportError("Run path must be a real directory")
+    return facts
 
 
 def read_json(path):

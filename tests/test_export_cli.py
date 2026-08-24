@@ -1121,6 +1121,46 @@ class ExportCliTests(unittest.TestCase):
                 expected_raw = planner_raw if directory == "planner" else policy_raw
                 self.assertEqual(routing[f"{directory}_raw"], expected_raw)
 
+    def test_v2_routing_reads_remain_anchored_during_source_swap(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            planner_raw, policy_raw = self.add_acceptance_routing(source, "direct")
+            prepared = json.loads((source / "preparation.json").read_text())["routing"]
+            replacement = root / "replacement"
+            shutil.copytree(source, replacement)
+            for directory in ("planner", "policy"):
+                output = replacement / directory / "output.json"
+                output.write_bytes(output.read_bytes() + b"\n")
+
+            displaced = root / "displaced-source"
+            destination = root / "bundle"
+            real_validate = afk_export.validate_prepared_routing
+            captured = {}
+
+            def swap_then_validate(path, routing_facts, source_descriptor=None):
+                self.assertEqual(routing_facts, prepared)
+                self.assertIsNotNone(source_descriptor)
+                source.rename(displaced)
+                replacement.rename(source)
+                captured.update(
+                    real_validate(
+                        path,
+                        routing_facts,
+                        source_descriptor=source_descriptor,
+                    )
+                )
+                return captured
+
+            with mock.patch(
+                "afk_export.validate_prepared_routing",
+                side_effect=swap_then_validate,
+            ):
+                afk_export.export_run(source, destination, schema_version=2)
+
+            self.assertEqual(captured["planner_raw"], planner_raw)
+            self.assertEqual(captured["policy_raw"], policy_raw)
+
     def test_unsupported_schema_is_rejected_before_destination_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
