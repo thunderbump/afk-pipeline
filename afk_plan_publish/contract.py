@@ -13,7 +13,9 @@ def load_accepted_plan(directory: Path) -> tuple[dict[str, object], dict[str, ob
     if (
         not isinstance(request, dict)
         or set(request) != {"schema_version", "planner_input", "plan"}
-        or request["schema_version"] != 1
+        or request["schema_version"] not in {1, 2}
+        or not isinstance(request["planner_input"], dict)
+        or request["schema_version"] != request["planner_input"].get("schema_version")
     ):
         raise ValueError("Acceptance Plan input has an invalid shape")
     accepted = accept_plan(request["planner_input"], request["plan"])
@@ -100,9 +102,13 @@ def external_reference(plan_sha256: str, local_id: str) -> str:
 def child_acceptance(plan: dict[str, object], child: dict[str, object]) -> str:
     criteria = {item["id"]: item for item in plan["criteria"]}
     statements = [f"- {criteria[item]['statement']}" for item in child["criteria"]]
-    if child["execution"] == "human":
+    if child.get("execution") == "human":
         statements.append(
             "- A valid Completion Record must be attached before this child closes."
+        )
+    if child.get("executor") == "outside_help":
+        statements.append(
+            "- Evidence from the named outside helper must be attached before this child closes."
         )
     return "\n".join(statements)
 
@@ -120,7 +126,28 @@ def child_description(
         "## Parent acceptance criteria",
         *[f"- {criteria[item]['source_text']}" for item in child["criteria"]],
     ]
-    if child["execution"] != "agent" and bead_id is not None:
+    if plan["schema_version"] == 2 and child["executor"] == "outside_help":
+        lines.extend(
+            [
+                "",
+                "## Outside help required",
+                "",
+                "The agent system cannot complete this child with its current capabilities.",
+                f"- Reason: `{child['outside_help_reason']}`",
+                f"- Expected helper: `{child['owner']}`",
+                f"- Evidence route: `{child['evidence_route']}`",
+                f"- Parent Bead: `{parent_id}`",
+                f"- Parent plan: `{plan['plan_sha256']}`",
+                *([f"- Child Bead: `{bead_id}`"] if bead_id is not None else []),
+                "",
+                "Attach the resulting evidence before closing this child.",
+            ]
+        )
+    if (
+        plan["schema_version"] == 1
+        and child["execution"] != "agent"
+        and bead_id is not None
+    ):
         handoff = child["handoff"]
         heading = (
             "Human completion handoff"

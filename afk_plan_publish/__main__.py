@@ -91,7 +91,10 @@ def main() -> int:
             validate_child_identity(
                 issue, planner_input["parent"]["id"], plan, child, reference
             )
-            if child["execution"] != "agent":
+            if child.get("execution") != "agent" and child.get("executor") not in {
+                "afk_run",
+                "caller_agent",
+            }:
                 description = child_description(
                     planner_input["parent"]["id"], plan, child, bead_id
                 )

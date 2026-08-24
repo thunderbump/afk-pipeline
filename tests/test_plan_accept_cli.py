@@ -8,7 +8,12 @@ from pathlib import Path
 
 from afk_plan.contract import build_routing
 from afk_plan_accept.contract import validate_accepted_output
-from tests.test_plan_accept_contract import planner_input, proposed_plan
+from tests.test_plan_accept_contract import (
+    capability_input,
+    capability_plan,
+    planner_input,
+    proposed_plan,
+)
 
 ROOT = Path(__file__).parents[1]
 
@@ -263,6 +268,88 @@ class PlanAcceptanceCliTest(unittest.TestCase):
         existing = self.invoke()
         self.assertEqual(existing.returncode, 2)
         self.assertEqual(list(self.result.iterdir()), [])
+
+    def test_v2_direct_afk_run_is_accepted(self):
+        request = capability_input()
+        routing, plan = build_routing(
+            request,
+            {
+                "schema_version": 2,
+                "decision": "direct",
+                "criteria": capability_plan(request)["criteria"],
+                "direct_routes": [
+                    {
+                        "criterion": f"criterion-{index}",
+                        "project": "example",
+                        "owner": "AFK Run",
+                        "phase": "implementation",
+                        "executor": "afk_run",
+                        "evidence_route": "pipeline_run",
+                    }
+                    for index in (1, 2)
+                ],
+                "children": [],
+                "ambiguities": [],
+            },
+        )
+        self.assertIsNone(plan)
+        self.value = {"schema_version": 2, "planner_input": request, "routing": routing}
+
+        completed = self.invoke()
+
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(output["decision"], "direct")
+        self.assertEqual(output["policy"], "pipeline-compatible-capability-direct-v2")
+
+    def test_v2_ambiguity_needs_clarification(self):
+        request = capability_input()
+        self.value = {
+            "schema_version": 2,
+            "planner_input": request,
+            "plan": capability_plan(request, ambiguities=["The target is unclear."]),
+        }
+
+        completed = self.invoke()
+
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(output["decision"], "needs_clarification")
+        self.assertNotIn("approval", json.dumps(output))
+
+    def test_v2_direct_outside_help_preserves_the_reason(self):
+        request = capability_input()
+        routing, _ = build_routing(
+            request,
+            {
+                "schema_version": 2,
+                "decision": "direct",
+                "criteria": capability_plan(request)["criteria"],
+                "direct_routes": [
+                    {
+                        "criterion": f"criterion-{index}",
+                        "project": "example",
+                        "owner": "Credential holder",
+                        "phase": "closure",
+                        "executor": "outside_help",
+                        "outside_help_reason": "missing_credentials",
+                        "evidence_route": "human_attestation",
+                    }
+                    for index in (1, 2)
+                ],
+                "children": [],
+                "ambiguities": [],
+            },
+        )
+        self.value = {"schema_version": 2, "planner_input": request, "routing": routing}
+
+        completed = self.invoke()
+
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(completed.returncode, 1)
+        self.assertEqual(output["decision"], "outside_help")
+        self.assertEqual(output["error_category"], "missing_credentials")
+        self.assertNotIn("approval", json.dumps(output))
 
     def test_help_is_available_without_input(self):
         completed = subprocess.run(

@@ -10,6 +10,8 @@ from afk_plan.contract import (
 
 POLICY = "contract-valid-proposed-v1"
 DIRECT_POLICY = "pipeline-compatible-direct-v1"
+CAPABILITY_POLICY = "contract-valid-capability-plan-v2"
+CAPABILITY_DIRECT_POLICY = "pipeline-compatible-capability-direct-v2"
 OUTPUT_FIELDS = {
     "schema_version",
     "outcome",
@@ -33,15 +35,41 @@ class RoutingNeedsHuman(ValueError):
     """Raised when a direct route cannot safely use the existing pipeline."""
 
 
+class PlanNeedsClarification(ValueError):
+    """Raised when a v2 Plan retains unresolved routing ambiguity."""
+
+
+class RoutingNeedsCallerAgent(ValueError):
+    """Raised when direct work belongs with the agent that invoked AFK."""
+
+
+class RoutingNeedsOutsideHelp(ValueError):
+    """Raised when direct work needs a capability outside the agent system."""
+
+    def __init__(self, reason: str):
+        super().__init__(f"routing needs outside help: {reason}")
+        self.reason = reason
+
+
+def plan_policy(version: int) -> str:
+    return POLICY if version == 1 else CAPABILITY_POLICY
+
+
+def direct_policy(version: int) -> str:
+    return DIRECT_POLICY if version == 1 else CAPABILITY_DIRECT_POLICY
+
+
 def accept_plan(planner_input: object, plan: object) -> dict[str, object]:
     request = validate_input(planner_input)
     validated_plan = validate_plan(request, plan)
     if validated_plan["status"] != "proposed" or validated_plan["ambiguities"]:
+        if request["schema_version"] == 2:
+            raise PlanNeedsClarification("plan needs clarification")
         raise PlanNeedsHuman("plan needs human interpretation")
     body = {
-        "schema_version": 1,
+        "schema_version": request["schema_version"],
         "status": "accepted",
-        "policy": POLICY,
+        "policy": plan_policy(request["schema_version"]),
         "basis": "structural_validity_only",
         "parent": validated_plan["parent"],
         "catalog_sha256": validated_plan["catalog_sha256"],
@@ -54,16 +82,31 @@ def accept_plan(planner_input: object, plan: object) -> dict[str, object]:
 def accept_direct(planner_input: object, routing: object) -> dict[str, object]:
     request = validate_input(planner_input)
     validated = validate_direct_routing(request, routing)
-    if (
-        validated["status"] != "proposed"
-        or validated["ambiguities"]
-        or not direct_pipeline_compatible(request, validated["routes"])
-    ):
+    if validated["status"] != "proposed" or validated["ambiguities"]:
+        if request["schema_version"] == 2:
+            raise PlanNeedsClarification("routing needs clarification")
+        raise RoutingNeedsHuman("routing cannot use the direct pipeline path")
+    if request["schema_version"] == 2:
+        executors = {route["executor"] for route in validated["routes"]}
+        if "outside_help" in executors:
+            reasons = {
+                route["outside_help_reason"]
+                for route in validated["routes"]
+                if route["executor"] == "outside_help"
+            }
+            if len(reasons) != 1:
+                raise RoutingNeedsOutsideHelp("multiple_outside_capabilities")
+            raise RoutingNeedsOutsideHelp(reasons.pop())
+        if "caller_agent" in executors:
+            raise RoutingNeedsCallerAgent(
+                "caller-agent work must be represented as an accepted child Plan"
+            )
+    if not direct_pipeline_compatible(request, validated["routes"]):
         raise RoutingNeedsHuman("routing cannot use the direct pipeline path")
     body = {
-        "schema_version": 1,
+        "schema_version": request["schema_version"],
         "status": "accepted",
-        "policy": DIRECT_POLICY,
+        "policy": direct_policy(request["schema_version"]),
         "basis": "pipeline_compatible_routes_only",
         "source": validated["parent"],
         "catalog_sha256": validated["catalog_sha256"],
@@ -79,12 +122,16 @@ def validate_accepted_output(planner_input: object, value: object) -> dict[str, 
     if not isinstance(value, dict) or set(value) != OUTPUT_FIELDS:
         raise ValueError("Acceptance Plan policy output has an invalid shape")
     output = dict(value)
-    accepted_plan = output["decision"] == "accepted" and output["policy"] == POLICY
+    expected_plan_policy = plan_policy(request["schema_version"])
+    expected_direct_policy = direct_policy(request["schema_version"])
+    accepted_plan = (
+        output["decision"] == "accepted" and output["policy"] == expected_plan_policy
+    )
     accepted_direct = (
-        output["decision"] == "direct" and output["policy"] == DIRECT_POLICY
+        output["decision"] == "direct" and output["policy"] == expected_direct_policy
     )
     if (
-        output["schema_version"] != 1
+        output["schema_version"] != request["schema_version"]
         or output["outcome"] != "completed"
         or not (accepted_plan or accepted_direct)
         or output["source"] != {"kind": "bead", "id": parent_id}

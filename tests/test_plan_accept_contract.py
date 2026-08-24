@@ -2,7 +2,11 @@ import copy
 import unittest
 
 from afk_plan.contract import build_plan, validate_input
-from afk_plan_accept.contract import PlanNeedsHuman, accept_plan
+from afk_plan_accept.contract import (
+    PlanNeedsClarification,
+    PlanNeedsHuman,
+    accept_plan,
+)
 
 
 def planner_input():
@@ -87,6 +91,97 @@ def proposed_plan(request, ambiguities=None):
     )
 
 
+def capability_input():
+    value = planner_input()
+    value["schema_version"] = 2
+    value["catalog"] = {
+        "schema_version": 2,
+        "projects": [
+            {
+                "slug": "example",
+                "routes": [
+                    {
+                        "owner": "AFK Run",
+                        "executor": "afk_run",
+                        "evidence_route": "pipeline_run",
+                        "phases": ["implementation"],
+                    },
+                    {
+                        "owner": "Caller agent",
+                        "executor": "caller_agent",
+                        "evidence_route": "external_check",
+                        "phases": ["implementation", "closure"],
+                    },
+                    {
+                        "owner": "Credential holder",
+                        "executor": "outside_help",
+                        "outside_help_reason": "missing_credentials",
+                        "evidence_route": "human_attestation",
+                        "phases": ["closure"],
+                    },
+                ],
+            }
+        ],
+    }
+    return validate_input(value)
+
+
+def capability_plan(request, executor="caller_agent", ambiguities=None):
+    owner = "Caller agent" if executor == "caller_agent" else "Credential holder"
+    evidence = "external_check" if executor == "caller_agent" else "human_attestation"
+    reason = (
+        {"outside_help_reason": "missing_credentials"}
+        if executor == "outside_help"
+        else {}
+    )
+    return build_plan(
+        request,
+        {
+            "schema_version": 2,
+            "criteria": [
+                {
+                    "id": "criterion-1",
+                    "source_text": "The change is implemented.",
+                    "statement": "Implement the change.",
+                },
+                {
+                    "id": "criterion-2",
+                    "source_text": "The current documentation is updated.",
+                    "statement": "Update the current documentation.",
+                },
+            ],
+            "children": [
+                {
+                    "local_id": "implementation",
+                    "title": "Implement the change",
+                    "objective": "Implement the requested behavior.",
+                    "criteria": ["criterion-1"],
+                    "project": "example",
+                    "owner": "Caller agent",
+                    "phase": "implementation",
+                    "executor": "caller_agent",
+                    "evidence_route": "external_check",
+                    "depends_on": [],
+                },
+                {
+                    "local_id": "closure",
+                    "title": "Complete the closure check",
+                    "objective": "Complete the requested closure evidence.",
+                    "criteria": ["criterion-2"],
+                    "project": "example",
+                    "owner": owner,
+                    "phase": "closure",
+                    "executor": executor,
+                    "evidence_route": evidence,
+                    **reason,
+                    "depends_on": ["implementation"],
+                },
+            ],
+            "ambiguities": ambiguities or [],
+        },
+    )
+
+
 class PlanAcceptanceContractTest(unittest.TestCase):
     def test_accepts_any_unambiguous_contract_valid_plan(self):
         request = planner_input()
@@ -116,6 +211,26 @@ class PlanAcceptanceContractTest(unittest.TestCase):
         plan["children"][0]["owner"] = "Invented owner"
 
         with self.assertRaises(ValueError):
+            accept_plan(request, plan)
+
+    def test_accepts_capability_plan_without_reclassifying_caller_agent_as_human(self):
+        request = capability_input()
+        plan = capability_plan(request)
+
+        accepted = accept_plan(request, plan)
+
+        self.assertEqual(accepted["schema_version"], 2)
+        self.assertEqual(accepted["policy"], "contract-valid-capability-plan-v2")
+        self.assertEqual(
+            [child["readiness"] for child in accepted["plan"]["children"]],
+            ["ready-for-agent", "ready-for-agent"],
+        )
+
+    def test_v2_ambiguity_needs_clarification_not_human_approval(self):
+        request = capability_input()
+        plan = capability_plan(request, ambiguities=["The target is unclear."])
+
+        with self.assertRaisesRegex(PlanNeedsClarification, "clarification"):
             accept_plan(request, plan)
 
 

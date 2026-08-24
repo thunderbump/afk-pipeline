@@ -6,12 +6,15 @@ import time
 from pathlib import Path
 
 from afk_plan_accept.contract import (
-    DIRECT_POLICY,
-    POLICY,
+    PlanNeedsClarification,
     PlanNeedsHuman,
+    RoutingNeedsCallerAgent,
     RoutingNeedsHuman,
+    RoutingNeedsOutsideHelp,
     accept_direct,
     accept_plan,
+    direct_policy,
+    plan_policy,
 )
 from afk_runtime import progress, seal_json, timestamp, write_json
 
@@ -40,7 +43,8 @@ def main() -> int:
     request = acceptance_request(json.loads(input_path.read_text()))
     started_at = timestamp()
     started = time.monotonic()
-    policy = DIRECT_POLICY if "routing" in request else POLICY
+    version = request["planner_input"]["schema_version"]
+    policy = direct_policy(version) if "routing" in request else plan_policy(version)
     try:
         if "routing" in request:
             acceptance = accept_direct(request["planner_input"], request["routing"])
@@ -53,6 +57,21 @@ def main() -> int:
         outcome = "unaccepted"
         decision = "needs_human"
         error_category = "plan_ambiguity"
+    except PlanNeedsClarification:
+        acceptance = None
+        outcome = "unaccepted"
+        decision = "needs_clarification"
+        error_category = "routing_ambiguity"
+    except RoutingNeedsCallerAgent:
+        acceptance = None
+        outcome = "unaccepted"
+        decision = "caller_agent"
+        error_category = "requires_decomposition"
+    except RoutingNeedsOutsideHelp as error:
+        acceptance = None
+        outcome = "unaccepted"
+        decision = "outside_help"
+        error_category = error.reason
     except RoutingNeedsHuman:
         acceptance = None
         outcome = "unaccepted"
@@ -67,7 +86,7 @@ def main() -> int:
     result_directory.mkdir()
     write_json(result_directory / "input.json", request)
     output = {
-        "schema_version": 1,
+        "schema_version": version,
         "outcome": outcome,
         "decision": decision,
         "source": {
@@ -94,8 +113,13 @@ def acceptance_request(value: object) -> dict[str, object]:
         {"schema_version", "planner_input", "routing"},
     ):
         raise ValueError("acceptance input has an invalid shape")
-    if value["schema_version"] != 1:
-        raise ValueError("acceptance input schema_version must be 1")
+    if value["schema_version"] not in {1, 2}:
+        raise ValueError("acceptance input schema_version must be 1 or 2")
+    planner_input = value["planner_input"]
+    if not isinstance(planner_input, dict) or value[
+        "schema_version"
+    ] != planner_input.get("schema_version"):
+        raise ValueError("acceptance schema_version must match its Planner input")
     return dict(value)
 
 

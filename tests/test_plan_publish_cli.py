@@ -10,7 +10,12 @@ from pathlib import Path
 
 from afk_plan.contract import build_plan, validate_input
 from afk_plan_accept.contract import accept_plan
-from tests.test_plan_accept_contract import planner_input, proposed_plan
+from tests.test_plan_accept_contract import (
+    capability_input,
+    capability_plan,
+    planner_input,
+    proposed_plan,
+)
 
 ROOT = Path(__file__).parents[1]
 FAKE_BD = ROOT / "tests" / "fixtures" / "fake_bd.py"
@@ -214,6 +219,31 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
             [{"local_id": "implementation", "bead_id": "central-child-1"}],
         )
 
+    def test_v2_publishes_caller_agent_and_outside_help_distinctly(self):
+        request = capability_input()
+        plan = capability_plan(request, executor="outside_help")
+        self.replace_acceptance(request, plan)
+        state = json.loads(self.state.read_text())
+        state["parent"] = {
+            **request["parent"],
+            "status": "in_progress",
+            "issue_type": "task",
+            "priority": 2,
+            "dependencies": [],
+        }
+        self.state.write_text(json.dumps(state))
+
+        completed = self.invoke(self.result)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        children = json.loads(self.state.read_text())["children"]
+        self.assertEqual(children[0]["labels"], ["project:example", "ready-for-agent"])
+        self.assertNotIn("handoff", children[0]["description"].lower())
+        self.assertEqual(children[1]["labels"], ["project:example", "ready-for-human"])
+        self.assertIn("## Outside help required", children[1]["description"])
+        self.assertIn("`missing_credentials`", children[1]["description"])
+        self.assertNotIn("approval", children[1]["description"].lower())
+
     def test_tampered_acceptance_causes_no_beads_command_or_result(self):
         output_path = self.acceptance / "output.json"
         output = json.loads(output_path.read_text())
@@ -261,19 +291,25 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
     def replace_acceptance(self, request, plan, acceptance=None):
         acceptance = acceptance or accept_plan(request, plan)
         (self.acceptance / "input.json").write_text(
-            json.dumps({"schema_version": 1, "planner_input": request, "plan": plan})
+            json.dumps(
+                {
+                    "schema_version": request["schema_version"],
+                    "planner_input": request,
+                    "plan": plan,
+                }
+            )
         )
         (self.acceptance / "output.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": request["schema_version"],
                     "outcome": "completed",
                     "decision": "accepted",
                     "source": {"kind": "bead", "id": request["parent"]["id"]},
                     "started_at": "2026-08-22T00:00:00Z",
                     "finished_at": "2026-08-22T00:00:01Z",
                     "duration_seconds": 1,
-                    "policy": "contract-valid-proposed-v1",
+                    "policy": acceptance["policy"],
                     "acceptance": acceptance,
                     "error_category": None,
                     "artifacts": {"input": "input.json"},
