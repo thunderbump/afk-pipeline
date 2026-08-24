@@ -239,6 +239,43 @@ commit/environment fails before result creation. A valid result contains
 inference, evidence retrieval, Beads access, work execution, child closure, or
 parent acceptance review.
 
+## Human Attestation
+
+Approve one explicitly published human child from any working directory:
+
+```sh
+/path/to/afk-pipeline/afk attest central-child-2 \
+  --publication /absolute/path/to/publisher-result \
+  --subject commit=abc123 --subject environment=production \
+  --evidence bead-comment:central-parent#approval-1
+# Automation must add --accept.
+```
+
+The command reads `~/.config/afk/config.json` (or the test/non-default
+`--config` path) and requires the configured `attestation.result_root` to be an
+existing directory. It revalidates the immutable Publisher input, accepted
+Plan, successful publication, exact child mapping, human handoff, authority,
+criteria, and subject-field shape before showing the frozen scope. A decline
+creates no result and does not read or mutate Beads. End-of-input is not
+approval; noninteractive callers must pass `--accept` explicitly.
+
+After approval it creates or resumes one content-addressed durable attempt under
+the attestation result root. It re-reads the frozen parent, exact current child,
+Plan-controlled dependencies, dependency closure, status, and existing
+Completion Record comments. The helper invokes the existing `afk_complete`
+validator and retains its sealed result. Only then does it attach the exact
+validated Completion Record as canonical JSON in a child comment and close that
+child. It never creates an approval, runs inference or Parent Acceptance Review,
+or closes the parent.
+
+Attachment and close reconcile independently. Retrying the same exact scope
+reuses its accepted timestamp and sealed Completion Validator evidence, does
+not duplicate the comment, and finishes a missing close. A stale or conflicting
+child, incomplete dependency, malformed evidence, validator failure, or Beads
+failure seals inspectable attempt evidence and does not newly close the child.
+The explicit `--publication` directory is intentional; this MVP does not scan
+for publications or maintain an invocation registry.
+
 ## Run Preparer
 
 From any working directory, prepare and execute one central Bead as a local AFK
@@ -260,6 +297,9 @@ schema:
   "run_root": "/absolute/caller-owned/path/to/runs",
   "worktree_root": "/absolute/caller-owned/path/to/worktrees",
   "classification_store": "/absolute/caller-owned/path/to/classifications",
+  "attestation": {
+    "result_root": "/absolute/afk-owned/path/to/attestations"
+  },
   "assignment": {
     "command": ["agent", "--mode", "json", "Read", "{assignment_path}"],
     "timeout_seconds": 1800
@@ -290,6 +330,10 @@ schema:
   }
 }
 ```
+
+`attestation` is optional for `afk run` and required by `afk attest`; its result
+root must already exist and remain separate from Beads and immutable Plan and
+Publisher evidence.
 
 `publication` is optional. When present, its command must contain exactly one
 argv element equal to `{bundle_path}`. The preparer replaces that element with

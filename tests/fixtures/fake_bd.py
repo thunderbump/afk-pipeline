@@ -70,6 +70,23 @@ elif command == "dep" and arguments[1] == "add":
         issue["dependencies"].append(dependency)
     state_path.write_text(json.dumps(state))
     print(json.dumps(issue))
+elif command == "comments" and arguments[1] == "add":
+    issue = next(item for item in state["children"] if item["id"] == arguments[2])
+    issue.setdefault("comments", []).append(arguments[3])
+    state_path.write_text(json.dumps(state))
+    print(json.dumps(issue))
+elif command == "comments":
+    issue = next(item for item in state["children"] if item["id"] == arguments[1])
+    print(json.dumps(issue.get("comments", [])))
+elif command == "close":
+    if state.pop("fail_next_close", False):
+        state_path.write_text(json.dumps(state))
+        print("injected close failure", file=sys.stderr)
+        raise SystemExit(1)
+    issue = next(item for item in state["children"] if item["id"] == arguments[1])
+    issue["status"] = "closed"
+    state_path.write_text(json.dumps(state))
+    print(json.dumps(issue))
 else:
     print(f"unsupported fake bd command: {arguments}", file=sys.stderr)
     raise SystemExit(2)

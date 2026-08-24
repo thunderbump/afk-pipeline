@@ -41,14 +41,19 @@ def main(argv=None):
         prog="afk",
         usage=(
             "afk run <bead-id> [--config PATH] | "
+            "afk attest CHILD_ID --publication DIRECTORY --subject FIELD=VALUE "
+            "--evidence VALUE [--accept] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"
         ),
-        description="Prepare, execute, or export one AFK Workflow Run.",
+        description="Prepare, execute, attest, or export AFK work.",
     )
     subparsers = parser.add_subparsers(dest="operation", required=True)
     run_parser = subparsers.add_parser("run", help="prepare and execute a Bead")
     run_parser.add_argument("bead_id", metavar="<bead-id>")
     run_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    from afk_attest import add_parser as add_attest_parser
+
+    add_attest_parser(subparsers)
     export_parser = subparsers.add_parser(
         "export", help="export one sealed Run as a portable bundle"
     )
@@ -69,6 +74,10 @@ def main(argv=None):
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
         return run(arguments.bead_id, arguments.config)
+    if arguments.operation == "attest":
+        from afk_attest import attest
+
+        return attest(arguments)
     if arguments.operation == "export":
         from afk_export import ExportError, ExportUsageError, export_run
 
@@ -677,7 +686,12 @@ def load_config(path):
         not isinstance(value, dict)
         or value.get("schema_version") != 1
         or frozenset(value)
-        not in {frozenset(expected), frozenset(expected | {"publication"})}
+        not in {
+            frozenset(expected),
+            frozenset(expected | {"publication"}),
+            frozenset(expected | {"attestation"}),
+            frozenset(expected | {"publication", "attestation"}),
+        }
     ):
         raise PreparationError(
             f"configuration {path} is malformed (expected schema_version 1)"
@@ -701,6 +715,8 @@ def load_config(path):
     validate_coordinator(value["coordinator"])
     if "publication" in value:
         validate_publication(value["publication"])
+    if "attestation" in value:
+        validate_attestation(value["attestation"])
     projects = value["projects"]
     if not isinstance(projects, dict) or not projects:
         raise PreparationError("configuration projects must be a nonempty object")
@@ -767,6 +783,16 @@ def validate_publication(value):
     if value["command"][0] == PUBLICATION_BUNDLE_PLACEHOLDER:
         raise PreparationError("publication {bundle_path} cannot be the executable")
     positive(value["timeout_seconds"], "publication timeout_seconds")
+
+
+def validate_attestation(value):
+    if not isinstance(value, dict) or set(value) != {"result_root"}:
+        raise PreparationError("configuration attestation is malformed")
+    value["result_root"] = absolute_path(
+        value["result_root"], "attestation result_root"
+    )
+    if not value["result_root"].is_dir():
+        raise PreparationError("configured attestation result_root must already exist")
 
 
 def validate_project(slug, value):
