@@ -77,6 +77,28 @@ class ContinuationPublicationTest(unittest.TestCase):
                     (self.coordinator / "output.json").read_bytes(), b"original-output"
                 )
 
+    def test_resumed_continuation_failure_publishes_same_directory(self):
+        running = self.observed("exhausted", [self.continuation])
+        failed = self.observed(None, [self.continuation])
+        failed["output"]["outcome"] = "failed"
+        with (
+            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch("afk_export.load_source", side_effect=[running, failed]),
+            mock.patch("afk_run.subprocess.run") as coordinator,
+            mock.patch(
+                "afk_run.publish_terminal_run", return_value={"status": "succeeded"}
+            ) as publish,
+        ):
+            coordinator.return_value.returncode = 1
+            code = afk_run.continue_run(self.source, 1, self.source / "config.json")
+
+        self.assertEqual(code, 1)
+        publish.assert_called_once_with(
+            self.source.resolve(),
+            self.config["publication"],
+            evidence_directory=self.continuation,
+        )
+
     def test_stopped_continuation_replays_without_coordinator_mutation(self):
         stopped = self.observed("stop", [self.continuation])
         with (

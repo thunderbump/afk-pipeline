@@ -221,9 +221,6 @@ def continue_run(source, additional_responses, config_path, abandon_active=False
         if not latest_continuations:
             return coordinator_code
         newest = latest_continuations[-1]
-        prior_newest = continuations[-1] if continuations else None
-        if coordinator_code != 0 and newest == prior_newest:
-            return coordinator_code
         publication = publish_terminal_run(
             source, config["publication"], evidence_directory=newest
         )
