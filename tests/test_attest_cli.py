@@ -338,6 +338,24 @@ class AttestCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertFalse(marker.exists())
 
+    def test_invalid_trusted_adapter_configuration_seals_empty_logs(self):
+        environment = os.environ.copy()
+        environment["AFK_ATTEST_BEADS_COMMAND"] = "not-json"
+
+        completed = subprocess.run(
+            self.command("--accept"),
+            cwd="/",
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(completed.returncode, 1)
+        attempt = next(self.results.iterdir())
+        self.assertEqual(json.loads((attempt / "stdout.log.json").read_text()), [])
+        self.assertEqual(json.loads((attempt / "stderr.log.json").read_text()), [])
+
     def test_attempt_symlink_cannot_redirect_durable_output(self):
         attempt = self.open_attempt()
         shutil.rmtree(attempt)

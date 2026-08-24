@@ -756,9 +756,12 @@ def finish(
     category,
     message=None,
 ):
-    if adapter is not None:
-        seal_json_at(attempt_descriptor, "stdout.log.json", adapter.stdout)
-        seal_json_at(attempt_descriptor, "stderr.log.json", adapter.stderr)
+    seal_json_at(
+        attempt_descriptor, "stdout.log.json", adapter.stdout if adapter else []
+    )
+    seal_json_at(
+        attempt_descriptor, "stderr.log.json", adapter.stderr if adapter else []
+    )
     output = {
         "schema_version": 1,
         "outcome": outcome,
