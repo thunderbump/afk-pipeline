@@ -1,11 +1,9 @@
 import io
 import json
 import os
-import signal
 import subprocess
 import sys
 import tempfile
-import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -14,7 +12,6 @@ from unittest import mock
 import afk_run
 
 ROOT = Path(__file__).parents[1]
-PREFLIGHT_FIXTURE = ROOT / "tests" / "fixture_preflight_agent.py"
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
 
@@ -48,8 +45,6 @@ class RunPreparerCliTest(unittest.TestCase):
                 "ready-for-agent",
             ],
         }
-        self.preflight_scenario = "proceed"
-        self.preflight_command = None
         self.plan_scenario = "capability-run-direct"
         self.write_bd()
         self.config = self.root / "config.json"
@@ -72,10 +67,8 @@ class RunPreparerCliTest(unittest.TestCase):
         assignment = json.loads((artifact / "assignment.json").read_text())
         request = json.loads((artifact / "coordinator-request.json").read_text())
         preparation = json.loads((artifact / "preparation.json").read_text())
-        preflight_input = json.loads((artifact / "preflight-input.json").read_text())
-        preflight_output = json.loads(
-            (artifact / "preflight" / "output.json").read_text()
-        )
+        planner_input = json.loads((artifact / "planner-input.json").read_text())
+        policy_output = json.loads((artifact / "policy" / "output.json").read_text())
         self.assertEqual(bead["source"], {"kind": "bead", "id": "central-123"})
         self.assertEqual(assignment["source"], bead["source"])
         self.assertEqual(
@@ -85,17 +78,15 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["repository"]["base_commit"], self.base)
         self.assertEqual(preparation["project"]["slug"], "fixture")
         self.assertEqual(preparation["preparation_status"], "prepared")
-        self.assertEqual(preparation["preflight"]["status"], "completed")
-        self.assertEqual(preparation["preflight"]["decision"], "proceed")
+        self.assertEqual(preparation["routing"]["planner"]["status"], "completed")
+        self.assertEqual(preparation["routing"]["policy"]["decision"], "direct")
+        self.assertFalse((artifact / "preflight-input.json").exists())
+        self.assertFalse((artifact / "preflight").exists())
+        self.assertEqual(planner_input["parent"]["id"], bead["source"]["id"])
         self.assertEqual(
-            preparation["preflight"]["command"][-2:],
-            ["--classification-store", str(self.root / "classifications")],
+            planner_input["parent"]["acceptance_criteria"], bead["acceptance_criteria"]
         )
-        self.assertEqual(preflight_input["source"], bead["source"])
-        self.assertEqual(
-            preflight_input["acceptance_criteria"], bead["acceptance_criteria"]
-        )
-        self.assertEqual(preflight_output["decision"], "proceed")
+        self.assertEqual(policy_output["decision"], "direct")
         self.assertEqual(preparation["coordinator"]["exit_code"], 1)
         self.assertEqual(preparation["coordinator"]["outcome"], "failed")
         self.assertIsNone(preparation["coordinator"]["decision"])
@@ -130,55 +121,7 @@ class RunPreparerCliTest(unittest.TestCase):
             ),
         )
 
-    def test_operator_evidence_pauses_before_coordinator_starts(self):
-        self.preflight_scenario = "pause"
-        self.bead["id"] = "central-6xx4.1"
-        self.bead["title"] = "Register Operations WebUI as a first-class Project"
-        self.bead["acceptance_criteria"] = (
-            "Tests, build, deployment and HTTP verification pass."
-        )
-        self.write_bd()
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        self.assertEqual(result.returncode, 1, result.stderr)
-        artifact = self.artifact_from(result.stdout)
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        preflight = json.loads((artifact / "preflight" / "output.json").read_text())
-        self.assertEqual(preflight["decision"], "pause")
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["preflight"]["status"], "completed")
-        self.assertEqual(preparation["preflight"]["decision"], "pause")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-        self.assertIsNone(preparation["coordinator"]["exit_code"])
-        self.assertEqual(list((artifact / "coordinator").iterdir()), [])
-        self.assertFalse(any(artifact.rglob("01-attempt")))
-        self.assertIn("operator_external -> operator handoff", result.stdout)
-        self.assertIn("preflight terminal decision", result.stdout)
-
-    def test_repository_contained_43zn_32_proceeds_without_extra_authoring(self):
-        self.bead.update(
-            id="central-43zn.32",
-            title="Expose Coordinator terminal decision through Run Preparer",
-            acceptance_criteria=(
-                "Run Preparer records and prints stop versus exhausted from a "
-                "validated sealed Coordinator output; failed or malformed output "
-                "remains value-safe; exit behavior is explicitly decided and tested."
-            ),
-        )
-        self.write_bd()
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        self.assertEqual(result.returncode, 1, result.stderr)
-        artifact = self.artifact_from(result.stdout)
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(preparation["preflight"]["decision"], "proceed")
-        self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
-
     def test_capability_direct_is_the_only_gate_before_coordinator(self):
-        self.configure_acceptance_routing()
-
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
 
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -191,7 +134,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
 
     def test_capability_direct_terminal_run_remains_publishable(self):
-        self.configure_acceptance_routing()
         receipt = self.root / "routing-publication-receipt.json"
         adapter = self.write_publication_adapter("accepted", 0, receipt)
         self.configure_publication(
@@ -208,7 +150,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertFalse((artifact / "preflight-input.json").exists())
 
     def test_capability_publication_rejects_tampered_planner_envelope(self):
-        self.configure_acceptance_routing()
         receipt = self.root / "routing-publication-receipt.json"
         adapter = self.write_publication_adapter("accepted", 0, receipt)
         self.configure_publication(
@@ -229,7 +170,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(replayed["error_category"], "export_failed")
 
     def test_capability_admission_rejects_incomplete_or_unbound_stage_evidence(self):
-        self.configure_acceptance_routing()
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
         artifact = self.artifact_from(result.stdout)
         planner_input = json.loads((artifact / "planner-input.json").read_text())
@@ -249,7 +189,6 @@ class RunPreparerCliTest(unittest.TestCase):
         )
 
     def test_decomposed_capability_routing_stops_before_coordinator(self):
-        self.configure_acceptance_routing()
         self.plan_scenario = "capability-run-decompose"
 
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
@@ -260,14 +199,16 @@ class RunPreparerCliTest(unittest.TestCase):
         policy = json.loads((artifact / "policy" / "output.json").read_text())
         self.assertEqual(preparation["preparation_status"], "routed")
         self.assertEqual(preparation["routing"]["policy"]["decision"], "accepted")
-        self.assertEqual(
-            policy["acceptance"]["plan"]["children"][0]["executor"], "caller_agent"
-        )
+        child = policy["acceptance"]["plan"]["children"][0]
+        self.assertEqual(child["title"], "Complete automated host closure")
+        self.assertEqual(child["phase"], "closure")
+        self.assertEqual(child["executor"], "caller_agent")
+        self.assertEqual(child["readiness"], "ready-for-agent")
+        self.assertNotIn("approval", json.dumps(child).lower())
         self.assertEqual(preparation["coordinator"]["status"], "not_started")
         self.assertEqual(list((artifact / "coordinator").iterdir()), [])
 
     def test_capability_nonadmission_names_clarification_or_missing_capability(self):
-        self.configure_acceptance_routing()
         for scenario, decision, reason in (
             (
                 "capability-run-clarification",
@@ -290,6 +231,13 @@ class RunPreparerCliTest(unittest.TestCase):
                 self.assertEqual(output["error_category"], reason)
                 self.assertNotIn("approval", json.dumps(output).lower())
                 if decision == "outside_help":
+                    preparation = json.loads(
+                        (artifact / "preparation.json").read_text()
+                    )
+                    self.assertEqual(preparation["preparation_status"], "outside_help")
+                    self.assertEqual(
+                        preparation["coordinator"]["status"], "not_started"
+                    )
                     planner_input = json.loads(
                         (artifact / "planner-input.json").read_text()
                     )
@@ -302,160 +250,6 @@ class RunPreparerCliTest(unittest.TestCase):
                     self.assertIsNone(
                         afk_run.policy_terminal(malformed, planner_input, policy_input)
                     )
-
-    def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
-        receipt = self.root / "paused-retry-publication-receipt.json"
-        adapter = self.write_publication_adapter("accepted", 0, receipt)
-        self.configure_publication(
-            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
-        )
-        self.preflight_scenario = "pause"
-
-        first = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        first_artifact = self.artifact_from(first.stdout)
-        first_evidence = (first_artifact / "preparation.json").read_bytes()
-        first_publication = (first_artifact / "publication.json").read_bytes()
-        second = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        second_artifact = self.artifact_from(second.stdout)
-
-        self.assertEqual((first.returncode, second.returncode), (1, 1))
-        self.assertNotEqual(first_artifact, second_artifact)
-        self.assertEqual(
-            (first_artifact / "preparation.json").read_bytes(), first_evidence
-        )
-        self.assertEqual(
-            (first_artifact / "publication.json").read_bytes(), first_publication
-        )
-        first_preflight = json.loads(
-            (first_artifact / "preflight" / "output.json").read_text()
-        )
-        second_preflight = json.loads(
-            (second_artifact / "preflight" / "output.json").read_text()
-        )
-        self.assertEqual(first_preflight["classifier"]["source"], "inferred")
-        self.assertEqual(second_preflight["classifier"]["source"], "reused")
-        self.assertEqual(
-            first_preflight["classifier"]["key"],
-            second_preflight["classifier"]["key"],
-        )
-        self.assertEqual(
-            json.loads((second_artifact / "preparation.json").read_text())[
-                "preparation_status"
-            ],
-            "paused",
-        )
-        second_publication = json.loads(
-            (second_artifact / "publication.json").read_text()
-        )
-        self.assertEqual(second_publication["status"], "succeeded")
-        self.assertEqual(second_publication["admission_outcome"], "accepted")
-        self.assertEqual(
-            json.loads(receipt.read_text())["identity"]["run_id"],
-            second_artifact.name,
-        )
-
-    def test_interrupt_during_preflight_seals_terminal_state(self):
-        adapter = self.write_publication_adapter(
-            "accepted", 0, self.root / "interrupted-publication-receipt.json"
-        )
-        self.configure_publication(
-            [
-                sys.executable,
-                str(adapter),
-                "{bundle_path}",
-                str(self.root / "interrupted-publication-receipt.json"),
-            ]
-        )
-        marker = self.root / "preflight-child.pid"
-        self.preflight_command = [
-            sys.executable,
-            str(PREFLIGHT_FIXTURE),
-            "hang",
-            str(marker),
-        ]
-        process = self.invoke_async(
-            "run", self.bead["id"], "--config", str(self.config)
-        )
-        for _ in range(100):
-            if marker.exists():
-                break
-            time.sleep(0.05)
-        self.assertTrue(marker.exists(), "preflight classifier did not start")
-
-        process.send_signal(signal.SIGINT)
-        stdout, stderr = process.communicate(timeout=15)
-
-        self.assertEqual(process.returncode, 130, stderr)
-        artifact = self.artifact_from(stdout)
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        output = json.loads((artifact / "preflight" / "output.json").read_text())
-        self.assertEqual(preparation["preparation_status"], "failed")
-        self.assertEqual(preparation["preflight"]["status"], "failed")
-        self.assertEqual(preparation["preflight"]["exit_code"], 130)
-        self.assertEqual(preparation["preflight"]["outcome"], "interrupted")
-        self.assertEqual(preparation["preflight"]["decision"], "pause")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-        self.assertEqual(output["outcome"], "interrupted")
-        self.assertEqual(output["requests"], [])
-        self.assertFalse((artifact / "publication.json").exists())
-
-    def test_interrupt_after_completed_output_still_projects_a_pause(self):
-        artifact = self.root / "interrupt-race"
-        (artifact / "preflight").mkdir(parents=True)
-        preparation = {
-            "preparation_status": "prepared",
-            "timestamps": {"finished_at": None},
-            "preflight": {"command": ["fixture"]},
-            "errors": [],
-        }
-        completed_request = {
-            "index": 1,
-            "request": "Repository tests pass.",
-            "category": "repository_validation",
-            "route": "repository validation",
-            "rationale": "The repository command proves this.",
-        }
-
-        with (
-            mock.patch("afk_run.run_foreground", return_value=(0, True)),
-            mock.patch(
-                "afk_run.preflight_terminal",
-                return_value=("completed", "proceed", [completed_request]),
-            ),
-        ):
-            code = afk_run.execute_preflight(
-                self.bead["id"], artifact, preparation, {"source": {}}
-            )
-
-        sealed = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(code, 130)
-        self.assertEqual(sealed["preparation_status"], "failed")
-        self.assertEqual(sealed["preflight"]["outcome"], "interrupted")
-        self.assertEqual(sealed["preflight"]["decision"], "pause")
-
-    def test_missing_or_malformed_preflight_evidence_never_starts_coordinator(self):
-        cases = ((None, "proceed"), ("Commit the result.", "invalid-classification"))
-        for index, (acceptance, scenario) in enumerate(cases, 1):
-            with self.subTest(scenario=scenario):
-                if acceptance is None:
-                    self.bead.pop("acceptance_criteria")
-                else:
-                    self.bead["acceptance_criteria"] = acceptance
-                self.preflight_scenario = scenario
-                self.bead["id"] = f"central-preflight-{index}"
-                self.write_bd()
-
-                result = self.invoke(
-                    "run", self.bead["id"], "--config", str(self.config)
-                )
-
-                self.assertEqual(result.returncode, 1, result.stderr)
-                artifact = self.artifact_from(result.stdout)
-                preparation = json.loads((artifact / "preparation.json").read_text())
-                self.assertEqual(preparation["preparation_status"], "failed")
-                self.assertEqual(preparation["preflight"]["decision"], "pause")
-                self.assertEqual(preparation["coordinator"]["status"], "not_started")
-                self.assertEqual(list((artifact / "coordinator").iterdir()), [])
 
     def test_validation_evidence_is_required_before_run_creation(self):
         config = json.loads(self.config.read_text())
@@ -507,56 +301,6 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertFalse(Path(observed["bundle"]).exists())
 
-    def test_completed_preflight_pause_is_published_once_without_coordinator_evidence(
-        self,
-    ):
-        receipt = self.root / "paused-publication-receipt.json"
-        adapter = self.write_publication_adapter("accepted", 0, receipt)
-        self.configure_publication(
-            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
-        )
-        self.preflight_scenario = "pause"
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        self.assertEqual(result.returncode, 1, result.stderr)
-        artifact = self.artifact_from(result.stdout)
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        publication = json.loads((artifact / "publication.json").read_text())
-        observed = json.loads(receipt.read_text())
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-        self.assertIsNone(preparation["coordinator"]["exit_code"])
-        self.assertEqual(list((artifact / "coordinator").iterdir()), [])
-        self.assertFalse(any(artifact.rglob("01-attempt")))
-        self.assertEqual(publication["status"], "succeeded")
-        self.assertEqual(publication["admission_outcome"], "accepted")
-        self.assertEqual(
-            (artifact / "publication.stdout").read_text().count("accepted"), 1
-        )
-        self.assertEqual((artifact / "publication.stderr").read_text(), "")
-        self.assertEqual(observed["identity"]["run_id"], artifact.name)
-        self.assertEqual(observed["status"], "paused")
-        self.assertIn("publication outcome", result.stdout)
-
-    def test_replayed_paused_publication_preserves_the_terminal_run(self):
-        receipt = self.root / "paused-replay-receipt.json"
-        adapter = self.write_publication_adapter("replayed", 0, receipt)
-        self.configure_publication(
-            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
-        )
-        self.preflight_scenario = "pause"
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        artifact = self.artifact_from(result.stdout)
-        publication = json.loads((artifact / "publication.json").read_text())
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(publication["status"], "succeeded")
-        self.assertEqual(publication["admission_outcome"], "replayed")
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-
     def test_same_terminal_run_replays_through_the_publication_seam(self):
         store = self.root / "adapter-store.json"
         adapter = self.write_stateful_publication_adapter(store)
@@ -599,25 +343,6 @@ class RunPreparerCliTest(unittest.TestCase):
             terminal,
         )
 
-    def test_rejected_paused_publication_is_separate_durable_evidence(self):
-        receipt = self.root / "paused-rejected-receipt.json"
-        adapter = self.write_publication_adapter("rejected", 1, receipt)
-        self.configure_publication(
-            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
-        )
-        self.preflight_scenario = "pause"
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        self.assertEqual(result.returncode, 1, result.stderr)
-        artifact = self.artifact_from(result.stdout)
-        publication = json.loads((artifact / "publication.json").read_text())
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(publication["status"], "failed")
-        self.assertEqual(publication["error_category"], "admission_rejected")
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-
     def test_temporary_storage_failure_is_sealed_after_completed_run(self):
         receipt = self.root / "unused-receipt.json"
         adapter = self.write_publication_adapter("accepted", 0, receipt)
@@ -638,55 +363,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(publication["error_category"], "temporary_storage")
         self.assertEqual(preparation["coordinator"]["decision"], "stop")
 
-    def test_temporary_storage_failure_is_sealed_after_paused_run(self):
-        receipt = self.root / "unused-paused-receipt.json"
-        adapter = self.write_publication_adapter("accepted", 0, receipt)
-        self.configure_publication(
-            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
-        )
-        self.preflight_scenario = "pause"
-        environment = os.environ.copy()
-        environment["PATH"] = f"{self.bin}:{environment['PATH']}"
-        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(PREFLIGHT_FIXTURE), "pause"]
-        )
-        stdout = io.StringIO()
-        with (
-            mock.patch.dict(os.environ, environment, clear=True),
-            mock.patch(
-                "afk_run.tempfile.TemporaryDirectory",
-                side_effect=OSError("temporary storage unavailable"),
-            ),
-            redirect_stdout(stdout),
-        ):
-            code = afk_run.run(self.bead["id"], self.config)
-
-        artifact = self.artifact_from(stdout.getvalue())
-        publication = json.loads((artifact / "publication.json").read_text())
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(code, 1)
-        self.assertEqual(publication["error_category"], "temporary_storage")
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-
-    def test_non_utf8_admission_output_is_a_protocol_failure(self):
-        adapter = self.root / "non-utf8-adapter.py"
-        adapter.write_text(
-            "import os,sys\nos.write(1, b'\\xff\\xfe')\nraise SystemExit(0)\n"
-        )
-        self.configure_publication([sys.executable, str(adapter), "{bundle_path}"])
-        self.preflight_scenario = "pause"
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-
-        artifact = self.artifact_from(result.stdout)
-        publication = json.loads((artifact / "publication.json").read_text())
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(publication["error_category"], "admission_protocol")
-        self.assertEqual(preparation["preparation_status"], "paused")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-
     def test_malformed_publication_config_is_rejected_before_run_creation(self):
         config = json.loads(self.config.read_text())
         config["publication"] = {
@@ -702,8 +378,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertFalse((self.root / "runs").exists())
 
     def test_readiness_gate_accepts_exactly_one_ready_for_agent_label(self):
-        self.preflight_scenario = "pause"
-
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
 
         self.assertEqual(result.returncode, 1, result.stderr)
@@ -803,46 +477,15 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("worktree_root", collision.stderr)
         self.assertFalse((self.root / "runs").exists())
 
-    def test_classification_store_is_required_and_independent(self):
+    def test_acceptance_routing_is_required_and_classification_store_is_retired(self):
         config = json.loads(self.config.read_text())
-        del config["classification_store"]
+        config["classification_store"] = str(self.root / "classifications")
         self.config.write_text(json.dumps(config))
-        missing = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        self.assertEqual(missing.returncode, 2)
-        self.assertIn("configuration", missing.stderr)
+        retired = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertEqual(retired.returncode, 2)
+        self.assertIn("classification_store", retired.stderr)
+        self.assertIn("retired", retired.stderr)
         self.assertFalse((self.root / "runs").exists())
-
-        self.write_config()
-        config = json.loads(self.config.read_text())
-        config["classification_store"] = config["run_root"]
-        self.config.write_text(json.dumps(config))
-        overlap = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        self.assertEqual(overlap.returncode, 2)
-        self.assertIn("classification store overlaps the Run root", overlap.stderr)
-        self.assertFalse((self.root / "runs").exists())
-
-    def test_unavailable_classification_store_fails_the_gate_with_durable_evidence(
-        self,
-    ):
-        blocked_parent = self.root / "blocked-store-parent"
-        blocked_parent.write_text("fixture\n")
-        config = json.loads(self.config.read_text())
-        config["classification_store"] = str(blocked_parent / "classifications")
-        self.config.write_text(json.dumps(config))
-
-        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        artifact = self.artifact_from(result.stdout)
-        preparation = json.loads((artifact / "preparation.json").read_text())
-        preflight = json.loads((artifact / "preflight" / "output.json").read_text())
-
-        self.assertEqual(result.returncode, 1, result.stderr)
-        self.assertEqual(preparation["preparation_status"], "failed")
-        self.assertEqual(preparation["preflight"]["decision"], "pause")
-        self.assertEqual(preparation["coordinator"]["status"], "not_started")
-        self.assertEqual(preflight["classifier"]["source"], "unavailable")
-        self.assertEqual(
-            preflight["classification_error"], "classification store unavailable"
-        )
 
     def test_assignment_command_requires_one_exact_path_placeholder_before_mutation(
         self,
@@ -1173,8 +816,8 @@ class RunPreparerCliTest(unittest.TestCase):
 
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
-        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
+        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(PLAN_FIXTURE), self.plan_scenario]
         )
         stdout = io.StringIO()
         with (
@@ -1278,7 +921,38 @@ class RunPreparerCliTest(unittest.TestCase):
             "beads_workspace": str(self.beads),
             "run_root": str(self.root / "runs"),
             "worktree_root": str(self.root / "worktrees"),
-            "classification_store": str(self.root / "classifications"),
+            "acceptance_routing": {
+                "timeout_seconds": 5,
+                "catalog": {
+                    "schema_version": 2,
+                    "projects": [
+                        {
+                            "slug": "fixture",
+                            "routes": [
+                                {
+                                    "owner": "AFK Run",
+                                    "executor": "afk_run",
+                                    "evidence_route": "pipeline_run",
+                                    "phases": ["implementation"],
+                                },
+                                {
+                                    "owner": "Caller agent",
+                                    "executor": "caller_agent",
+                                    "evidence_route": "external_check",
+                                    "phases": ["implementation", "closure"],
+                                },
+                                {
+                                    "owner": "Credential holder",
+                                    "executor": "outside_help",
+                                    "outside_help_reason": "missing_credentials",
+                                    "evidence_route": "human_attestation",
+                                    "phases": ["closure"],
+                                },
+                            ],
+                        }
+                    ],
+                },
+            },
             "assignment": {
                 "command": [
                     sys.executable,
@@ -1317,43 +991,6 @@ class RunPreparerCliTest(unittest.TestCase):
     def configure_publication(self, command):
         value = json.loads(self.config.read_text())
         value["publication"] = {"command": command, "timeout_seconds": 5}
-        self.config.write_text(json.dumps(value))
-
-    def configure_acceptance_routing(self):
-        value = json.loads(self.config.read_text())
-        value.pop("classification_store")
-        value["acceptance_routing"] = {
-            "timeout_seconds": 5,
-            "catalog": {
-                "schema_version": 2,
-                "projects": [
-                    {
-                        "slug": "fixture",
-                        "routes": [
-                            {
-                                "owner": "AFK Run",
-                                "executor": "afk_run",
-                                "evidence_route": "pipeline_run",
-                                "phases": ["implementation"],
-                            },
-                            {
-                                "owner": "Caller agent",
-                                "executor": "caller_agent",
-                                "evidence_route": "external_check",
-                                "phases": ["implementation", "closure"],
-                            },
-                            {
-                                "owner": "Credential holder",
-                                "executor": "outside_help",
-                                "outside_help_reason": "missing_credentials",
-                                "evidence_route": "human_attestation",
-                                "phases": ["closure"],
-                            },
-                        ],
-                    }
-                ],
-            },
-        }
         self.config.write_text(json.dumps(value))
 
     def write_publication_adapter(self, outcome, exit_code, receipt):
@@ -1410,12 +1047,6 @@ class RunPreparerCliTest(unittest.TestCase):
             **self.invocation_options(),
         )
 
-    def invoke_async(self, *arguments):
-        return subprocess.Popen(
-            [str(ROOT / "afk"), *arguments],
-            **self.invocation_options(),
-        )
-
     def invocation_options(self):
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
@@ -1423,10 +1054,6 @@ class RunPreparerCliTest(unittest.TestCase):
         environment["PI_DATABASE_URL"] = "TOP_SECRET-pi-database"
         environment["OPENAI_INTERNAL_PASSWORD"] = "TOP_SECRET-openai-password"
         environment["ANTHROPIC_INTERNAL_TOKEN"] = "TOP_SECRET-anthropic-token"
-        environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
-            self.preflight_command
-            or [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
-        )
         environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
             [sys.executable, str(PLAN_FIXTURE), self.plan_scenario]
         )

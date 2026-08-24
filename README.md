@@ -382,9 +382,9 @@ depends only on its small versioned JSON result contract.
 Planner timeout. The catalog must include the source Project and may include
 other Projects used by decomposed work. The Run Preparer retains the exact
 Planner input/output and deterministic Policy input/output in the Run root.
-Historical configurations containing `classification_store` continue to read
-and produce the retained v1 Preflight layout; a configuration chooses exactly
-one admission path.
+`acceptance_routing` is the only Run admission configuration. Run Preparer
+rejects the retired `classification_store` field. Historical v1 Run and
+Preflight evidence remains readable through the exporter and Operations WebUI.
 
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace. Run admission requires the Bead to have exactly one
@@ -420,26 +420,18 @@ created. This lets a configurable worker read the frozen Bead objective while
 keeping Beads lookup in the trusted preparer.
 
 Each project validation mapping also retains bounded `evidence` text describing
-what its exact repository-owned command proves. Legacy Preflight configuration
-uses that text to build its evidence catalog. Capability routing instead uses
-only the configured v2 catalog; the Bead cannot add an executor, owner, evidence
-route, or outside-help reason.
+what its exact repository-owned command proves. Acceptance Routing uses only the
+configured v2 catalog; the Bead cannot add an executor, owner, evidence route,
+or outside-help reason.
 
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
 `coordinator-request.json`, versioned `preparation.json`, and a reserved
-`coordinator/` directory. Capability Runs also contain `planner-input.json`,
-`policy-input.json`, and complete `planner/` and `policy/` results. Legacy Runs
-retain `preflight-input.json` and `preflight/`. Both paths fail closed before
-Coordinator when their selected admission evidence is incomplete or malformed.
-
-A paused or failed Preflight is terminal for that Run and is never resumed in
-place. Invoke `afk run <bead-id>` again to create a new Run ID, worktree, and
-branch while retaining the earlier evidence. An unchanged valid input and
-classifier policy reuse the stored request ledger and decision without starting
-Pi. Correcting the Bead or changing classifier policy creates a different key
-and permits a fresh classification. Reuse makes the first valid classification
-stable; it does not establish that the classification was correct.
+`coordinator/` directory. Runs also contain `planner-input.json`,
+`policy-input.json`, and complete `planner/` and `policy/` results. Run Preparer
+fails closed before Coordinator when that admission evidence is incomplete or
+malformed. Historical Runs may retain `preflight-input.json` and `preflight/`,
+but new Runs never create them.
 
 For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that
@@ -451,21 +443,20 @@ zero, while `exhausted` exits `1` so actionable findings are visible to command
 line callers. Nonzero Coordinator exits are propagated, a zero exit without a
 valid completed output becomes `1`, and preparation/input refusal exits `2`.
 
-After sealing either a terminal completed Preflight pause or terminal
-Coordinator facts in `preparation.json`, a configured preparer exports the Run,
-invokes the publication command exactly once, and removes the temporary bundle.
-A pause is published with an empty Coordinator history; Coordinator remains
-`not_started`, and no Attempt is created. Failed, malformed, or interrupted
-Preflight runs are not publishable terminals and remain fail-closed locally.
-The preparer writes raw adapter streams to `publication.stdout` and
-`publication.stderr`, then atomically seals `publication.json` last. A valid
+After sealing terminal Coordinator facts in `preparation.json`, a configured
+preparer exports the Run, invokes the publication command exactly once, and
+removes the temporary bundle. The preparer writes raw adapter streams to
+`publication.stdout` and `publication.stderr`, then atomically seals
+`publication.json` last. A valid
 `accepted` or `replayed` result records publication success. Conflict,
 rejection, timeout, launch, malformed adapter output, temporary-storage failure,
 or export failure records categorized evidence without changing the Run's
 terminal facts. A publication failure changes an otherwise successful `afk run`
-exit to `1`; an already-unsuccessful Coordinator or paused Preflight retains its
-existing exit behavior. Without `publication`, the command behaves exactly as
-before and creates no publication artifacts.
+exit to `1`; an already-unsuccessful Coordinator retains its existing exit
+behavior. Without `publication`, the command behaves exactly as before and
+creates no publication artifacts. The standalone exporter still accepts
+validated historical Runs that ended in a completed Preflight pause, preserving
+their empty Coordinator history without making that a new-Run production path.
 
 Run and worktree roots, their existing ancestors, and the repository are trusted
 local-host infrastructure. The preparer takes advisory directory locks to
@@ -484,10 +475,11 @@ The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator
 selection without changing the Coordinator or worker contracts.
 
-## Acceptance Evidence Preflight
+## Historical Acceptance Evidence Preflight
 
-Classify one Bead's requested acceptance evidence without running an
-implementation agent:
+The standalone v1 producer remains available for retained fixtures and evidence
+compatibility. Run Preparer no longer invokes it. To reproduce a historical
+classification outside a Run:
 
 ```sh
 python3 -m afk_preflight preflight.json /new/result-directory \

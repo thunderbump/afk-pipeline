@@ -18,7 +18,6 @@ from afk_coordinate.contract import validate_output as validate_coordinator_outp
 from afk_plan.contract import validate_catalog, validate_planner_output
 from afk_plan.contract import validate_input as validate_planner_input
 from afk_plan_accept.contract import validate_policy_output
-from afk_preflight.contract import validate_output as validate_preflight_output
 from afk_runtime import (
     progress,
     run_command,
@@ -186,15 +185,9 @@ def run(bead_id, config_path):
             },
             **config["coordinator"],
         }
-        routing_config = config.get("acceptance_routing")
-        preflight_request = None
-        planner_request = None
-        if routing_config is None:
-            preflight_request = acceptance_preflight(
-                source_record, project["validation"], config["coordinator"]
-            )
-        else:
-            planner_request = acceptance_routing_request(bead_id, bead, routing_config)
+        planner_request = acceptance_routing_request(
+            bead_id, bead, config["acceptance_routing"]
+        )
         started = timestamp()
         preparation = {
             "schema_version": 1,
@@ -214,61 +207,37 @@ def run(bead_id, config_path):
                 "finished_at": None,
             },
             "preparation_status": "preparing",
-            **(
-                {
-                    "preflight": {
-                        "command": [
-                            sys.executable,
-                            "-m",
-                            "afk_preflight",
-                            str(artifact / "preflight-input.json"),
-                            str(artifact / "preflight"),
-                            "--classification-store",
-                            str(config["classification_store"]),
-                        ],
-                        "directory": "preflight",
-                        "result": "preflight/output.json",
-                        "status": "not_started",
-                        "exit_code": None,
-                        "outcome": None,
-                        "decision": None,
-                    }
-                }
-                if preflight_request is not None
-                else {
-                    "routing": {
-                        "planner": {
-                            "command": [
-                                sys.executable,
-                                "-m",
-                                "afk_plan",
-                                str(artifact / "planner-input.json"),
-                                str(artifact / "planner"),
-                            ],
-                            "directory": "planner",
-                            "result": "planner/output.json",
-                            "status": "not_started",
-                            "exit_code": None,
-                            "outcome": None,
-                        },
-                        "policy": {
-                            "command": [
-                                sys.executable,
-                                "-m",
-                                "afk_plan_accept",
-                                str(artifact / "policy-input.json"),
-                                str(artifact / "policy"),
-                            ],
-                            "directory": "policy",
-                            "result": "policy/output.json",
-                            "status": "not_started",
-                            "exit_code": None,
-                            "outcome": None,
-                            "decision": None,
-                        },
-                    }
-                }
-            ),
+            "routing": {
+                "planner": {
+                    "command": [
+                        sys.executable,
+                        "-m",
+                        "afk_plan",
+                        str(artifact / "planner-input.json"),
+                        str(artifact / "planner"),
+                    ],
+                    "directory": "planner",
+                    "result": "planner/output.json",
+                    "status": "not_started",
+                    "exit_code": None,
+                    "outcome": None,
+                },
+                "policy": {
+                    "command": [
+                        sys.executable,
+                        "-m",
+                        "afk_plan_accept",
+                        str(artifact / "policy-input.json"),
+                        str(artifact / "policy"),
+                    ],
+                    "directory": "policy",
+                    "result": "policy/output.json",
+                    "status": "not_started",
+                    "exit_code": None,
+                    "outcome": None,
+                    "decision": None,
+                },
+            },
             "coordinator": {
                 "command": [
                     sys.executable,
@@ -298,19 +267,13 @@ def run(bead_id, config_path):
         open_fds.append(artifact_fd)
         artifact_io = Path(f"/proc/self/fd/{artifact_fd}")
         artifact_owned = True
-        if preflight_request is not None:
-            (artifact_io / "preflight").mkdir()
-        else:
-            (artifact_io / "planner").mkdir()
-            (artifact_io / "policy").mkdir()
+        (artifact_io / "planner").mkdir()
+        (artifact_io / "policy").mkdir()
         (artifact_io / "coordinator").mkdir()
         seal_json(artifact_io / "preparation.json", preparation)
         write_json(artifact_io / "bead.json", source_record)
         write_json(artifact_io / "assignment.json", assignment)
-        if preflight_request is not None:
-            write_json(artifact_io / "preflight-input.json", preflight_request)
-        else:
-            write_json(artifact_io / "planner-input.json", planner_request)
+        write_json(artifact_io / "planner-input.json", planner_request)
         write_json(artifact_io / "coordinator-request.json", request)
         progress(f"creating prepared worktree for Bead {bead_id} at {worktree}")
         require_identity(worktree.parent, worktree_parent_fd, "worktree parent")
@@ -348,10 +311,7 @@ def run(bead_id, config_path):
         require_identity(worktree, worktree_fd, "worktree destination")
         preparation["preparation_status"] = "prepared"
         preparation["timestamps"]["prepared_at"] = timestamp()
-        if preflight_request is not None:
-            preparation["preflight"]["status"] = "running"
-        else:
-            preparation["routing"]["planner"]["status"] = "running"
+        preparation["routing"]["planner"]["status"] = "running"
         seal_json(artifact_io / "preparation.json", preparation)
         # Revalidation above is the handoff boundary. Later path replacement by
         # an actor that ignores these locks is outside the local-host contract.
@@ -359,21 +319,10 @@ def run(bead_id, config_path):
         open_fds.clear()
         leases.clear()
         artifact_io = artifact
-        if preflight_request is not None:
-            admission_code = execute_preflight(
-                bead_id, artifact, preparation, preflight_request
-            )
-        else:
-            admission_code = execute_acceptance_routing(
-                bead_id, artifact, preparation, planner_request
-            )
+        admission_code = execute_acceptance_routing(
+            bead_id, artifact, preparation, planner_request
+        )
         if admission_code != 0:
-            # Only a validated completed pause is a publishable Preflight
-            # terminal. Failed, malformed, and interrupted gates remain local
-            # fail-closed evidence and never reach Coordinator or Admission.
-            if preparation["preparation_status"] == "paused":
-                terminal_sealed = True
-                publish_configured_run(bead_id, artifact, config)
             print(f"artifact root: {artifact}", flush=True)
             return admission_code
 
@@ -462,13 +411,6 @@ def run(bead_id, config_path):
     except KeyboardInterrupt:
         if artifact_owned:
             if preparation is not None and not terminal_sealed:
-                if preparation.get("preflight", {}).get("status") == "running":
-                    preparation["preflight"].update(
-                        status="failed",
-                        exit_code=130,
-                        outcome="interrupted",
-                        decision="pause",
-                    )
                 if (
                     preparation.get("routing", {}).get("planner", {}).get("status")
                     == "running"
@@ -511,87 +453,6 @@ def coordinator_terminal(output_path):
         return None, None
     decision = output.get("decision") if output["outcome"] == "completed" else None
     return output["outcome"], decision
-
-
-def preflight_terminal(output_path, preflight_input):
-    """Return only value-safe routing facts from a valid sealed Preflight output."""
-    try:
-        output = validate_preflight_output(
-            json.loads(output_path.read_text()), preflight_input
-        )
-    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
-        return None, "pause", []
-    return output["outcome"], output["decision"], output["requests"]
-
-
-def execute_preflight(bead_id, artifact, preparation, preflight_input):
-    """Run and record the complete pre-Coordinator acceptance gate."""
-    progress(f"starting acceptance-evidence preflight for Bead {bead_id}")
-    (artifact / "preflight").rmdir()
-    try:
-        preflight_code, interrupted = run_foreground(
-            preparation["preflight"]["command"], Path(__file__).parent
-        )
-    except OSError:
-        (artifact / "preflight").mkdir(exist_ok=True)
-        preparation["preflight"].update(
-            status="failed", exit_code=None, outcome=None, decision="pause"
-        )
-        fail_preparation(
-            preparation,
-            "preflight_launch",
-            f"acceptance-evidence preflight could not be started for Bead {bead_id}",
-        )
-        seal_json(artifact / "preparation.json", preparation)
-        raise PreparationError(
-            f"acceptance-evidence preflight could not be started for Bead {bead_id}"
-        )
-
-    outcome, decision, requests = preflight_terminal(
-        artifact / "preflight" / "output.json", preflight_input
-    )
-    if interrupted:
-        outcome = "interrupted"
-        decision = "pause"
-        requests = []
-    preparation["preflight"].update(
-        status=(
-            "completed"
-            if not interrupted and preflight_code == 0 and outcome == "completed"
-            else "failed"
-        ),
-        exit_code=130 if interrupted else preflight_code,
-        outcome=outcome,
-        decision=decision,
-    )
-    for classified in requests:
-        progress(
-            f"preflight request {classified['index']}: "
-            f"{classified['category']} -> {classified['route']}; "
-            f"request={json.dumps(classified['request'])}"
-        )
-    progress(f"preflight terminal decision for Bead {bead_id}: {decision}")
-    if not interrupted and preflight_code == 0 and outcome == "completed":
-        if decision == "proceed":
-            return 0
-        preparation["preparation_status"] = "paused"
-        preparation["timestamps"]["finished_at"] = timestamp()
-        seal_json(artifact / "preparation.json", preparation)
-        return 1
-
-    preparation["preparation_status"] = "failed"
-    preparation["timestamps"]["finished_at"] = timestamp()
-    preparation["errors"].append(
-        {
-            "category": "interrupted" if interrupted else "preflight",
-            "message": (
-                f"acceptance-evidence preflight "
-                f"{'was interrupted' if interrupted else 'failed'} for Bead {bead_id}"
-            ),
-        }
-    )
-    seal_json(artifact / "preparation.json", preparation)
-    return 130 if interrupted else 1
 
 
 def execute_acceptance_routing(bead_id, artifact, preparation, planner_input):
@@ -896,15 +757,17 @@ def load_config(path):
         "coordinator",
         "projects",
     }
-    legacy = core | {"classification_store"}
     capability = core | {"acceptance_routing"}
+    if isinstance(value, dict) and "classification_store" in value:
+        raise PreparationError(
+            "configuration classification_store is retired; use acceptance_routing"
+        )
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != 1
         or frozenset(value)
         not in {
-            frozenset(base | optional)
-            for base in (legacy, capability)
+            frozenset(capability | optional)
             for optional in (
                 set(),
                 {"publication"},
@@ -926,19 +789,7 @@ def load_config(path):
         raise PreparationError(
             f"configured central Beads workspace {value['beads_workspace']} is unavailable"
         )
-    if "classification_store" in value:
-        value["classification_store"] = absolute_path(
-            value["classification_store"], "configuration classification_store"
-        )
-        if (
-            value["classification_store"].exists()
-            and not value["classification_store"].is_dir()
-        ):
-            raise PreparationError(
-                f"configured classification_store {value['classification_store']} is not a directory"
-            )
-    if "acceptance_routing" in value:
-        validate_acceptance_routing(value["acceptance_routing"])
+    validate_acceptance_routing(value["acceptance_routing"])
     validate_assignment_defaults(value["assignment"])
     validate_coordinator(value["coordinator"])
     if "publication" in value:
@@ -1207,45 +1058,6 @@ def safe_bead(bead_id, bead):
     return result
 
 
-def acceptance_preflight(bead, validation, coordinator):
-    request = {
-        "schema_version": 1,
-        "source": bead["source"],
-        "title": bead["title"],
-        "acceptance_criteria": bead.get("acceptance_criteria"),
-        "evidence_catalog": [
-            {
-                "category": "repository_validation",
-                "route": "repository validation",
-                "can_prove": (
-                    f"{validation['evidence']} Exact argv: "
-                    f"{json.dumps(validation['command'])}."
-                ),
-            },
-            {
-                "category": "pipeline_evidence",
-                "route": "AFK committed change and Review",
-                "can_prove": (
-                    "Committed implementation facts, Git transition facts, and "
-                    "findings from AFK Review."
-                ),
-            },
-            {
-                "category": "operator_external",
-                "route": "operator handoff",
-                "can_prove": (
-                    "Host, deployment, live service, HTTP, and other checks outside "
-                    "the prepared repository Run."
-                ),
-            },
-        ],
-        "timeout_seconds": coordinator["agent_timeout_seconds"],
-    }
-    if any(len(item["can_prove"]) > 4000 for item in request["evidence_catalog"]):
-        raise PreparationError("configured acceptance-evidence catalog is too large")
-    return request
-
-
 def acceptance_routing_request(bead_id, bead, routing):
     """Freeze the exact capability catalog and source fields used for admission."""
     try:
@@ -1322,7 +1134,6 @@ def ensure_branch_available(bead_id, repository, branch):
 def ensure_destination_layout(bead_id, config, repository, artifact, worktree):
     run_root = config["run_root"]
     worktree_root = config["worktree_root"]
-    classification_store = config.get("classification_store")
     if (
         run_root == worktree_root
         or run_root in worktree_root.parents
@@ -1331,21 +1142,6 @@ def ensure_destination_layout(bead_id, config, repository, artifact, worktree):
         raise PreparationError(
             f"Bead {bead_id} Run and worktree roots overlap unsafely"
         )
-    if classification_store is not None:
-        for other, fact in (
-            (run_root, "Run root"),
-            (worktree_root, "worktree root"),
-            (repository, "selected repository"),
-            (config["beads_workspace"], "central Beads workspace"),
-        ):
-            if (
-                classification_store == other
-                or classification_store in other.parents
-                or other in classification_store.parents
-            ):
-                raise PreparationError(
-                    f"Bead {bead_id} classification store overlaps the {fact} unsafely"
-                )
     for root, path, fact in (
         (run_root, artifact, "artifact"),
         (worktree_root, worktree, "worktree"),

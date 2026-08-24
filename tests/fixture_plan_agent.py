@@ -139,12 +139,12 @@ elif scenario in {
             "children": [
                 {
                     "local_id": "caller-work",
-                    "title": "Complete caller-agent work",
-                    "objective": "Complete and check the requested result.",
+                    "title": "Complete automated host closure",
+                    "objective": "Run the automated host check after repository work.",
                     "criteria": ["criterion-1"],
                     "project": "fixture",
                     "owner": "Caller agent",
-                    "phase": "implementation",
+                    "phase": "closure",
                     "executor": "caller_agent",
                     "evidence_route": "external_check",
                     "depends_on": [],
