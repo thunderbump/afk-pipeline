@@ -575,14 +575,20 @@ caller must provide those facts explicitly:
 already carries the corresponding identity. The destination parent must exist
 and the destination itself must not. Source and destination may not overlap.
 
-The exporter validates terminal Coordinator evidence, or a terminal `pause`
-from Preflight before Coordinator was started. A paused export has an empty
-history; it never invents Coordinator invocations. Legacy Runs without
-Preflight remain exportable.
+The exporter validates terminal Coordinator evidence, a terminal `pause`
+from Preflight, or sealed Acceptance Routing that intentionally stopped before
+Coordinator. A paused or routing-only export has an empty history; it never
+invents Coordinator invocations. Legacy Runs without Preflight remain
+exportable.
 
 Publication Bundle v2 is the default producer output. It retains the readable
-normalized Run fields and adds the Preflight request ledger plus a
-semantic `artifacts` inventory. Each descriptor identifies a safe Run-relative source, scope, kind,
+normalized Run fields and adds the Preflight request ledger, a bounded
+`acceptance_routing` stage, and a semantic `artifacts` inventory. The routing
+stage records Planner outcome, Policy outcome and decision, a direct-route or
+child-route summary, and the exact contract reason for outside help or
+clarification. Typed `planner` and `policy` artifacts retain only the validated
+output envelopes; model event streams and policy inputs are deliberately not
+published. Each descriptor identifies a safe Run-relative source, scope, kind,
 media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
 UTF-8 logs, and diffs are written only as deterministic derived copies below

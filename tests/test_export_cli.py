@@ -937,6 +937,82 @@ class ExportCliTests(unittest.TestCase):
             self.assertFalse(rejected_destination.exists())
             self.assertEqual(json.loads(rejected.stdout)["error"], "invalid_run")
 
+    def test_normalizes_direct_and_decomposed_acceptance_routing(self):
+        direct = self.routing_evidence("direct")
+        normalized = afk_export.normalize_acceptance_routing(direct)
+        self.assertEqual(normalized["planner"]["outcome"], "completed")
+        self.assertEqual(normalized["policy"]["decision"], "direct")
+        self.assertEqual(normalized["route"]["kind"], "direct")
+        self.assertEqual(normalized["route"]["routes"][0]["executor"], "afk_run")
+        self.assertEqual(
+            normalized["artifacts"],
+            [
+                {"type": "planner", "source": "planner/output.json"},
+                {"type": "policy", "source": "policy/output.json"},
+            ],
+        )
+
+        decomposed = afk_export.normalize_acceptance_routing(
+            self.routing_evidence("accepted")
+        )
+        self.assertEqual(decomposed["route"]["kind"], "decomposed")
+        self.assertEqual(decomposed["route"]["children"][0]["executor"], "caller_agent")
+        self.assertNotIn("objective", decomposed["route"]["children"][0])
+
+    def test_normalized_routing_keeps_exact_nonadmission_reason(self):
+        for decision, reason in (
+            ("outside_help", "missing_credentials"),
+            ("needs_clarification", "routing_ambiguity"),
+        ):
+            with self.subTest(decision=decision):
+                normalized = afk_export.normalize_acceptance_routing(
+                    self.routing_evidence(decision, reason)
+                )
+                self.assertEqual(normalized["policy"]["decision"], decision)
+                self.assertEqual(normalized["reason"], reason)
+
+    def test_malformed_acceptance_routing_binding_is_rejected(self):
+        evidence = self.routing_evidence("direct")
+        planner_input = {"schema_version": 2}
+        malformed_policy_input = {
+            "schema_version": 2,
+            "planner_input": planner_input,
+            "routing": {"status": "fabricated"},
+        }
+        prepared = {
+            "planner": {
+                "directory": "planner",
+                "result": "planner/output.json",
+                "status": "completed",
+                "exit_code": 0,
+                "outcome": "completed",
+            },
+            "policy": {
+                "directory": "policy",
+                "result": "policy/output.json",
+                "status": "completed",
+                "exit_code": 0,
+                "outcome": "completed",
+                "decision": "direct",
+            },
+        }
+        with (
+            mock.patch(
+                "afk_export.read_json",
+                side_effect=[planner_input, malformed_policy_input],
+            ),
+            mock.patch("afk_export.read_bytes", side_effect=[b"{}", b"{}"]),
+            mock.patch("afk_export.validate_plan_input", return_value=planner_input),
+            mock.patch(
+                "afk_export.validate_planner_output", return_value=evidence["planner"]
+            ),
+            mock.patch(
+                "afk_export.validate_policy_output", return_value=evidence["policy"]
+            ),
+            self.assertRaisesRegex(afk_export.ExportError, "Acceptance Routing"),
+        ):
+            afk_export.validate_prepared_routing(Path("unused"), prepared)
+
     def test_unsupported_schema_is_rejected_before_destination_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1002,6 +1078,57 @@ class ExportCliTests(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    @staticmethod
+    def routing_evidence(decision, reason=None):
+        direct = decision != "accepted"
+        route = {
+            "criterion": "criterion-1",
+            "target": {"kind": "source", "id": "central-example"},
+            "project": "example",
+            "owner": "AFK Run",
+            "phase": "implementation",
+            "executor": "afk_run",
+            "evidence_route": "repository_check",
+        }
+        routing = {
+            "status": (
+                "needs_clarification"
+                if decision == "needs_clarification"
+                else "proposed"
+            ),
+            "routes": [route],
+        }
+        plan = None
+        if not direct:
+            routing = {"status": "proposed", "routes": []}
+            plan = {
+                "children": [
+                    {
+                        "local_id": "closure",
+                        "project": "example",
+                        "owner": "Caller agent",
+                        "phase": "closure",
+                        "executor": "caller_agent",
+                        "evidence_route": "external_check",
+                        "depends_on": [],
+                        "readiness": "ready-for-agent",
+                        "objective": "private Planner prose is not normalized",
+                    }
+                ]
+            }
+        return {
+            "planner": {"outcome": "completed", "routing": routing, "plan": plan},
+            "policy": {
+                "outcome": "completed"
+                if decision in {"direct", "accepted"}
+                else "unaccepted",
+                "decision": decision,
+                "error_category": reason,
+            },
+            "planner_raw": b"{}",
+            "policy_raw": b"{}",
+        }
 
     def add_preflight(
         self, source, invocation, bead_id="central-example", stored_classifier=False

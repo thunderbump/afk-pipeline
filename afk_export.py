@@ -203,7 +203,17 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
     preparation = read_json(preparation_path)
     if not isinstance(preparation, dict):
         raise ExportError("invalid Run Preparer evidence")
-    if preparation.get("preparation_status") != "paused":
+    preparation_status = preparation.get("preparation_status")
+    if preparation_status in {
+        "routed",
+        "outside_help",
+        "needs_clarification",
+        "caller_agent",
+    }:
+        if terminal_continuation is not None:
+            raise ExportError("terminal Acceptance Routing has no continuation")
+        return load_terminal_routing(source, preparation, project, run_id, bead_id)
+    if preparation_status != "paused":
         if "preflight" in preparation:
             require_directory(source / "preflight")
         observed = load_source(
@@ -317,6 +327,108 @@ def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None)
     }
 
 
+def load_terminal_routing(source, preparation, project, run_id, bead_id):
+    """Load a sealed v2 route that intentionally stopped before Coordinator."""
+    expected = {
+        "schema_version",
+        "run",
+        "bead",
+        "project",
+        "repository",
+        "timestamps",
+        "preparation_status",
+        "routing",
+        "coordinator",
+        "errors",
+    }
+    if (
+        not isinstance(preparation, dict)
+        or set(preparation) != expected
+        or preparation.get("schema_version") != 1
+        or preparation.get("errors") != []
+    ):
+        raise ExportError("invalid terminal Acceptance Routing preparation")
+    run, project_record, bead = (
+        preparation.get("run"),
+        preparation.get("project"),
+        preparation.get("bead"),
+    )
+    if (
+        not exact_object(run, {"id", "artifact_root"})
+        or Path(run["artifact_root"]).resolve() != source.resolve()
+        or not exact_object(project_record, {"slug"})
+        or not exact_object(bead, {"id"})
+    ):
+        raise ExportError("invalid terminal Acceptance Routing identity")
+    identity = validate_identity(project_record["slug"], run["id"])
+    validate_public_identity(bead["id"], SAFE_ID, "prepared Bead")
+    assert_identity(project, identity["project"], "project")
+    assert_identity(run_id, identity["run_id"], "run ID")
+    assert_identity(bead_id, bead["id"], "Bead ID")
+    if not isinstance(preparation.get("timestamps"), dict) or not isinstance(
+        preparation["timestamps"].get("finished_at"), str
+    ):
+        raise ExportError("Acceptance Routing Run is not terminal")
+    coordinator_facts = preparation.get("coordinator")
+    if (
+        not isinstance(coordinator_facts, dict)
+        or coordinator_facts.get("status") != "not_started"
+        or coordinator_facts.get("exit_code") is not None
+        or coordinator_facts.get("outcome") is not None
+        or coordinator_facts.get("decision") is not None
+    ):
+        raise ExportError("terminal Acceptance Routing has Coordinator evidence")
+    require_directory(source / "coordinator")
+    if any((source / "coordinator").iterdir()):
+        raise ExportError("terminal Acceptance Routing has Coordinator history")
+    assignment = validate_assignment(read_json(source / "assignment.json"))
+    request = validate_request(read_json(source / "coordinator-request.json"))
+    if assignment.get("source") != {"kind": "bead", "id": bead["id"]}:
+        raise ExportError("Acceptance Routing Bead identity disagrees")
+    routing = validate_prepared_routing(source, preparation["routing"])
+    decision = routing["policy"]["decision"]
+    expected_status = {
+        "accepted": "routed",
+        "outside_help": "outside_help",
+        "needs_clarification": "needs_clarification",
+        "caller_agent": "caller_agent",
+    }.get(decision)
+    if expected_status != preparation["preparation_status"]:
+        raise ExportError("Acceptance Routing terminal decision disagrees")
+    repository = preparation.get("repository")
+    if (
+        not isinstance(repository, dict)
+        or not isinstance(repository.get("path"), str)
+        or not isinstance(repository.get("worktree"), str)
+    ):
+        raise ExportError("invalid terminal Acceptance Routing repository")
+    redactions = {
+        str(source.resolve()),
+        assignment["workspace"],
+        run["artifact_root"],
+        repository["path"],
+        repository["worktree"],
+    }
+    return {
+        "identity": identity,
+        "bead_id": bead["id"],
+        "assignment": assignment,
+        "request": request,
+        "state": None,
+        "output": None,
+        "coordinator": source / "coordinator",
+        "redactions": {
+            item
+            for item in redactions
+            if isinstance(item, str) and item.startswith("/")
+        },
+        "run_root": source,
+        "preflight": None,
+        "preparation": preparation,
+        "acceptance_routing": routing,
+    }
+
+
 def load_optional_preflight(source, preparation):
     if "preflight" not in preparation:
         return None
@@ -388,8 +500,13 @@ def load_source(
             validate_prepared_preflight(
                 preparation["preflight"], preflight_input, preflight_output
             )
+        acceptance_routing = None
         if "routing" in preparation:
-            validate_prepared_routing(source, preparation["routing"])
+            acceptance_routing = validate_prepared_routing(
+                source, preparation["routing"]
+            )
+            if acceptance_routing["policy"]["decision"] != "direct":
+                raise ExportError("Coordinator Run lacks an accepted direct route")
     else:
         if project is None or run_id is None:
             raise ExportUsageError(
@@ -401,6 +518,7 @@ def load_source(
         coordinator = source
         root_assignment = None
         root_request = None
+        acceptance_routing = None
 
     require_directory(coordinator)
     assignment = validate_assignment(read_json(coordinator / "assignment.json"))
@@ -467,6 +585,7 @@ def load_source(
             for value in redactions
             if isinstance(value, str) and value.startswith("/")
         },
+        "acceptance_routing": acceptance_routing,
     }
 
 
@@ -600,46 +719,61 @@ def validate_prepared_preflight(prepared, preflight_input, preflight_output):
 
 
 def validate_prepared_routing(source, prepared):
-    """Require an accepted direct v2 route for a Coordinator-bearing Run."""
+    """Validate and retain the complete, contract-bound v2 routing stage."""
     try:
         planner_input = validate_plan_input(read_json(source / "planner-input.json"))
+        planner_raw = read_bytes(source / "planner" / "output.json", MAX_JSON_BYTES)
         planner_output = validate_planner_output(
-            planner_input, read_json(source / "planner" / "output.json")
+            planner_input, json.loads(decode_text(planner_raw))
         )
-        routing = planner_output["routing"]
+        evidence_name = "routing" if planner_output["plan"] is None else "plan"
+        evidence = planner_output[evidence_name]
         policy_input = read_json(source / "policy-input.json")
+        policy_raw = read_bytes(source / "policy" / "output.json", MAX_JSON_BYTES)
         policy_output = validate_policy_output(
-            planner_input,
-            policy_input,
-            read_json(source / "policy" / "output.json"),
+            planner_input, policy_input, json.loads(decode_text(policy_raw))
         )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
         raise ExportError("invalid prepared Acceptance Routing evidence") from error
     if (
         not isinstance(prepared, dict)
         or set(prepared) != {"planner", "policy"}
-        or planner_output["plan"] is not None
         or policy_input
-        != {"schema_version": 2, "planner_input": planner_input, "routing": routing}
-        or policy_output["decision"] != "direct"
+        != {
+            "schema_version": 2,
+            "planner_input": planner_input,
+            evidence_name: evidence,
+        }
     ):
         raise ExportError("invalid prepared Acceptance Routing evidence")
+    expected_exit = 0 if policy_output["decision"] in {"direct", "accepted"} else 1
     expected = (
-        (prepared["planner"], "planner", "completed", 0, "completed"),
-        (prepared["policy"], "policy", "completed", 0, "completed"),
+        (prepared["planner"], "planner", 0, planner_output["outcome"], None),
+        (
+            prepared["policy"],
+            "policy",
+            expected_exit,
+            policy_output["outcome"],
+            policy_output["decision"],
+        ),
     )
-    for facts, directory, status, exit_code, outcome in expected:
+    for facts, directory, exit_code, outcome, decision in expected:
         if (
             not isinstance(facts, dict)
             or facts.get("directory") != directory
             or facts.get("result") != f"{directory}/output.json"
-            or facts.get("status") != status
+            or facts.get("status") != "completed"
             or facts.get("exit_code") != exit_code
             or facts.get("outcome") != outcome
+            or (decision is not None and facts.get("decision") != decision)
         ):
             raise ExportError("invalid prepared Acceptance Routing evidence")
-    if prepared["policy"].get("decision") != "direct":
-        raise ExportError("invalid prepared Acceptance Routing evidence")
+    return {
+        "planner": planner_output,
+        "policy": policy_output,
+        "planner_raw": planner_raw,
+        "policy_raw": policy_raw,
+    }
 
 
 def validate_preparer_terminal(preparation, output):
@@ -661,9 +795,7 @@ def validate_preparer_terminal(preparation, output):
 def normalize_run_v2(observed):
     """Create the v2 semantic record and its sanitized public artifacts."""
     if observed["state"] is None:
-        preflight = sanitize_json_value(
-            observed["preflight"]["output"], observed["redactions"]
-        )[0]
+        routing = observed.get("acceptance_routing")
         record = {
             "schema_version": 2,
             "identity": observed["identity"],
@@ -672,16 +804,33 @@ def normalize_run_v2(observed):
                 observed["assignment"]["objective"], observed["redactions"]
             ),
             "response_limit": observed["request"]["max_responses"],
-            "status": "paused",
-            "terminal": {"stage": "preflight", "decision": "pause"},
+            "status": (
+                observed["preparation"]["preparation_status"] if routing else "paused"
+            ),
+            "terminal": (
+                {
+                    "stage": "acceptance_routing",
+                    "decision": routing["policy"]["decision"],
+                }
+                if routing
+                else {"stage": "preflight", "decision": "pause"}
+            ),
             "history": [],
             "evidence": [],
-            "preflight": {
+        }
+        if routing:
+            record["acceptance_routing"] = normalize_acceptance_routing(
+                routing, observed["redactions"]
+            )
+        else:
+            preflight = sanitize_json_value(
+                observed["preflight"]["output"], observed["redactions"]
+            )[0]
+            record["preflight"] = {
                 "outcome": preflight["outcome"],
                 "decision": preflight["decision"],
                 "requests": preflight["requests"],
-            },
-        }
+            }
     else:
         record, _ = normalize_run(observed, include_evidence=False)
         record["schema_version"] = 2
@@ -694,10 +843,79 @@ def normalize_run_v2(observed):
                 "decision": public["decision"],
                 "requests": public["requests"],
             }
+        if observed.get("acceptance_routing"):
+            record["acceptance_routing"] = normalize_acceptance_routing(
+                observed["acceptance_routing"], observed["redactions"]
+            )
 
     descriptors, payloads = public_artifacts(observed)
     record["artifacts"] = descriptors
     return record, payloads
+
+
+def normalize_acceptance_routing(value, redactions=frozenset()):
+    """Reduce validated routing envelopes to bounded public semantic facts."""
+    planner, policy = value["planner"], value["policy"]
+    routing = planner["routing"]
+    result = {
+        "planner": {
+            "outcome": planner["outcome"],
+            "route_kind": "direct" if planner["plan"] is None else "decomposed",
+            "routing_status": routing["status"],
+        },
+        "policy": {
+            "outcome": policy["outcome"],
+            "decision": policy["decision"],
+        },
+    }
+    if policy["error_category"] is not None:
+        # This contract enum is the exact trusted outside-help/clarification
+        # reason.  Do not replace it with prose inferred from Planner content.
+        result["reason"] = policy["error_category"]
+    if planner["plan"] is None:
+        result["route"] = {
+            "kind": "direct",
+            "routes": [normalize_route(item) for item in routing["routes"]],
+        }
+    else:
+        result["route"] = {
+            "kind": "decomposed",
+            "children": [normalize_child(item) for item in planner["plan"]["children"]],
+        }
+    result["artifacts"] = [
+        {"type": "planner", "source": "planner/output.json"},
+        {"type": "policy", "source": "policy/output.json"},
+    ]
+    return sanitize_json_value(result, redactions)[0]
+
+
+def normalize_route(route):
+    fields = (
+        "criterion",
+        "target",
+        "project",
+        "owner",
+        "phase",
+        "executor",
+        "evidence_route",
+        "outside_help_reason",
+    )
+    return {field: route[field] for field in fields if field in route}
+
+
+def normalize_child(child):
+    fields = (
+        "local_id",
+        "project",
+        "owner",
+        "phase",
+        "executor",
+        "evidence_route",
+        "outside_help_reason",
+        "depends_on",
+        "readiness",
+    )
+    return {field: child[field] for field in fields if field in child}
 
 
 def public_artifacts(observed):
@@ -747,6 +965,7 @@ def artifact_candidates(observed):
         declaration=None,
         validated_preflight_classifier_key=None,
         validated_preflight_output_raw=None,
+        validated_raw=None,
     ):
         if not unsafe_path and not safe_relative(relative):
             return
@@ -780,6 +999,7 @@ def artifact_candidates(observed):
                     validated_preflight_classifier_key
                 ),
                 "validated_preflight_output_raw": validated_preflight_output_raw,
+                "validated_raw": validated_raw,
             }
         )
 
@@ -809,6 +1029,25 @@ def artifact_candidates(observed):
         )
         add("preflight/stderr.log", "preflight", "log", "text/plain; charset=utf-8", 1)
         add("preflight/events.jsonl", "preflight", "events", "application/x-ndjson", 2)
+    if observed.get("acceptance_routing"):
+        # Planner event streams can contain model prompts and policy input repeats
+        # the private catalog.  Publish only the two validated typed envelopes.
+        add(
+            "planner/output.json",
+            "acceptance_routing",
+            "planner",
+            "application/json",
+            0,
+            validated_raw=observed["acceptance_routing"]["planner_raw"],
+        )
+        add(
+            "policy/output.json",
+            "acceptance_routing",
+            "policy",
+            "application/json",
+            0,
+            validated_raw=observed["acceptance_routing"]["policy_raw"],
+        )
     if observed["state"] is not None:
         coordinator_prefix = (
             ""
@@ -948,8 +1187,13 @@ def derive_public_artifact(candidate, redactions):
             and raw != validated_preflight_output_raw
         ):
             raise ExportError("validated Preflight output changed")
+        if (
+            candidate.get("validated_raw") is not None
+            and raw != candidate["validated_raw"]
+        ):
+            raise ExportError("validated Acceptance Routing output changed")
         text = decode_text(raw)
-        if candidate["kind"] == "json":
+        if candidate["kind"] in {"json", "planner", "policy"}:
             value = json.loads(text)
             changed = sanitize_validated_preflight_classifier_key(
                 value, candidate.get("validated_preflight_classifier_key")
