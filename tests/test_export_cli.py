@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -8,6 +9,13 @@ from pathlib import Path
 from unittest import mock
 
 import afk_export
+from afk_plan.contract import build_routing
+from afk_plan_accept.contract import (
+    accept_direct,
+    accept_plan,
+    direct_policy,
+    plan_policy,
+)
 
 ROOT = Path(__file__).parents[1]
 
@@ -937,81 +945,115 @@ class ExportCliTests(unittest.TestCase):
             self.assertFalse(rejected_destination.exists())
             self.assertEqual(json.loads(rejected.stdout)["error"], "invalid_run")
 
-    def test_normalizes_direct_and_decomposed_acceptance_routing(self):
-        direct = self.routing_evidence("direct")
-        normalized = afk_export.normalize_acceptance_routing(direct)
-        self.assertEqual(normalized["planner"]["outcome"], "completed")
-        self.assertEqual(normalized["policy"]["decision"], "direct")
-        self.assertEqual(normalized["route"]["kind"], "direct")
-        self.assertEqual(normalized["route"]["routes"][0]["executor"], "afk_run")
-        self.assertEqual(
-            normalized["artifacts"],
-            [
-                {"type": "planner", "source": "planner/output.json"},
-                {"type": "policy", "source": "policy/output.json"},
-            ],
+    def test_v2_exports_supported_acceptance_routing_scenarios_end_to_end(self):
+        scenarios = (
+            ("direct", "completed", "direct", None),
+            ("accepted", "routed", "decomposed", None),
+            ("outside_help", "outside_help", "direct", "missing_credentials"),
+            (
+                "needs_clarification",
+                "needs_clarification",
+                "direct",
+                "routing_ambiguity",
+            ),
         )
+        for decision, status, route_kind, reason in scenarios:
+            with (
+                self.subTest(decision=decision),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                planner_raw, policy_raw = self.add_acceptance_routing(source, decision)
+                destination = root / "routing-bundle"
 
-        decomposed = afk_export.normalize_acceptance_routing(
-            self.routing_evidence("accepted")
-        )
-        self.assertEqual(decomposed["route"]["kind"], "decomposed")
-        self.assertEqual(decomposed["route"]["children"][0]["executor"], "caller_agent")
-        self.assertNotIn("objective", decomposed["route"]["children"][0])
+                result = self.export_v2(source, destination)
 
-    def test_normalized_routing_keeps_exact_nonadmission_reason(self):
-        for decision, reason in (
-            ("outside_help", "missing_credentials"),
-            ("needs_clarification", "routing_ambiguity"),
-        ):
-            with self.subTest(decision=decision):
-                normalized = afk_export.normalize_acceptance_routing(
-                    self.routing_evidence(decision, reason)
-                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                record = json.loads((destination / "workflow-run.json").read_text())
+                normalized = record["acceptance_routing"]
+                self.assertEqual(record["status"], status)
+                self.assertEqual(normalized["planner"]["outcome"], "completed")
                 self.assertEqual(normalized["policy"]["decision"], decision)
-                self.assertEqual(normalized["reason"], reason)
+                self.assertEqual(normalized["route"]["kind"], route_kind)
+                if decision == "direct":
+                    self.assertEqual(
+                        normalized["route"]["routes"][0]["executor"], "afk_run"
+                    )
+                else:
+                    self.assertEqual(
+                        record["terminal"],
+                        {"stage": "acceptance_routing", "decision": decision},
+                    )
+                if reason is None:
+                    self.assertNotIn("reason", normalized)
+                else:
+                    self.assertEqual(normalized["reason"], reason)
+                if decision == "accepted":
+                    child = normalized["route"]["children"][0]
+                    self.assertEqual(child["executor"], "caller_agent")
+                    self.assertNotIn("objective", child)
+                artifacts = {
+                    item["source"]["path"]: item for item in record["artifacts"]
+                }
+                self.assertEqual(artifacts["planner/output.json"]["kind"], "planner")
+                self.assertEqual(artifacts["policy/output.json"]["kind"], "policy")
+                self.assertEqual(
+                    json.loads(
+                        (
+                            destination / artifacts["planner/output.json"]["path"]
+                        ).read_text()
+                    ),
+                    json.loads(planner_raw),
+                )
+                self.assertEqual(
+                    json.loads(
+                        (
+                            destination / artifacts["policy/output.json"]["path"]
+                        ).read_text()
+                    ),
+                    json.loads(policy_raw),
+                )
+                published = (destination / "workflow-run.json").read_text()
+                self.assertNotIn(str(root), published)
+                self.assertNotIn("system_prompt", published)
 
-    def test_malformed_acceptance_routing_binding_is_rejected(self):
-        evidence = self.routing_evidence("direct")
-        planner_input = {"schema_version": 2}
-        malformed_policy_input = {
-            "schema_version": 2,
-            "planner_input": planner_input,
-            "routing": {"status": "fabricated"},
-        }
-        prepared = {
-            "planner": {
-                "directory": "planner",
-                "result": "planner/output.json",
-                "status": "completed",
-                "exit_code": 0,
-                "outcome": "completed",
-            },
-            "policy": {
-                "directory": "policy",
-                "result": "policy/output.json",
-                "status": "completed",
-                "exit_code": 0,
-                "outcome": "completed",
-                "decision": "direct",
-            },
-        }
-        with (
-            mock.patch(
-                "afk_export.read_json",
-                side_effect=[planner_input, malformed_policy_input],
-            ),
-            mock.patch("afk_export.read_bytes", side_effect=[b"{}", b"{}"]),
-            mock.patch("afk_export.validate_plan_input", return_value=planner_input),
-            mock.patch(
-                "afk_export.validate_planner_output", return_value=evidence["planner"]
-            ),
-            mock.patch(
-                "afk_export.validate_policy_output", return_value=evidence["policy"]
-            ),
-            self.assertRaisesRegex(afk_export.ExportError, "Acceptance Routing"),
-        ):
-            afk_export.validate_prepared_routing(Path("unused"), prepared)
+    def test_v2_rejects_malformed_acceptance_routing_binding_end_to_end(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_acceptance_routing(source, "accepted")
+            policy_input_path = source / "policy-input.json"
+            policy_input = json.loads(policy_input_path.read_text())
+            policy_input["plan"]["status"] = "fabricated"
+            policy_input_path.write_text(json.dumps(policy_input))
+            destination = root / "malformed-routing-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_symlinked_acceptance_routing_directories(self):
+        for directory in ("planner", "policy"):
+            with (
+                self.subTest(directory=directory),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                self.add_acceptance_routing(source, "direct")
+                external = root / f"external-{directory}"
+                (source / directory).rename(external)
+                (source / directory).symlink_to(external, target_is_directory=True)
+                destination = root / f"{directory}-symlink-bundle"
+
+                result = self.export_v2(source, destination)
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertFalse(destination.exists())
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_unsupported_schema_is_rejected_before_destination_creation(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1080,55 +1122,198 @@ class ExportCliTests(unittest.TestCase):
         )
 
     @staticmethod
-    def routing_evidence(decision, reason=None):
-        direct = decision != "accepted"
-        route = {
-            "criterion": "criterion-1",
-            "target": {"kind": "source", "id": "central-example"},
-            "project": "example",
-            "owner": "AFK Run",
-            "phase": "implementation",
-            "executor": "afk_run",
-            "evidence_route": "repository_check",
+    def add_acceptance_routing(source, decision):
+        criterion = {
+            "id": "criterion-1",
+            "source_text": "The export is safe.",
+            "statement": "The export is safe.",
         }
-        routing = {
-            "status": (
-                "needs_clarification"
-                if decision == "needs_clarification"
-                else "proposed"
-            ),
-            "routes": [route],
+        catalog_routes = [
+            {
+                "owner": "AFK Run",
+                "executor": "afk_run",
+                "evidence_route": "repository_check",
+                "phases": ["implementation"],
+            },
+            {
+                "owner": "Caller agent",
+                "executor": "caller_agent",
+                "evidence_route": "external_check",
+                "phases": ["closure"],
+            },
+            {
+                "owner": "Credential holder",
+                "executor": "outside_help",
+                "outside_help_reason": "missing_credentials",
+                "evidence_route": "human_attestation",
+                "phases": ["closure"],
+            },
+        ]
+        planner_input = {
+            "schema_version": 2,
+            "parent": {
+                "id": "central-example",
+                "title": "Portable publication",
+                "description": "Export the retained Run.",
+                "acceptance_criteria": "The export is safe.",
+                "labels": ["project:operations-webui"],
+            },
+            "catalog": {
+                "schema_version": 2,
+                "projects": [{"slug": "operations-webui", "routes": catalog_routes}],
+            },
+            "timeout_seconds": 60,
         }
-        plan = None
-        if not direct:
-            routing = {"status": "proposed", "routes": []}
-            plan = {
+        if decision == "accepted":
+            proposal = {
+                "schema_version": 2,
+                "decision": "decompose",
+                "criteria": [criterion],
+                "direct_routes": [],
                 "children": [
                     {
                         "local_id": "closure",
-                        "project": "example",
+                        "title": "Complete caller-owned closure",
+                        "objective": "Private Planner prose must not be normalized.",
+                        "criteria": ["criterion-1"],
+                        "project": "operations-webui",
                         "owner": "Caller agent",
                         "phase": "closure",
                         "executor": "caller_agent",
                         "evidence_route": "external_check",
                         "depends_on": [],
-                        "readiness": "ready-for-agent",
-                        "objective": "private Planner prose is not normalized",
                     }
-                ]
+                ],
+                "ambiguities": [],
             }
-        return {
-            "planner": {"outcome": "completed", "routing": routing, "plan": plan},
-            "policy": {
-                "outcome": "completed"
-                if decision in {"direct", "accepted"}
-                else "unaccepted",
-                "decision": decision,
-                "error_category": reason,
+        else:
+            outside_help = decision == "outside_help"
+            proposal = {
+                "schema_version": 2,
+                "decision": "direct",
+                "criteria": [criterion],
+                "direct_routes": [
+                    {
+                        "criterion": "criterion-1",
+                        "project": "operations-webui",
+                        "owner": "Credential holder" if outside_help else "AFK Run",
+                        "phase": "closure" if outside_help else "implementation",
+                        "executor": "outside_help" if outside_help else "afk_run",
+                        "evidence_route": (
+                            "human_attestation" if outside_help else "repository_check"
+                        ),
+                        **(
+                            {"outside_help_reason": "missing_credentials"}
+                            if outside_help
+                            else {}
+                        ),
+                    }
+                ],
+                "children": [],
+                "ambiguities": (
+                    ["The requested route is ambiguous."]
+                    if decision == "needs_clarification"
+                    else []
+                ),
+            }
+        routing, plan = build_routing(planner_input, proposal)
+        planner_output = {
+            "schema_version": 1,
+            "outcome": "completed",
+            "source": {"kind": "bead", "id": "central-example"},
+            "started_at": "2026-08-19T00:00:00Z",
+            "finished_at": "2026-08-19T00:00:01Z",
+            "duration_seconds": 1,
+            "process": {"exit_code": 0, "signal": None},
+            "agent": {"status": "completed"},
+            "planner": {
+                "kind": "inference",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-luna",
+                "status": "completed",
             },
-            "planner_raw": b"{}",
-            "policy_raw": b"{}",
+            "routing": routing,
+            "plan": plan,
+            "error_category": None,
+            "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
         }
+        evidence_name = "routing" if plan is None else "plan"
+        policy_input = {
+            "schema_version": 2,
+            "planner_input": planner_input,
+            evidence_name: routing if plan is None else plan,
+        }
+        acceptance = None
+        reason = None
+        if decision == "direct":
+            acceptance = accept_direct(planner_input, routing)
+        elif decision == "accepted":
+            acceptance = accept_plan(planner_input, plan)
+        elif decision == "outside_help":
+            reason = "missing_credentials"
+        else:
+            reason = "routing_ambiguity"
+        policy_output = {
+            "schema_version": 2,
+            "outcome": (
+                "completed" if decision in {"direct", "accepted"} else "unaccepted"
+            ),
+            "decision": decision,
+            "source": {"kind": "bead", "id": "central-example"},
+            "started_at": "2026-08-19T00:00:01Z",
+            "finished_at": "2026-08-19T00:00:02Z",
+            "duration_seconds": 1,
+            "policy": plan_policy(2) if plan is not None else direct_policy(2),
+            "acceptance": acceptance,
+            "error_category": reason,
+            "artifacts": {"input": "input.json"},
+        }
+        planner = source / "planner"
+        policy = source / "policy"
+        planner.mkdir()
+        policy.mkdir()
+        planner_raw = json.dumps(planner_output, sort_keys=True).encode()
+        policy_raw = json.dumps(policy_output, sort_keys=True).encode()
+        (source / "planner-input.json").write_text(json.dumps(planner_input))
+        (source / "policy-input.json").write_text(json.dumps(policy_input))
+        (planner / "output.json").write_bytes(planner_raw)
+        (policy / "output.json").write_bytes(policy_raw)
+
+        preparation_path = source / "preparation.json"
+        preparation = json.loads(preparation_path.read_text())
+        preparation["routing"] = {
+            "planner": {
+                "directory": "planner",
+                "result": "planner/output.json",
+                "status": "completed",
+                "exit_code": 0,
+                "outcome": "completed",
+            },
+            "policy": {
+                "directory": "policy",
+                "result": "policy/output.json",
+                "status": "completed",
+                "exit_code": 0 if decision in {"direct", "accepted"} else 1,
+                "outcome": policy_output["outcome"],
+                "decision": decision,
+            },
+        }
+        if decision != "direct":
+            preparation["preparation_status"] = {
+                "accepted": "routed",
+                "outside_help": "outside_help",
+                "needs_clarification": "needs_clarification",
+            }[decision]
+            preparation["coordinator"].update(
+                status="not_started", exit_code=None, outcome=None, decision=None
+            )
+            for child in (source / "coordinator").iterdir():
+                if child.is_dir():
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+        preparation_path.write_text(json.dumps(preparation))
+        return planner_raw, policy_raw
 
     def add_preflight(
         self, source, invocation, bead_id="central-example", stored_classifier=False

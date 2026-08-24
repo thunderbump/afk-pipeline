@@ -720,7 +720,12 @@ def validate_prepared_preflight(prepared, preflight_input, preflight_output):
 
 def validate_prepared_routing(source, prepared):
     """Validate and retain the complete, contract-bound v2 routing stage."""
+    # O_NOFOLLOW protects only the final output.json path component. Require both
+    # invocation parents to be real Run directories before reading either typed
+    # envelope so a symlink cannot import evidence from outside the Run.
     try:
+        require_directory(source / "planner")
+        require_directory(source / "policy")
         planner_input = validate_plan_input(read_json(source / "planner-input.json"))
         planner_raw = read_bytes(source / "planner" / "output.json", MAX_JSON_BYTES)
         planner_output = validate_planner_output(
