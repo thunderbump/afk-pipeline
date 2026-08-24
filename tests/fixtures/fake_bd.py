@@ -79,11 +79,16 @@ elif command == "comments":
     issue = next(item for item in state["children"] if item["id"] == arguments[1])
     print(json.dumps(issue.get("comments", [])))
 elif command == "close":
+    issue = next(item for item in state["children"] if item["id"] == arguments[1])
+    if state.pop("close_then_fail", False):
+        issue["status"] = "closed"
+        state_path.write_text(json.dumps(state))
+        print("injected lost close response", file=sys.stderr)
+        raise SystemExit(1)
     if state.pop("fail_next_close", False):
         state_path.write_text(json.dumps(state))
         print("injected close failure", file=sys.stderr)
         raise SystemExit(1)
-    issue = next(item for item in state["children"] if item["id"] == arguments[1])
     issue["status"] = "closed"
     state_path.write_text(json.dumps(state))
     print(json.dumps(issue))

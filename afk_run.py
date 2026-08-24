@@ -13,6 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
+from afk_config import attestation_result_root
 from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_preflight.contract import validate_output as validate_preflight_output
 from afk_runtime import (
@@ -786,13 +787,10 @@ def validate_publication(value):
 
 
 def validate_attestation(value):
-    if not isinstance(value, dict) or set(value) != {"result_root"}:
-        raise PreparationError("configuration attestation is malformed")
-    value["result_root"] = absolute_path(
-        value["result_root"], "attestation result_root"
-    )
-    if not value["result_root"].is_dir():
-        raise PreparationError("configured attestation result_root must already exist")
+    try:
+        value["result_root"] = attestation_result_root(value)
+    except (TypeError, ValueError) as error:
+        raise PreparationError(str(error)) from error
 
 
 def validate_project(slug, value):

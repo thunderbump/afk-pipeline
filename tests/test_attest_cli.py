@@ -183,6 +183,27 @@ class AttestCliTest(unittest.TestCase):
         self.assertEqual(output["outcome"], "failed")
         self.assertEqual(output["error_category"], "current_state")
 
+    def test_extra_plan_controlled_dependency_relation_is_rejected(self):
+        state = json.loads(self.state.read_text())
+        state["children"][1]["dependencies"].append(
+            {"id": state["parent"]["id"], "dependency_type": "blocks"}
+        )
+        self.state.write_text(json.dumps(state))
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 1)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["children"][1]["status"], "open")
+
+    def test_malformed_top_level_config_exits_without_traceback(self):
+        self.config.write_text("[]")
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertNotIn("Traceback", completed.stderr)
+
     def test_explicit_approval_succeeds_without_confirmation_input(self):
         completed = self.invoke("--accept")
 
@@ -324,6 +345,33 @@ class AttestCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2)
         self.assertEqual(list(outside.iterdir()), [])
+
+    def test_nested_artifact_symlink_cannot_redirect_durable_output(self):
+        attempt = self.open_attempt()
+        (attempt / "request.json").unlink()
+        outside = self.root / "outside.json"
+        outside.write_text("untouched")
+        (attempt / "request.json.tmp").symlink_to(outside)
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(outside.read_text(), "untouched")
+
+    def test_lost_close_response_reconciles_observed_success(self):
+        state = json.loads(self.state.read_text())
+        state["close_then_fail"] = True
+        self.state.write_text(json.dumps(state))
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["children"][1]["status"], "closed")
+        result = next(self.results.iterdir())
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "completed")
+        self.assertEqual(output["decision"], "attested")
 
     def test_successful_replay_does_not_replace_result_after_parent_closes(self):
         completed = self.invoke("--accept")

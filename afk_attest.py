@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 from afk_complete.contract import load_result, validate_subject
+from afk_config import attestation_result_root
 from afk_plan_publish.__main__ import (
     Beads,
     dependency_pairs,
@@ -249,21 +250,21 @@ def load_config(path):
         raise AttestationError(
             f"configuration {path} cannot be read as JSON"
         ) from error
-    attestation = value.get("attestation") if isinstance(value, dict) else None
     if (
-        value.get("schema_version") != 1
+        not isinstance(value, dict)
+        or value.get("schema_version") != 1
         or not isinstance(value.get("beads_workspace"), str)
-        or not isinstance(attestation, dict)
-        or set(attestation) != {"result_root"}
+        or "attestation" not in value
     ):
         raise AttestationError("configuration has no valid attestation result root")
     beads = Path(value["beads_workspace"])
-    root = Path(attestation["result_root"])
     if not beads.is_absolute() or not beads.is_dir():
         raise AttestationError("configured Beads workspace is unavailable")
-    if not root.is_absolute() or not root.is_dir():
-        raise AttestationError("configured attestation result root must already exist")
-    return {"beads_workspace": beads.resolve(), "result_root": root.resolve()}
+    try:
+        root = attestation_result_root(value["attestation"])
+    except ValueError as error:
+        raise AttestationError(str(error)) from error
+    return {"beads_workspace": beads.resolve(), "result_root": root}
 
 
 def subject_values(values):
@@ -321,6 +322,7 @@ def open_attempt(scope, evidence):
     os.close(descriptor)
     if attempt.resolve().parent != scope["result_root"]:
         raise AttestationError("attestation attempt escapes its configured root")
+    reject_symlink_tree(attempt)
 
     request = None
     if request_path.exists():
@@ -372,6 +374,21 @@ def open_attempt(scope, evidence):
         {"schema_version": 1, "identity": identity, "record": record},
     )
     return attempt, record
+
+
+def reject_symlink_tree(root):
+    """Reject pre-existing indirections before any artifact is read or written."""
+    pending = [root]
+    while pending:
+        directory = pending.pop()
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if entry.is_symlink():
+                    raise AttestationError(
+                        "attestation attempt contains an unsafe symbolic link"
+                    )
+                if entry.is_dir(follow_symlinks=False):
+                    pending.append(Path(entry.path))
 
 
 def acquire_reconciliation_lock(beads_workspace):
@@ -480,11 +497,14 @@ def reconcile(scope, record, attempt, adapter):
         for local_id in child["depends_on"]
     }
     controlled = {
-        item
-        for item, kind in dependency_pairs(issue)
-        if kind in {"parent-child", "blocks"}
+        pair
+        for pair in dependency_pairs(issue)
+        if pair[1] in {"parent-child", "blocks"}
     }
-    if controlled != required_dependencies:
+    required_relationships = {(parent_id, "parent-child")} | {
+        (item, "blocks") for item in required_dependencies - {parent_id}
+    }
+    if controlled != required_relationships:
         raise AttestationError(
             "current child dependencies do not match the frozen Plan", "current_state"
         )
@@ -615,7 +635,28 @@ def reconcile(scope, record, attempt, adapter):
     if not attached:
         adapter.one("comments", "add", child_id, encoded, "--json")
     if status != "closed":
-        adapter.one("close", child_id, "--json")
+        try:
+            adapter.one("close", child_id, "--json")
+        except (
+            OSError,
+            RuntimeError,
+            subprocess.SubprocessError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ):
+            if not observed_attested_close(adapter, child_id, encoded):
+                raise
+
+
+def observed_attested_close(adapter, child_id, encoded):
+    """Resolve an ambiguous close response from fresh read-only observations."""
+    issue = adapter.one("show", child_id, "--json", "--readonly")
+    comments = adapter.many("comments", child_id, "--json", "--readonly")
+    return issue.get("status") == "closed" and any(
+        item == encoded or isinstance(item, dict) and item.get("text") == encoded
+        for item in comments
+    )
 
 
 def retain_partial_completion(path):
