@@ -77,12 +77,15 @@ def _attest(arguments, lock_holder):
                 print("Attestation declined; no result or Beads mutation was created.")
                 return 1
 
-        attempt_path, record = open_attempt(scope, arguments.evidence)
-        # Serialize reconciliation and result sealing for this deterministic
-        # attempt. A retry may begin after request initialization but cannot
-        # race the attachment, close, or terminal output of another caller.
-        descriptor = acquire_attempt_lock(attempt_path)
+        # The Completion Record check, attachment, and close are separate Beads
+        # operations. Serialize them across the Beads workspace so that distinct
+        # attempts (including attempts with different evidence or result roots)
+        # cannot concurrently attest the same child from stale observations.
+        # This is deliberately broader than a per-attempt lock: attempt
+        # identities include subject and evidence.
+        descriptor = acquire_reconciliation_lock(scope["beads_workspace"])
         lock_holder.append(descriptor)
+        attempt_path, record = open_attempt(scope, arguments.evidence)
         attempt = attempt_path
         started_at = timestamp()
         started = time.monotonic()
@@ -222,6 +225,7 @@ def load_scope(arguments):
         "mapping": mapping,
         "child": child,
         "subject": subject,
+        "beads_workspace": config["beads_workspace"],
         "result_root": root,
     }
 
@@ -355,6 +359,17 @@ def open_attempt(scope, evidence):
 def acquire_attempt_lock(attempt):
     """Exclusively lock an attempt without adding a mutable lock artifact."""
     descriptor = os.open(attempt, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def acquire_reconciliation_lock(beads_workspace):
+    """Serialize Beads reconciliation without adding a mutable lock artifact."""
+    descriptor = os.open(beads_workspace, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
     except BaseException:

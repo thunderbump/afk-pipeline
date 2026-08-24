@@ -158,6 +158,61 @@ class AttestCliTest(unittest.TestCase):
             json.loads((attempt / "output.json").read_text())["decision"], "attested"
         )
 
+    def test_distinct_attestations_serialize_reconciliation(self):
+        scope, _ = self.attestation_scope()
+        common = {
+            "child_id": self.child_id,
+            "publication": self.publication,
+            "subject": ["commit=abc123", "environment=local production"],
+            "config": self.config,
+            "accept": True,
+        }
+        first_arguments = SimpleNamespace(
+            **common, evidence=["bead-comment:central-example#approval-1"]
+        )
+        second_arguments = SimpleNamespace(
+            **common, evidence=["bead-comment:central-example#approval-2"]
+        )
+        first_entered = threading.Event()
+        release_first = threading.Event()
+        second_entered = threading.Event()
+        results = []
+
+        def observe_reconciliation(_scope, record, _attempt, _adapter):
+            if record["evidence"] == first_arguments.evidence:
+                first_entered.set()
+                release_first.wait(timeout=2)
+            else:
+                second_entered.set()
+
+        with (
+            mock.patch.object(afk_attest, "load_scope", return_value=scope),
+            mock.patch.object(afk_attest, "Beads", return_value=object()),
+            mock.patch.object(
+                afk_attest, "reconcile", side_effect=observe_reconciliation
+            ),
+            mock.patch.object(afk_attest, "finish"),
+        ):
+            first = threading.Thread(
+                target=lambda: results.append(afk_attest.attest(first_arguments))
+            )
+            first.start()
+            self.assertTrue(first_entered.wait(timeout=2))
+            second = threading.Thread(
+                target=lambda: results.append(afk_attest.attest(second_arguments))
+            )
+            second.start()
+            time.sleep(0.1)
+            self.assertFalse(second_entered.is_set())
+            release_first.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertTrue(second_entered.is_set())
+        self.assertEqual(results, [0, 0])
+
     def test_concurrent_initialization_reuses_the_exclusively_sealed_request(self):
         scope, evidence = self.attestation_scope()
         real_seal = afk_attest.seal_json
