@@ -213,7 +213,7 @@ def load_source_v2(
     terminal_continuation=None,
     source_descriptor=None,
 ):
-    """Load either a terminal Coordinator Run or a terminal Preflight pause."""
+    """Load a terminal Coordinator, Preflight, or Acceptance Routing Run."""
     preparation_path = source / "preparation.json"
     if not preparation_path.exists() and not preparation_path.is_symlink():
         observed = load_source(
