@@ -257,7 +257,8 @@ existing directory. It revalidates the immutable Publisher input, accepted
 Plan, successful publication, exact child mapping, human handoff, authority,
 criteria, and subject-field shape before showing the frozen scope. A decline
 creates no result and does not read or mutate Beads. End-of-input is not
-approval; noninteractive callers must pass `--accept` explicitly.
+approval, and piped input cannot confirm; interactive confirmation requires a
+terminal. Noninteractive callers must pass `--accept` explicitly.
 
 After approval it creates or resumes one content-addressed durable attempt under
 the attestation result root. It re-reads the frozen parent, exact current child,
@@ -266,13 +267,18 @@ Completion Record comments. The helper invokes the existing `afk_complete`
 validator and retains its sealed result. Only then does it attach the exact
 validated Completion Record as canonical JSON in a child comment and close that
 child. It never creates an approval, runs inference or Parent Acceptance Review,
-or closes the parent.
+or closes the parent. Beads operations use the trusted host-side `bd` command,
+not the command recorded in Publisher evidence. Tests and controlled deployment
+adapters may replace that argv with `AFK_ATTEST_BEADS_COMMAND` JSON.
 
 Attachment and close reconcile independently. Retrying the same exact scope
 reuses its accepted timestamp and sealed Completion Validator evidence, does
-not duplicate the comment, and finishes a missing close. A stale or conflicting
-child, incomplete dependency, malformed evidence, validator failure, or Beads
-failure seals inspectable attempt evidence and does not newly close the child.
+not duplicate the comment, and finishes a missing close. A sealed successful
+attempt remains immutable even after later parent-state changes. Interrupted
+validator directories are retained as numbered abandoned evidence before a
+replacement validator attempt begins. A stale or conflicting child, incomplete
+dependency, malformed evidence, validator failure, or Beads failure seals
+inspectable attempt evidence and does not newly close the child.
 The explicit `--publication` directory is intentional; this MVP does not scan
 for publications or maintain an invocation registry.
 

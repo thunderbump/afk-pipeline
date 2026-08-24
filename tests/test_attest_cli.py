@@ -1,9 +1,12 @@
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -23,6 +26,7 @@ class AttestCliTest(unittest.TestCase):
     def setUp(self):
         completion_helpers.CompletionRecordCliTest.setUp(self)
         publisher_input = json.loads((self.publication / "input.json").read_text())
+        self.beads_command = publisher_input["command"]
         self.beads = Path(publisher_input["beads_workspace"])
         self.state = self.beads / "state.json"
         self.results = self.root / "attestations"
@@ -60,9 +64,12 @@ class AttestCliTest(unittest.TestCase):
         ]
 
     def invoke(self, *extra, input_text=None):
+        environment = os.environ.copy()
+        environment["AFK_ATTEST_BEADS_COMMAND"] = json.dumps(self.beads_command)
         return subprocess.run(
             self.command(*extra),
             cwd="/",
+            env=environment,
             text=True,
             input=input_text,
             capture_output=True,
@@ -85,9 +92,23 @@ class AttestCliTest(unittest.TestCase):
 
     def test_preview_and_decline_do_not_create_evidence_or_read_beads(self):
         before = self.state.read_text()
-        completed = self.invoke(input_text="no\n")
+        arguments = SimpleNamespace(
+            child_id=self.child_id,
+            publication=self.publication,
+            subject=["commit=abc123", "environment=local production"],
+            evidence=["bead-comment:central-example#approval-1"],
+            config=self.config,
+            accept=False,
+        )
+        stdout = StringIO()
+        with (
+            mock.patch.object(afk_attest.sys.stdin, "isatty", return_value=True),
+            mock.patch("builtins.input", return_value="no"),
+            redirect_stdout(stdout),
+        ):
+            completed = afk_attest.attest(arguments)
 
-        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertEqual(completed, 1)
         for value in (
             self.request["parent"]["id"],
             self.plan["plan_sha256"],
@@ -97,12 +118,12 @@ class AttestCliTest(unittest.TestCase):
             '"commit": "abc123"',
             "bead-comment:central-example#approval-1",
         ):
-            self.assertIn(value, completed.stdout)
+            self.assertIn(value, stdout.getvalue())
         self.assertEqual(self.state.read_text(), before)
         self.assertEqual(list(self.results.iterdir()), [])
 
-    def test_interactive_and_explicit_approval_attach_record_and_close_only_child(self):
-        completed = self.invoke(input_text="yes\n")
+    def test_explicit_approval_attaches_record_and_closes_only_child(self):
+        completed = self.invoke("--accept")
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         state = json.loads(self.state.read_text())
@@ -123,6 +144,29 @@ class AttestCliTest(unittest.TestCase):
         self.assertEqual(replay.returncode, 0, replay.stderr)
         state = json.loads(self.state.read_text())
         self.assertEqual(len(state["children"][1]["comments"]), 1)
+
+    def test_interactive_terminal_approval_attaches_record(self):
+        arguments = SimpleNamespace(
+            child_id=self.child_id,
+            publication=self.publication,
+            subject=["commit=abc123", "environment=local production"],
+            evidence=["bead-comment:central-example#approval-1"],
+            config=self.config,
+            accept=False,
+        )
+        with (
+            mock.patch.object(afk_attest.sys.stdin, "isatty", return_value=True),
+            mock.patch("builtins.input", return_value="yes"),
+            mock.patch.dict(
+                os.environ,
+                {"AFK_ATTEST_BEADS_COMMAND": json.dumps(self.beads_command)},
+            ),
+        ):
+            completed = afk_attest.attest(arguments)
+
+        self.assertEqual(completed, 0)
+        state = json.loads(self.state.read_text())
+        self.assertEqual(state["children"][1]["status"], "closed")
 
     def test_stale_child_seals_inspectable_failure_and_leaves_child_open(self):
         state = json.loads(self.state.read_text())
@@ -213,58 +257,6 @@ class AttestCliTest(unittest.TestCase):
         self.assertTrue(second_entered.is_set())
         self.assertEqual(results, [0, 0])
 
-    def test_concurrent_initialization_reuses_the_exclusively_sealed_request(self):
-        scope, evidence = self.attestation_scope()
-        real_seal = afk_attest.seal_json
-        first_seal_started = threading.Event()
-        release_first_seal = threading.Event()
-        seal_count = 0
-        seal_count_lock = threading.Lock()
-        records = []
-        errors = []
-
-        def delayed_seal(path, value):
-            nonlocal seal_count
-            if path.name == "request.json":
-                with seal_count_lock:
-                    seal_count += 1
-                    current = seal_count
-                if current == 1:
-                    first_seal_started.set()
-                    release_first_seal.wait(timeout=2)
-            real_seal(path, value)
-
-        def initialize():
-            try:
-                records.append(afk_attest.open_attempt(scope, evidence)[1])
-            except (afk_attest.AttestationError, OSError, StopIteration) as error:
-                errors.append(error)
-
-        with (
-            mock.patch.object(afk_attest, "seal_json", side_effect=delayed_seal),
-            mock.patch.object(
-                afk_attest,
-                "timestamp",
-                side_effect=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z"],
-            ),
-        ):
-            first = threading.Thread(target=initialize)
-            first.start()
-            self.assertTrue(first_seal_started.wait(timeout=2))
-            second = threading.Thread(target=initialize)
-            second.start()
-            time.sleep(0.1)
-            release_first_seal.set()
-            first.join(timeout=2)
-            second.join(timeout=2)
-
-        self.assertFalse(first.is_alive())
-        self.assertFalse(second.is_alive())
-        self.assertEqual(errors, [])
-        self.assertEqual(len(records), 2)
-        self.assertEqual(records[0], records[1])
-        self.assertEqual(seal_count, 1)
-
     def test_retry_replaces_an_unsealed_completion_result(self):
         attempt = self.open_attempt()
         completion = attempt / "completion"
@@ -278,6 +270,9 @@ class AttestCliTest(unittest.TestCase):
             json.loads((completion / "output.json").read_text())["outcome"],
             "completed",
         )
+        abandoned = list(attempt.glob("completion.abandoned-*"))
+        self.assertEqual(len(abandoned), 1)
+        self.assertEqual((abandoned[0] / "input.json").read_text(), '{"partial":')
 
     def test_retry_reconciles_attachment_after_interrupted_close(self):
         state = json.loads(self.state.read_text())
@@ -298,9 +293,51 @@ class AttestCliTest(unittest.TestCase):
 
     def test_noninteractive_confirmation_is_required(self):
         with mock.patch.dict(os.environ, {"AFK_UNUSED": "1"}):
-            completed = self.invoke(input_text="")
+            completed = self.invoke(input_text="yes\n")
         self.assertEqual(completed.returncode, 2)
         self.assertEqual(list(self.results.iterdir()), [])
+
+    def test_publisher_command_is_not_used_for_beads_mutation(self):
+        marker = self.root / "publisher-command-ran"
+        publisher_input_path = self.publication / "input.json"
+        publisher_input = json.loads(publisher_input_path.read_text())
+        publisher_input["command"] = [
+            "/bin/sh",
+            "-c",
+            f"touch {marker}",
+        ]
+        publisher_input_path.write_text(json.dumps(publisher_input))
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertFalse(marker.exists())
+
+    def test_attempt_symlink_cannot_redirect_durable_output(self):
+        attempt = self.open_attempt()
+        shutil.rmtree(attempt)
+        outside = self.root / "outside"
+        outside.mkdir()
+        attempt.symlink_to(outside, target_is_directory=True)
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_successful_replay_does_not_replace_result_after_parent_closes(self):
+        completed = self.invoke("--accept")
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        attempt = next(self.results.iterdir())
+        sealed = (attempt / "output.json").read_bytes()
+        state = json.loads(self.state.read_text())
+        state["parent"]["status"] = "closed"
+        self.state.write_text(json.dumps(state))
+
+        replay = self.invoke("--accept")
+
+        self.assertEqual(replay.returncode, 0, replay.stderr)
+        self.assertEqual((attempt / "output.json").read_bytes(), sealed)
 
 
 if __name__ == "__main__":

@@ -4,7 +4,6 @@ import fcntl
 import hashlib
 import json
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -35,7 +34,12 @@ class AttestationError(Exception):
 
 def add_parser(subparsers):
     parser = subparsers.add_parser(
-        "attest", help="attest one published human child and close only that child"
+        "attest",
+        help="attest one published human child and close only that child",
+        usage=(
+            "afk attest CHILD_ID --publication DIRECTORY --subject FIELD=VALUE "
+            "--evidence VALUE [--accept] [--config PATH]"
+        ),
     )
     parser.add_argument("child_id", metavar="CHILD_ID")
     parser.add_argument("--publication", required=True, type=Path)
@@ -66,6 +70,11 @@ def _attest(arguments, lock_holder):
         scope = load_scope(arguments)
         preview(scope, arguments.evidence)
         if not arguments.accept:
+            if not sys.stdin.isatty():
+                raise AttestationError(
+                    "interactive confirmation requires a terminal; use --accept for noninteractive callers",
+                    "confirmation",
+                )
             try:
                 answer = input("Approve this exact scope? [yes/no] ")
             except EOFError as error:
@@ -89,7 +98,10 @@ def _attest(arguments, lock_holder):
         attempt = attempt_path
         started_at = timestamp()
         started = time.monotonic()
-        adapter = Beads(scope["publisher_request"])
+        if completed_attempt(scope, record, attempt):
+            print(f"attestation result: {attempt}")
+            return 0
+        adapter = Beads(trusted_beads_request(scope))
         reconcile(scope, record, attempt, adapter)
         finish(
             attempt,
@@ -295,76 +307,71 @@ def open_attempt(scope, evidence):
     ).hexdigest()
     attempt = scope["result_root"] / f"{scope['mapping']['bead_id']}-{digest[:16]}"
     request_path = attempt / "request.json"
-    if attempt.exists() and not attempt.is_dir():
+    try:
+        attempt.mkdir()
+    except FileExistsError:
+        pass
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(attempt, flags)
+    except OSError as error:
         raise AttestationError(
-            "existing attestation attempt conflicts with this approval"
-        )
-    attempt.mkdir(exist_ok=True)
-    lock = acquire_attempt_lock(attempt)
-    try:
-        request = None
-        if request_path.exists():
-            try:
-                request = json.loads(request_path.read_text())
-            except (OSError, json.JSONDecodeError):
-                # An interrupted initial write is safe to replace only while no
-                # later artifact can have relied on it.
-                if any(
-                    path.name not in {"request.json", "request.json.tmp"}
-                    for path in attempt.iterdir()
-                ):
-                    raise AttestationError(
-                        "existing attestation attempt has a corrupt request"
-                    )
-        if request is not None:
-            if (
-                not isinstance(request, dict)
-                or request.get("identity") != identity
-                or not isinstance(request.get("record"), dict)
+            "existing attestation attempt is not a safe directory"
+        ) from error
+    os.close(descriptor)
+    if attempt.resolve().parent != scope["result_root"]:
+        raise AttestationError("attestation attempt escapes its configured root")
+
+    request = None
+    if request_path.exists():
+        try:
+            request = json.loads(request_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            # An interrupted initial write is safe to replace only while no
+            # later artifact can have relied on it.
+            if any(
+                path.name not in {"request.json", "request.json.tmp"}
+                for path in attempt.iterdir()
             ):
-                if any(
-                    path.name not in {"request.json", "request.json.tmp"}
-                    for path in attempt.iterdir()
-                ):
-                    raise AttestationError(
-                        "existing attestation attempt conflicts with this approval"
-                    )
-                request = None
-            else:
-                return attempt, request["record"]
-        child = scope["child"]
-        record = {
-            "schema_version": 1,
-            "child": scope["mapping"]["bead_id"],
-            "parent_plan": scope["acceptance"]["plan"]["plan_sha256"],
-            "outcome": "satisfied",
-            "producer": {
-                "kind": "human_attestation",
-                "identity": child["handoff"]["authority"],
-            },
-            "criteria": child["criteria"],
-            "subject": scope["subject"],
-            "evidence": evidence,
-            "accepted_at": timestamp(),
-        }
-        seal_json(
-            request_path,
-            {"schema_version": 1, "identity": identity, "record": record},
-        )
-        return attempt, record
-    finally:
-        os.close(lock)
-
-
-def acquire_attempt_lock(attempt):
-    """Exclusively lock an attempt without adding a mutable lock artifact."""
-    descriptor = os.open(attempt, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-    except BaseException:
-        os.close(descriptor)
-        raise
-    return descriptor
+                raise AttestationError(
+                    "existing attestation attempt has a corrupt request"
+                )
+    if request is not None:
+        if (
+            not isinstance(request, dict)
+            or request.get("identity") != identity
+            or not isinstance(request.get("record"), dict)
+        ):
+            if any(
+                path.name not in {"request.json", "request.json.tmp"}
+                for path in attempt.iterdir()
+            ):
+                raise AttestationError(
+                    "existing attestation attempt conflicts with this approval"
+                )
+            request = None
+        else:
+            return attempt, request["record"]
+    child = scope["child"]
+    record = {
+        "schema_version": 1,
+        "child": scope["mapping"]["bead_id"],
+        "parent_plan": scope["acceptance"]["plan"]["plan_sha256"],
+        "outcome": "satisfied",
+        "producer": {
+            "kind": "human_attestation",
+            "identity": child["handoff"]["authority"],
+        },
+        "criteria": child["criteria"],
+        "subject": scope["subject"],
+        "evidence": evidence,
+        "accepted_at": timestamp(),
+    }
+    seal_json(
+        request_path,
+        {"schema_version": 1, "identity": identity, "record": record},
+    )
+    return attempt, record
 
 
 def acquire_reconciliation_lock(beads_workspace):
@@ -376,6 +383,69 @@ def acquire_reconciliation_lock(beads_workspace):
         os.close(descriptor)
         raise
     return descriptor
+
+
+def trusted_beads_request(scope):
+    """Build the mutation adapter from host authority, never Publisher evidence."""
+    command = ["bd"]
+    override = os.environ.get("AFK_ATTEST_BEADS_COMMAND")
+    if override is not None:
+        try:
+            command = json.loads(override)
+        except json.JSONDecodeError as error:
+            raise AttestationError("AFK_ATTEST_BEADS_COMMAND is invalid") from error
+        if (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(item, str) and item for item in command)
+        ):
+            raise AttestationError("AFK_ATTEST_BEADS_COMMAND is invalid")
+    return {
+        "command": command,
+        "beads_workspace": scope["beads_workspace"],
+        "timeout_seconds": 30,
+    }
+
+
+def completed_attempt(scope, record, attempt):
+    """Recognize an exact successful result before consulting mutable Beads state."""
+    output_path = attempt / "output.json"
+    if not output_path.exists():
+        return False
+    try:
+        output = json.loads(output_path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise AttestationError("existing attestation result is malformed") from error
+    if not isinstance(output, dict):
+        raise AttestationError("existing attestation result is malformed")
+    if output.get("outcome") != "completed" or output.get("decision") != "attested":
+        return False
+    expected = {
+        "source": {"kind": "bead", "id": scope["mapping"]["bead_id"]},
+        "plan_sha256": scope["acceptance"]["plan"]["plan_sha256"],
+        "record": record,
+        "completion": "completion/output.json",
+        "error_category": None,
+        "error": None,
+    }
+    if any(output.get(name) != value for name, value in expected.items()):
+        raise AttestationError("existing successful attestation does not match")
+    try:
+        load_result(
+            attempt / "completion",
+            scope["child"],
+            scope["mapping"]["bead_id"],
+            scope["acceptance"]["acceptance_sha256"],
+            scope["acceptance"]["plan"]["plan_sha256"],
+            scope["publisher_request"]["acceptance_directory"],
+            scope["publication"],
+            scope["subject"],
+        )
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise AttestationError(
+            "existing successful attestation has invalid Completion evidence"
+        ) from error
+    return True
 
 
 def reconcile(scope, record, attempt, adapter):
@@ -470,13 +540,18 @@ def reconcile(scope, record, attempt, adapter):
 
     completion = attempt / "completion"
     completion_stage = attempt / "completion.in-progress"
+    if completion.is_symlink() or completion_stage.is_symlink():
+        raise AttestationError(
+            "Completion Record result path is not a safe directory",
+            "completion_validation",
+        )
     # afk_complete requires a new result directory. A directory without its
     # atomically sealed output is only an interrupted validator run, not proof
     # that validation completed.
     if completion.exists() and not (completion / "output.json").is_file():
-        remove_partial_completion(completion)
+        retain_partial_completion(completion)
     if not completion.exists():
-        remove_partial_completion(completion_stage)
+        retain_partial_completion(completion_stage)
         completion_input = attempt / "completion.json"
         seal_json(
             completion_input,
@@ -543,15 +618,28 @@ def reconcile(scope, record, attempt, adapter):
         adapter.one("close", child_id, "--json")
 
 
-def remove_partial_completion(path):
-    if not path.exists():
-        return
-    if path.is_symlink() or not path.is_dir():
+def retain_partial_completion(path):
+    if path.is_symlink():
         raise AttestationError(
             "partial Completion Record result is not a directory",
             "completion_validation",
         )
-    shutil.rmtree(path)
+    if not path.exists():
+        return
+    if not path.is_dir():
+        raise AttestationError(
+            "partial Completion Record result is not a directory",
+            "completion_validation",
+        )
+    for sequence in range(1, 1001):
+        destination = path.with_name(f"{path.name}.abandoned-{sequence:03d}")
+        if not os.path.lexists(destination):
+            path.rename(destination)
+            return
+    raise AttestationError(
+        "partial Completion Record retention limit was reached",
+        "completion_validation",
+    )
 
 
 def finish(
