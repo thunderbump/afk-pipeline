@@ -651,6 +651,81 @@ def routing_status(version: int, ambiguities: list[str]) -> str:
     return "needs_human" if version == 1 else "needs_clarification"
 
 
+def validate_planner_output(planner_input: object, value: object) -> dict[str, object]:
+    """Revalidate one complete successful Planner envelope and its route union."""
+    request = validate_input(planner_input)
+    output = object_with_keys(
+        value,
+        {
+            "schema_version",
+            "outcome",
+            "source",
+            "started_at",
+            "finished_at",
+            "duration_seconds",
+            "process",
+            "agent",
+            "planner",
+            "routing",
+            "plan",
+            "error_category",
+            "artifacts",
+        },
+        "Planner output",
+    )
+    if (
+        output["schema_version"] != 1
+        or output["outcome"] != "completed"
+        or output["source"] != {"kind": "bead", "id": request["parent"]["id"]}
+        or output["process"] != {"exit_code": 0, "signal": None}
+        or output["agent"] != {"status": "completed"}
+        or output["planner"]
+        != {
+            "kind": "inference",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-luna",
+            "status": "completed",
+        }
+        or output["error_category"] is not None
+        or output["artifacts"] != {"events": "events.jsonl", "stderr": "stderr.log"}
+    ):
+        raise ValueError("Planner output is not a successful canonical result")
+    utc_timestamp(output["started_at"], "Planner started_at")
+    utc_timestamp(output["finished_at"], "Planner finished_at")
+    duration = output["duration_seconds"]
+    if (
+        not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or duration < 0
+    ):
+        raise ValueError("Planner duration_seconds is invalid")
+    routing = output["routing"]
+    if isinstance(routing, dict) and routing.get("decision") == "direct":
+        validate_direct_routing(request, routing)
+        if output["plan"] is not None:
+            raise ValueError("direct Planner output must not contain a Plan")
+    else:
+        plan = validate_plan(request, output["plan"])
+        children = [
+            {key: item for key, item in child.items() if key != "readiness"}
+            for child in plan["children"]
+        ]
+        rebuilt_routing, rebuilt_plan = build_routing(
+            request,
+            {
+                "schema_version": request["schema_version"],
+                "decision": "decompose",
+                "criteria": plan["criteria"],
+                "direct_routes": [],
+                "children": children,
+                "ambiguities": plan["ambiguities"],
+            },
+        )
+        if routing != rebuilt_routing or plan != rebuilt_plan:
+            raise ValueError("decomposed Planner output is not canonical")
+    return output
+
+
 def digest(value: object) -> str:
     encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()

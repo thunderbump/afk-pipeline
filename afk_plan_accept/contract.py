@@ -3,6 +3,7 @@
 from afk_plan.contract import (
     digest,
     direct_pipeline_compatible,
+    utc_timestamp,
     validate_direct_routing,
     validate_input,
     validate_plan,
@@ -141,9 +142,8 @@ def validate_accepted_output(planner_input: object, value: object) -> dict[str, 
         or output["artifacts"] != {"input": "input.json"}
     ):
         raise ValueError("Acceptance Routing policy output is not accepted")
-    for field in ("started_at", "finished_at"):
-        if not isinstance(output[field], str) or not output[field]:
-            raise ValueError("Acceptance Routing policy timestamp is invalid")
+    utc_timestamp(output["started_at"], "policy started_at")
+    utc_timestamp(output["finished_at"], "policy finished_at")
     duration = output["duration_seconds"]
     if (
         not isinstance(duration, (int, float))
@@ -164,3 +164,67 @@ def validate_accepted_output(planner_input: object, value: object) -> dict[str, 
     if acceptance != expected:
         raise ValueError("Acceptance Routing policy evidence does not match its input")
     return output
+
+
+def validate_policy_output(
+    planner_input: object, policy_input: object, value: object
+) -> dict[str, object]:
+    """Validate and bind an accepted or unaccepted v2 Policy envelope."""
+    request = validate_input(planner_input)
+    if (
+        not isinstance(policy_input, dict)
+        or set(policy_input)
+        not in (
+            {"schema_version", "planner_input", "routing"},
+            {"schema_version", "planner_input", "plan"},
+        )
+        or policy_input.get("schema_version") != request["schema_version"]
+        or policy_input.get("planner_input") != request
+    ):
+        raise ValueError("Acceptance Routing policy input is invalid")
+    if not isinstance(value, dict) or set(value) != OUTPUT_FIELDS:
+        raise ValueError("Acceptance Routing policy output has an invalid shape")
+    if value.get("decision") in {"direct", "accepted"}:
+        output = validate_accepted_output(request, value)
+        evidence_name = "routing" if "routing" in policy_input else "plan"
+        if output["acceptance"].get(evidence_name) != policy_input[evidence_name]:
+            raise ValueError(
+                "Acceptance Routing policy output is not bound to its input"
+            )
+        return output
+    if request["schema_version"] != 2:
+        raise ValueError("unaccepted capability routing requires schema version 2")
+    expected_policy = direct_policy(2) if "routing" in policy_input else plan_policy(2)
+    try:
+        if "routing" in policy_input:
+            accept_direct(request, policy_input["routing"])
+        else:
+            accept_plan(request, policy_input["plan"])
+    except PlanNeedsClarification:
+        expected = ("needs_clarification", "routing_ambiguity")
+    except RoutingNeedsCallerAgent:
+        expected = ("caller_agent", "requires_decomposition")
+    except RoutingNeedsOutsideHelp as error:
+        expected = ("outside_help", error.reason)
+    else:
+        raise ValueError("accepted capability routing cannot use an unaccepted output")
+    if (
+        value["schema_version"] != 2
+        or value["outcome"] != "unaccepted"
+        or (value["decision"], value["error_category"]) != expected
+        or value["source"] != {"kind": "bead", "id": request["parent"]["id"]}
+        or value["policy"] != expected_policy
+        or value["acceptance"] is not None
+        or value["artifacts"] != {"input": "input.json"}
+    ):
+        raise ValueError("unaccepted capability routing does not match its input")
+    utc_timestamp(value["started_at"], "policy started_at")
+    utc_timestamp(value["finished_at"], "policy finished_at")
+    duration = value["duration_seconds"]
+    if (
+        not isinstance(duration, (int, float))
+        or isinstance(duration, bool)
+        or duration < 0
+    ):
+        raise ValueError("policy duration_seconds is invalid")
+    return dict(value)

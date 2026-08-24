@@ -15,14 +15,9 @@ from pathlib import Path
 
 from afk_config import attestation_result_root
 from afk_coordinate.contract import validate_output as validate_coordinator_output
-from afk_plan.contract import (
-    build_routing,
-    validate_catalog,
-    validate_direct_routing,
-    validate_plan,
-)
+from afk_plan.contract import validate_catalog, validate_planner_output
 from afk_plan.contract import validate_input as validate_planner_input
-from afk_plan_accept.contract import validate_accepted_output
+from afk_plan_accept.contract import validate_policy_output
 from afk_preflight.contract import validate_output as validate_preflight_output
 from afk_runtime import (
     progress,
@@ -703,75 +698,7 @@ def execute_acceptance_routing(bead_id, artifact, preparation, planner_input):
 def planner_terminal(path, planner_input):
     """Revalidate the Planner's canonical route before policy handoff."""
     try:
-        output = json.loads(path.read_text())
-        required = {
-            "schema_version",
-            "outcome",
-            "source",
-            "started_at",
-            "finished_at",
-            "duration_seconds",
-            "process",
-            "agent",
-            "planner",
-            "routing",
-            "plan",
-            "error_category",
-            "artifacts",
-        }
-        if (
-            not isinstance(output, dict)
-            or set(output) != required
-            or output.get("schema_version") != 1
-            or output.get("outcome") != "completed"
-            or output.get("source")
-            != {"kind": "bead", "id": planner_input["parent"]["id"]}
-            or not isinstance(output.get("routing"), dict)
-            or output.get("error_category") is not None
-            or output.get("artifacts")
-            != {"events": "events.jsonl", "stderr": "stderr.log"}
-            or output.get("process") != {"exit_code": 0, "signal": None}
-            or output.get("planner")
-            != {
-                "kind": "inference",
-                "provider": "openai-codex",
-                "model": "gpt-5.6-luna",
-                "status": "completed",
-            }
-            or not isinstance(output.get("agent"), dict)
-            or output["agent"].get("status") != "completed"
-            or not isinstance(output.get("started_at"), str)
-            or not isinstance(output.get("finished_at"), str)
-            or not isinstance(output.get("duration_seconds"), (int, float))
-            or isinstance(output.get("duration_seconds"), bool)
-            or output["duration_seconds"] < 0
-        ):
-            return None
-        routing = output["routing"]
-        if routing.get("decision") == "direct":
-            validate_direct_routing(planner_input, routing)
-            if output.get("plan") is not None:
-                return None
-        else:
-            plan = validate_plan(planner_input, output.get("plan"))
-            children = [
-                {key: item for key, item in child.items() if key != "readiness"}
-                for child in plan["children"]
-            ]
-            rebuilt_routing, rebuilt_plan = build_routing(
-                planner_input,
-                {
-                    "schema_version": 2,
-                    "decision": "decompose",
-                    "criteria": plan["criteria"],
-                    "direct_routes": [],
-                    "children": children,
-                    "ambiguities": plan["ambiguities"],
-                },
-            )
-            if output["routing"] != rebuilt_routing or plan != rebuilt_plan:
-                return None
-        return output
+        return validate_planner_output(planner_input, json.loads(path.read_text()))
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         return None
 
@@ -779,27 +706,9 @@ def planner_terminal(path, planner_input):
 def policy_terminal(path, planner_input, policy_input):
     """Accept only canonical success or the bounded v2 non-admission union."""
     try:
-        output = json.loads(path.read_text())
-        if not isinstance(output, dict):
-            return None
-        if output.get("decision") in {"direct", "accepted"}:
-            accepted = validate_accepted_output(planner_input, output)
-            evidence_name = "routing" if "routing" in policy_input else "plan"
-            if accepted["acceptance"].get(evidence_name) != policy_input[evidence_name]:
-                return None
-            return accepted
-        if (
-            output.get("schema_version") != 2
-            or output.get("outcome") != "unaccepted"
-            or output.get("decision")
-            not in {"needs_clarification", "caller_agent", "outside_help"}
-            or output.get("source")
-            != {"kind": "bead", "id": planner_input["parent"]["id"]}
-            or output.get("acceptance") is not None
-            or not isinstance(output.get("error_category"), str)
-        ):
-            return None
-        return output
+        return validate_policy_output(
+            planner_input, policy_input, json.loads(path.read_text())
+        )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError):
         return None
 

@@ -18,9 +18,9 @@ from afk_coordinate.contract import (
     validate_output,
     validate_request,
 )
-from afk_plan.contract import validate_direct_routing
 from afk_plan.contract import validate_input as validate_plan_input
-from afk_plan_accept.contract import validate_accepted_output
+from afk_plan.contract import validate_planner_output
+from afk_plan_accept.contract import validate_policy_output
 from afk_preflight.contract import validate_input as validate_preflight_input
 from afk_preflight.contract import validate_output as validate_preflight_output
 
@@ -493,23 +493,25 @@ def validate_prepared_routing(source, prepared):
     """Require an accepted direct v2 route for a Coordinator-bearing Run."""
     try:
         planner_input = validate_plan_input(read_json(source / "planner-input.json"))
-        planner_output = read_json(source / "planner" / "output.json")
-        routing = validate_direct_routing(planner_input, planner_output["routing"])
+        planner_output = validate_planner_output(
+            planner_input, read_json(source / "planner" / "output.json")
+        )
+        routing = planner_output["routing"]
         policy_input = read_json(source / "policy-input.json")
-        policy_output = validate_accepted_output(
-            planner_input, read_json(source / "policy" / "output.json")
+        policy_output = validate_policy_output(
+            planner_input,
+            policy_input,
+            read_json(source / "policy" / "output.json"),
         )
     except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
         raise ExportError("invalid prepared Acceptance Routing evidence") from error
     if (
         not isinstance(prepared, dict)
         or set(prepared) != {"planner", "policy"}
-        or planner_output.get("outcome") != "completed"
-        or planner_output.get("plan") is not None
+        or planner_output["plan"] is not None
         or policy_input
         != {"schema_version": 2, "planner_input": planner_input, "routing": routing}
-        or policy_output.get("decision") != "direct"
-        or policy_output["acceptance"].get("routing") != policy_input["routing"]
+        or policy_output["decision"] != "direct"
     ):
         raise ExportError("invalid prepared Acceptance Routing evidence")
     expected = (

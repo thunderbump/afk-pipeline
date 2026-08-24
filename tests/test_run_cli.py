@@ -207,6 +207,27 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(publication["admission_outcome"], "accepted")
         self.assertFalse((artifact / "preflight-input.json").exists())
 
+    def test_capability_publication_rejects_tampered_planner_envelope(self):
+        self.configure_acceptance_routing()
+        receipt = self.root / "routing-publication-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(result.stdout)
+        planner_path = artifact / "planner" / "output.json"
+        planner_output = json.loads(planner_path.read_text())
+        planner_output["agent"]["unexpected"] = True
+        planner_path.chmod(0o644)
+        planner_path.write_text(json.dumps(planner_output))
+
+        config = afk_run.load_config(self.config)
+        replayed = afk_run.publish_terminal_run(artifact, config["publication"])
+
+        self.assertEqual(replayed["status"], "failed")
+        self.assertEqual(replayed["error_category"], "export_failed")
+
     def test_capability_admission_rejects_incomplete_or_unbound_stage_evidence(self):
         self.configure_acceptance_routing()
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
@@ -268,6 +289,19 @@ class RunPreparerCliTest(unittest.TestCase):
                 self.assertEqual(output["decision"], decision)
                 self.assertEqual(output["error_category"], reason)
                 self.assertNotIn("approval", json.dumps(output).lower())
+                if decision == "outside_help":
+                    planner_input = json.loads(
+                        (artifact / "planner-input.json").read_text()
+                    )
+                    policy_input = json.loads(
+                        (artifact / "policy-input.json").read_text()
+                    )
+                    output["error_category"] = "human_judgment"
+                    malformed = artifact / "malformed-policy.json"
+                    malformed.write_text(json.dumps(output))
+                    self.assertIsNone(
+                        afk_run.policy_terminal(malformed, planner_input, policy_input)
+                    )
 
     def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
         receipt = self.root / "paused-retry-publication-receipt.json"
