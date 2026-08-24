@@ -302,7 +302,38 @@ schema:
   "beads_workspace": "/absolute/path/to/central-beads",
   "run_root": "/absolute/caller-owned/path/to/runs",
   "worktree_root": "/absolute/caller-owned/path/to/worktrees",
-  "classification_store": "/absolute/caller-owned/path/to/classifications",
+  "acceptance_routing": {
+    "timeout_seconds": 300,
+    "catalog": {
+      "schema_version": 2,
+      "projects": [
+        {
+          "slug": "example",
+          "routes": [
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "pipeline_run",
+              "phases": ["implementation"]
+            },
+            {
+              "owner": "Caller agent",
+              "executor": "caller_agent",
+              "evidence_route": "external_check",
+              "phases": ["implementation", "closure"]
+            },
+            {
+              "owner": "Credential holder",
+              "executor": "outside_help",
+              "outside_help_reason": "missing_credentials",
+              "evidence_route": "human_attestation",
+              "phases": ["implementation", "closure"]
+            }
+          ]
+        }
+      ]
+    }
+  },
   "attestation": {
     "result_root": "/absolute/afk-owned/path/to/attestations"
   },
@@ -347,12 +378,13 @@ a private temporary Publication Bundle path and invokes the command without a
 shell. The current adapter is Operations Datastore Admission, but the preparer
 depends only on its small versioned JSON result contract.
 
-The required Classification Store is independent of the Run root, worktree
-root, selected repositories, and central Beads workspace. Preflight stores one
-immutable validated classification for each canonical input and explicit
-classifier policy. The policy includes contract identities, provider, model,
-thinking level, system-prompt digest, and exact adapter-command digest.
-Changing any input or policy fact creates a new key and permits fresh inference.
+`acceptance_routing` freezes the complete trusted v2 capability catalog and the
+Planner timeout. The catalog must include the source Project and may include
+other Projects used by decomposed work. The Run Preparer retains the exact
+Planner input/output and deterministic Policy input/output in the Run root.
+Historical configurations containing `classification_store` continue to read
+and produce the retained v1 Preflight layout; a configuration chooses exactly
+one admission path.
 
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace. Run admission requires the Bead to have exactly one
@@ -362,6 +394,13 @@ check occurs before project ownership resolution, repository inspection, Git
 mutation, worktree creation, or durable Run artifacts. There is no readiness
 bypass flag. This is the readiness gate for Runs later exposed through the
 current Operations WebUI publication interface.
+
+For capability routing, Acceptance Planner runs after the isolated worktree is
+prepared. An accepted direct `afk_run` route starts Coordinator immediately;
+Acceptance Evidence Preflight is not invoked or written. An accepted child Plan,
+`outside_help`, or `needs_clarification` seals its exact routing evidence and
+returns before Coordinator. Planner, policy, protocol, launch, and interruption
+failures also stop before Coordinator and seal a failed preparation.
 
 After readiness admission, the preparer requires exactly one `project:<slug>`
 label. It resolves that project locally, freezes the base ref to a commit, and
@@ -380,25 +419,19 @@ Assignment path as their executable are rejected before any run destination is
 created. This lets a configurable worker read the frozen Bead objective while
 keeping Beads lookup in the trusted preparer.
 
-Each project validation mapping also requires bounded `evidence` text describing
-what its exact repository-owned command proves. Run Preparer uses that trusted
-metadata, the exact validation argv, existing AFK evidence capabilities, and the
-operator handoff boundary to build the acceptance-evidence catalog. The Bead
-does not supply or modify those capabilities.
+Each project validation mapping also retains bounded `evidence` text describing
+what its exact repository-owned command proves. Legacy Preflight configuration
+uses that text to build its evidence catalog. Capability routing instead uses
+only the configured v2 catalog; the Bead cannot add an executor, owner, evidence
+route, or outside-help reason.
 
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
-`preflight-input.json`, `coordinator-request.json`, versioned
-`preparation.json`, and reserved `preflight/` and `coordinator/` directories.
-After the worktree and inputs are frozen, Run Preparer invokes Acceptance
-Evidence Preflight before Coordinator. A valid `proceed` hands the unchanged
-Assignment to Coordinator. A valid `pause`, failed classifier, or malformed
-Preflight evidence exits `1`, leaves Coordinator `not_started`, and starts no
-implementation Attempt. A valid `pause` retains its classified request ledger.
-A failed classifier or malformed result retains the accepted input, raw agent
-streams, and sealed pause outcome without claiming a valid request ledger.
-Progress prints every validated request category and route plus the terminal
-Preflight decision.
+`coordinator-request.json`, versioned `preparation.json`, and a reserved
+`coordinator/` directory. Capability Runs also contain `planner-input.json`,
+`policy-input.json`, and complete `planner/` and `policy/` results. Legacy Runs
+retain `preflight-input.json` and `preflight/`. Both paths fail closed before
+Coordinator when their selected admission evidence is incomplete or malformed.
 
 A paused or failed Preflight is terminal for that Run and is never resumed in
 place. Invoke `afk run <bead-id>` again to create a new Run ID, worktree, and

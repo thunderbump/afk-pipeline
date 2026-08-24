@@ -18,6 +18,9 @@ from afk_coordinate.contract import (
     validate_output,
     validate_request,
 )
+from afk_plan.contract import validate_direct_routing
+from afk_plan.contract import validate_input as validate_plan_input
+from afk_plan_accept.contract import validate_accepted_output
 from afk_preflight.contract import validate_input as validate_preflight_input
 from afk_preflight.contract import validate_output as validate_preflight_output
 
@@ -350,6 +353,8 @@ def load_source(source, project, run_id, bead_id):
             validate_prepared_preflight(
                 preparation["preflight"], preflight_input, preflight_output
             )
+        if "routing" in preparation:
+            validate_prepared_routing(source, preparation["routing"])
     else:
         if project is None or run_id is None:
             raise ExportUsageError(
@@ -427,7 +432,11 @@ def validate_preparation(source, value):
     if (
         not isinstance(value, dict)
         or frozenset(value)
-        not in {frozenset(expected), frozenset(expected | {"preflight"})}
+        not in {
+            frozenset(expected),
+            frozenset(expected | {"preflight"}),
+            frozenset(expected | {"routing"}),
+        }
         or value.get("schema_version") != 1
     ):
         raise ExportError("invalid Run Preparer evidence")
@@ -478,6 +487,46 @@ def validate_prepared_preflight(prepared, preflight_input, preflight_output):
         or preflight_output["source"] != preflight_input["source"]
     ):
         raise ExportError("invalid prepared Preflight evidence")
+
+
+def validate_prepared_routing(source, prepared):
+    """Require an accepted direct v2 route for a Coordinator-bearing Run."""
+    try:
+        planner_input = validate_plan_input(read_json(source / "planner-input.json"))
+        planner_output = read_json(source / "planner" / "output.json")
+        routing = validate_direct_routing(planner_input, planner_output["routing"])
+        policy_input = read_json(source / "policy-input.json")
+        policy_output = validate_accepted_output(
+            planner_input, read_json(source / "policy" / "output.json")
+        )
+    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+        raise ExportError("invalid prepared Acceptance Routing evidence") from error
+    if (
+        not isinstance(prepared, dict)
+        or set(prepared) != {"planner", "policy"}
+        or planner_output.get("outcome") != "completed"
+        or planner_output.get("plan") is not None
+        or policy_input
+        != {"schema_version": 2, "planner_input": planner_input, "routing": routing}
+        or policy_output.get("decision") != "direct"
+    ):
+        raise ExportError("invalid prepared Acceptance Routing evidence")
+    expected = (
+        (prepared["planner"], "planner", "completed", 0, "completed"),
+        (prepared["policy"], "policy", "completed", 0, "completed"),
+    )
+    for facts, directory, status, exit_code, outcome in expected:
+        if (
+            not isinstance(facts, dict)
+            or facts.get("directory") != directory
+            or facts.get("result") != f"{directory}/output.json"
+            or facts.get("status") != status
+            or facts.get("exit_code") != exit_code
+            or facts.get("outcome") != outcome
+        ):
+            raise ExportError("invalid prepared Acceptance Routing evidence")
+    if prepared["policy"].get("decision") != "direct":
+        raise ExportError("invalid prepared Acceptance Routing evidence")
 
 
 def validate_preparer_terminal(preparation, output):

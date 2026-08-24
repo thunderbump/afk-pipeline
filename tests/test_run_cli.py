@@ -15,6 +15,7 @@ import afk_run
 
 ROOT = Path(__file__).parents[1]
 PREFLIGHT_FIXTURE = ROOT / "tests" / "fixture_preflight_agent.py"
+PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
 
 class RunPreparerCliTest(unittest.TestCase):
@@ -49,6 +50,7 @@ class RunPreparerCliTest(unittest.TestCase):
         }
         self.preflight_scenario = "proceed"
         self.preflight_command = None
+        self.plan_scenario = "capability-run-direct"
         self.write_bd()
         self.config = self.root / "config.json"
         self.write_config()
@@ -173,6 +175,79 @@ class RunPreparerCliTest(unittest.TestCase):
         preparation = json.loads((artifact / "preparation.json").read_text())
         self.assertEqual(preparation["preflight"]["decision"], "proceed")
         self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
+
+    def test_capability_direct_is_the_only_gate_before_coordinator(self):
+        self.configure_acceptance_routing()
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        self.assertNotIn("preflight", preparation)
+        self.assertFalse((artifact / "preflight-input.json").exists())
+        self.assertEqual(preparation["routing"]["planner"]["status"], "completed")
+        self.assertEqual(preparation["routing"]["policy"]["decision"], "direct")
+        self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
+
+    def test_capability_direct_terminal_run_remains_publishable(self):
+        self.configure_acceptance_routing()
+        receipt = self.root / "routing-publication-receipt.json"
+        adapter = self.write_publication_adapter("accepted", 0, receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        artifact = self.artifact_from(result.stdout)
+        publication = json.loads((artifact / "publication.json").read_text())
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(publication["status"], "succeeded")
+        self.assertEqual(publication["admission_outcome"], "accepted")
+        self.assertFalse((artifact / "preflight-input.json").exists())
+
+    def test_decomposed_capability_routing_stops_before_coordinator(self):
+        self.configure_acceptance_routing()
+        self.plan_scenario = "capability-run-decompose"
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        artifact = self.artifact_from(result.stdout)
+        preparation = json.loads((artifact / "preparation.json").read_text())
+        policy = json.loads((artifact / "policy" / "output.json").read_text())
+        self.assertEqual(preparation["preparation_status"], "routed")
+        self.assertEqual(preparation["routing"]["policy"]["decision"], "accepted")
+        self.assertEqual(
+            policy["acceptance"]["plan"]["children"][0]["executor"], "caller_agent"
+        )
+        self.assertEqual(preparation["coordinator"]["status"], "not_started")
+        self.assertEqual(list((artifact / "coordinator").iterdir()), [])
+
+    def test_capability_nonadmission_names_clarification_or_missing_capability(self):
+        self.configure_acceptance_routing()
+        for scenario, decision, reason in (
+            (
+                "capability-run-clarification",
+                "needs_clarification",
+                "routing_ambiguity",
+            ),
+            ("capability-run-outside-help", "outside_help", "missing_credentials"),
+        ):
+            with self.subTest(scenario=scenario):
+                self.plan_scenario = scenario
+                self.bead["id"] = f"central-{decision}"
+                self.write_bd()
+                result = self.invoke(
+                    "run", self.bead["id"], "--config", str(self.config)
+                )
+                artifact = self.artifact_from(result.stdout)
+                output = json.loads((artifact / "policy" / "output.json").read_text())
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(output["decision"], decision)
+                self.assertEqual(output["error_category"], reason)
+                self.assertNotIn("approval", json.dumps(output).lower())
 
     def test_retry_after_pause_creates_a_new_run_and_preserves_the_first(self):
         receipt = self.root / "paused-retry-publication-receipt.json"
@@ -1190,6 +1265,43 @@ class RunPreparerCliTest(unittest.TestCase):
         value["publication"] = {"command": command, "timeout_seconds": 5}
         self.config.write_text(json.dumps(value))
 
+    def configure_acceptance_routing(self):
+        value = json.loads(self.config.read_text())
+        value.pop("classification_store")
+        value["acceptance_routing"] = {
+            "timeout_seconds": 5,
+            "catalog": {
+                "schema_version": 2,
+                "projects": [
+                    {
+                        "slug": "fixture",
+                        "routes": [
+                            {
+                                "owner": "AFK Run",
+                                "executor": "afk_run",
+                                "evidence_route": "pipeline_run",
+                                "phases": ["implementation"],
+                            },
+                            {
+                                "owner": "Caller agent",
+                                "executor": "caller_agent",
+                                "evidence_route": "external_check",
+                                "phases": ["implementation", "closure"],
+                            },
+                            {
+                                "owner": "Credential holder",
+                                "executor": "outside_help",
+                                "outside_help_reason": "missing_credentials",
+                                "evidence_route": "human_attestation",
+                                "phases": ["closure"],
+                            },
+                        ],
+                    }
+                ],
+            },
+        }
+        self.config.write_text(json.dumps(value))
+
     def write_publication_adapter(self, outcome, exit_code, receipt):
         path = self.root / f"publish-{outcome}.py"
         path.write_text(
@@ -1260,6 +1372,9 @@ class RunPreparerCliTest(unittest.TestCase):
         environment["AFK_PREFLIGHT_AGENT_COMMAND"] = json.dumps(
             self.preflight_command
             or [sys.executable, str(PREFLIGHT_FIXTURE), self.preflight_scenario]
+        )
+        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(PLAN_FIXTURE), self.plan_scenario]
         )
         return {
             "cwd": self.root,

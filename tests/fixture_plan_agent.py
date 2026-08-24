@@ -119,6 +119,69 @@ elif scenario == "capability-direct":
         "children": [],
         "ambiguities": [],
     }
+elif scenario in {
+    "capability-run-direct",
+    "capability-run-decompose",
+    "capability-run-clarification",
+    "capability-run-outside-help",
+}:
+    criterion = {
+        "id": "criterion-1",
+        "source_text": "Commit the result.",
+        "statement": "Commit the result.",
+    }
+    if scenario == "capability-run-decompose":
+        value = {
+            "schema_version": 2,
+            "decision": "decompose",
+            "criteria": [criterion],
+            "direct_routes": [],
+            "children": [
+                {
+                    "local_id": "caller-work",
+                    "title": "Complete caller-agent work",
+                    "objective": "Complete and check the requested result.",
+                    "criteria": ["criterion-1"],
+                    "project": "fixture",
+                    "owner": "Caller agent",
+                    "phase": "implementation",
+                    "executor": "caller_agent",
+                    "evidence_route": "external_check",
+                    "depends_on": [],
+                }
+            ],
+            "ambiguities": [],
+        }
+    else:
+        outside = scenario == "capability-run-outside-help"
+        value = {
+            "schema_version": 2,
+            "decision": "direct",
+            "criteria": [criterion],
+            "direct_routes": [
+                {
+                    "criterion": "criterion-1",
+                    "project": "fixture",
+                    "owner": "Credential holder" if outside else "AFK Run",
+                    "phase": "closure" if outside else "implementation",
+                    "executor": "outside_help" if outside else "afk_run",
+                    **(
+                        {"outside_help_reason": "missing_credentials"}
+                        if outside
+                        else {}
+                    ),
+                    "evidence_route": "human_attestation"
+                    if outside
+                    else "pipeline_run",
+                }
+            ],
+            "children": [],
+            "ambiguities": (
+                ["The requested target is unclear."]
+                if scenario == "capability-run-clarification"
+                else []
+            ),
+        }
 elif scenario == "unnecessary-decomposition":
     value = unnecessary_decomposition()
 elif scenario == "direct-retry-protocol":
