@@ -115,6 +115,92 @@ class ContinuationPublicationTest(unittest.TestCase):
         coordinator.assert_not_called()
         publish.assert_called_once()
 
+    def test_retained_lineage_handles_base_only_partial_and_complete_replay(self):
+        second = self.coordinator / "continuations" / "02"
+        second.mkdir()
+        stopped = self.observed("stop", [self.continuation, second])
+        (second / "input.json").write_text(json.dumps({"additional_responses": 1}))
+
+        for admitted, expected in (
+            (set(), [("01", "accepted"), ("02", "accepted")]),
+            ({"01"}, [("01", "replayed"), ("02", "accepted")]),
+            ({"01", "02"}, [("01", "replayed"), ("02", "replayed")]),
+        ):
+            with self.subTest(admitted=admitted):
+                datastore = set(admitted)
+                published = []
+
+                def publish(
+                    source,
+                    config,
+                    evidence_directory,
+                    datastore=datastore,
+                    published=published,
+                ):
+                    identity = evidence_directory.name
+                    outcome = "replayed" if identity in datastore else "accepted"
+                    datastore.add(identity)
+                    published.append((identity, outcome))
+                    return {"status": "succeeded", "admission_outcome": outcome}
+
+                with (
+                    mock.patch("afk_run.load_config", return_value=self.config),
+                    mock.patch(
+                        "afk_export.load_source", side_effect=[stopped, stopped]
+                    ),
+                    mock.patch("afk_run.publish_terminal_run", side_effect=publish),
+                ):
+                    code = afk_run.continue_run(
+                        self.source, 1, self.source / "config.json"
+                    )
+
+                self.assertEqual(code, 0)
+                self.assertEqual(published, expected)
+
+    def test_retained_continuation_publication_stops_at_first_failure(self):
+        second = self.coordinator / "continuations" / "02"
+        second.mkdir()
+        stopped = self.observed("stop", [self.continuation, second])
+        (second / "input.json").write_text(json.dumps({"additional_responses": 1}))
+
+        with (
+            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch("afk_export.load_source", side_effect=[stopped, stopped]),
+            mock.patch(
+                "afk_run.publish_terminal_run",
+                side_effect=[{"status": "failed"}, {"status": "succeeded"}],
+            ) as publish,
+        ):
+            code = afk_run.continue_run(self.source, 1, self.source / "config.json")
+
+        self.assertEqual(code, 1)
+        publish.assert_called_once_with(
+            self.source.resolve(),
+            self.config["publication"],
+            evidence_directory=self.continuation,
+        )
+
+    def test_publication_exports_the_evidence_continuation_identity(self):
+        with (
+            mock.patch(
+                "afk_export.export_run",
+                return_value={
+                    "identity": {
+                        "project": "fixture",
+                        "run_id": "run-1.continuation.01",
+                    }
+                },
+            ) as export,
+            mock.patch("afk_run.invoke_admission", return_value=(0, "accepted", None)),
+        ):
+            afk_run.publish_terminal_run(
+                self.source,
+                self.config["publication"],
+                evidence_directory=self.continuation,
+            )
+
+        self.assertEqual(export.call_args.kwargs["terminal_continuation"], "01")
+
     def test_publication_failure_evidence_is_retained_with_the_continuation(self):
         with (
             mock.patch(

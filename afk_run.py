@@ -220,22 +220,24 @@ def continue_run(source, additional_responses, config_path, abandon_active=False
         latest_continuations = latest.get("continuations", [])
         if not latest_continuations:
             return coordinator_code
-        newest = latest_continuations[-1]
-        publication = publish_terminal_run(
-            source, config["publication"], evidence_directory=newest
-        )
-        print(f"artifact root: {source}", flush=True)
         terminal_code = (
             0
             if latest["output"].get("outcome") == "completed"
             and latest["output"].get("decision") == "stop"
             else 1
         )
-        return (
-            1
-            if terminal_code == 0 and publication["status"] != "succeeded"
-            else terminal_code
-        )
+        # Admission identities form an immutable chain.  Replay every retained
+        # terminal in lineage order so a datastore which only knows the base Run
+        # can never observe a later continuation before its predecessor.
+        for continuation in latest_continuations:
+            publication = publish_terminal_run(
+                source, config["publication"], evidence_directory=continuation
+            )
+            if publication["status"] != "succeeded":
+                print(f"artifact root: {source}", flush=True)
+                return 1
+        print(f"artifact root: {source}", flush=True)
+        return terminal_code
     except (
         PreparationError,
         ExportError,
@@ -784,7 +786,15 @@ def publish_terminal_run(source, config, evidence_directory=None):
         with tempfile.TemporaryDirectory(prefix="afk-publication-") as temporary:
             bundle = Path(temporary) / "bundle"
             try:
-                exported = export_run(source, bundle, schema_version=2)
+                terminal_continuation = (
+                    None if evidence_directory == source else evidence_directory.name
+                )
+                exported = export_run(
+                    source,
+                    bundle,
+                    schema_version=2,
+                    terminal_continuation=terminal_continuation,
+                )
             except (
                 ExportError,
                 ExportUsageError,

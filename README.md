@@ -1013,17 +1013,19 @@ repository-owned continuation and publication entry point:
 ```
 
 This validates the original terminal and every numbered continuation before
-executing work, leaves the original `state.json` and `output.json` byte-for-byte
-unchanged, and publishes the newest sealed continuation through the same private
-v2 Publication Bundle and fail-closed Admission seam as `afk run`. Publication
-streams and `publication.json` are retained in that continuation directory.
-The bundle Run ID appends `.continuation.NN`, giving each terminal continuation
-an immutable Admission identity while preserving deterministic replay. A
-publication failure remains unsuccessful without changing Coordinator facts.
-Repeating the command after a clean stop republishes that same newest terminal,
-allowing Admission to report `replayed`; an exhausted newest continuation
-instead receives the next additive allowance. `--abandon-active` carries the
-same explicit liveness assertion as Coordinator.
+executing work and leaves the original `state.json` and `output.json`
+byte-for-byte unchanged. It publishes every retained sealed continuation oldest
+to newest through the same private v2 Publication Bundle and fail-closed
+Admission seam as `afk run`, stopping at the first failed or rejected identity.
+Publication streams and `publication.json` are retained in each attempted
+continuation directory. The bundle Run ID appends `.continuation.NN`, giving
+each terminal continuation an immutable Admission identity while preserving
+deterministic replay. Already admitted predecessors can report `replayed`
+without being changed. A publication failure remains unsuccessful without
+changing Coordinator facts. Repeating the command after a clean stop replays
+the complete retained lineage and returns the newest terminal result; an
+exhausted newest continuation instead receives the next additive allowance.
+`--abandon-active` carries the same explicit liveness assertion as Coordinator.
 
 If an active continuation worker is confirmed gone before sealing output, the
 caller can apply the same liveness assertion used by an original run:

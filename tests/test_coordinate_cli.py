@@ -546,6 +546,37 @@ class CoordinatorCliTest(unittest.TestCase):
             first_output,
         )
 
+        # Publication can select an immutable predecessor while still validating
+        # the complete retained lineage.
+        from afk_export import ExportError, export_run
+
+        bundle = self.root / "first-continuation-bundle"
+        exported = export_run(
+            run,
+            bundle,
+            project="fixture",
+            run_id="continued-1",
+            terminal_continuation="01",
+        )
+        record = json.loads((bundle / "workflow-run.json").read_text())
+        self.assertEqual(exported["identity"]["run_id"], "continued-1.continuation.01")
+        self.assertEqual(record["terminal"], {"decision": "exhausted"})
+        sources = {artifact["source"]["path"] for artifact in record["artifacts"]}
+        self.assertIn("continuations/01/output.json", sources)
+        self.assertNotIn("continuations/02/output.json", sources)
+
+        second_input = json.loads((second_directory / "input.json").read_text())
+        second_input["prior_output"] = "../wrong/output.json"
+        (second_directory / "input.json").write_text(json.dumps(second_input))
+        with self.assertRaises((ExportError, ValueError)):
+            export_run(
+                run,
+                self.root / "invalid-predecessor-bundle",
+                project="fixture",
+                run_id="continued-1",
+                terminal_continuation="01",
+            )
+
     def test_next_continuation_refuses_rewritten_predecessor_allowance(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         run = self.root / "rewritten-predecessor"

@@ -106,6 +106,7 @@ def export_run(
     run_id=None,
     bead_id=None,
     schema_version=2,
+    terminal_continuation=None,
 ):
     if schema_version not in {1, 2}:
         raise ExportUsageError("unsupported Publication Bundle schema")
@@ -125,9 +126,21 @@ def export_run(
     ):
         raise ExportError("source and destination must not overlap")
     observed = (
-        load_source(source, project, run_id, bead_id)
+        load_source(
+            source,
+            project,
+            run_id,
+            bead_id,
+            terminal_continuation=terminal_continuation,
+        )
         if schema_version == 1
-        else load_source_v2(source, project, run_id, bead_id)
+        else load_source_v2(
+            source,
+            project,
+            run_id,
+            bead_id,
+            terminal_continuation=terminal_continuation,
+        )
     )
     record, payloads = (
         normalize_run(observed) if schema_version == 1 else normalize_run_v2(observed)
@@ -172,11 +185,17 @@ def export_run(
     }
 
 
-def load_source_v2(source, project, run_id, bead_id):
+def load_source_v2(source, project, run_id, bead_id, terminal_continuation=None):
     """Load either a terminal Coordinator Run or a terminal Preflight pause."""
     preparation_path = source / "preparation.json"
     if not preparation_path.exists() and not preparation_path.is_symlink():
-        observed = load_source(source, project, run_id, bead_id)
+        observed = load_source(
+            source,
+            project,
+            run_id,
+            bead_id,
+            terminal_continuation=terminal_continuation,
+        )
         observed["run_root"] = source
         observed["preflight"] = None
         return observed
@@ -187,7 +206,13 @@ def load_source_v2(source, project, run_id, bead_id):
     if preparation.get("preparation_status") != "paused":
         if "preflight" in preparation:
             require_directory(source / "preflight")
-        observed = load_source(source, project, run_id, bead_id)
+        observed = load_source(
+            source,
+            project,
+            run_id,
+            bead_id,
+            terminal_continuation=terminal_continuation,
+        )
         observed["run_root"] = source
         observed["preflight"] = load_optional_preflight(source, preparation)
         if observed["preflight"] is not None and observed["preflight"]["input"][
@@ -196,6 +221,8 @@ def load_source_v2(source, project, run_id, bead_id):
             raise ExportError("prepared Preflight Bead identity disagrees")
         return observed
 
+    if terminal_continuation is not None:
+        raise ExportError("terminal Preflight pause has no continuation")
     # A pause is a terminal Run in its own right.  In particular, an empty
     # Coordinator directory is evidence of absence, not missing history.
     required = {
@@ -332,7 +359,14 @@ def load_optional_preflight(source, preparation):
     }
 
 
-def load_source(source, project, run_id, bead_id, allow_running_continuation=False):
+def load_source(
+    source,
+    project,
+    run_id,
+    bead_id,
+    allow_running_continuation=False,
+    terminal_continuation=None,
+):
     require_directory(source)
     preparation_path = source / "preparation.json"
     if preparation_path.exists() or preparation_path.is_symlink():
@@ -401,6 +435,7 @@ def load_source(source, project, run_id, bead_id, allow_running_continuation=Fal
         original_state,
         original_output,
         allow_running=allow_running_continuation,
+        terminal_continuation=terminal_continuation,
     )
     if continuations:
         identity = {
@@ -435,8 +470,15 @@ def load_source(source, project, run_id, bead_id, allow_running_continuation=Fal
     }
 
 
-def load_continuation_lineage(coordinator, request, state, output, allow_running=False):
-    """Validate every continuation and select the newest sealed terminal."""
+def load_continuation_lineage(
+    coordinator,
+    request,
+    state,
+    output,
+    allow_running=False,
+    terminal_continuation=None,
+):
+    """Validate the full lineage and select one sealed terminal when requested."""
     from afk_coordinate.__main__ import (
         existing_continuations,
         require_exhausted,
@@ -448,6 +490,7 @@ def load_continuation_lineage(coordinator, request, state, output, allow_running
     expected_max_responses = request["max_responses"]
     observed = []
     terminal_directory = coordinator
+    selected = None
     for directory in directories:
         require_exhausted(
             coordinator, state, expected_max_responses, check_workspace=False
@@ -475,6 +518,12 @@ def load_continuation_lineage(coordinator, request, state, output, allow_running
         observed.append(directory)
         expected_max_responses = continuation_input["effective_max_responses"]
         prior_output = f"../{directory.name}/output.json"
+        if directory.name == terminal_continuation:
+            selected = (state, output, terminal_directory, list(observed))
+    if terminal_continuation is not None:
+        if selected is None:
+            raise ExportError("selected continuation is not a sealed terminal")
+        return selected
     return state, output, terminal_directory, observed
 
 
