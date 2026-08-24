@@ -296,6 +296,56 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertFalse((run / "08-response").exists())
 
+    def test_orphaned_continuation_invocation_can_be_abandoned_and_retried(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "orphaned-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        environment = self.environment(
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="delayed-commit",
+        )
+        coordinator = subprocess.Popen(
+            self.command(request_path, run, "--continue-exhausted", "1"),
+            cwd=ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            start_new_session=True,
+        )
+        continuation = run / "continuations" / "01"
+        self.wait_for_active_state(continuation / "state.json", "response")
+        os.killpg(coordinator.pid, signal.SIGKILL)
+        coordinator.wait(timeout=5)
+
+        resumed = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            "--abandon-active",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="commit",
+        )
+
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        output = json.loads((continuation / "output.json").read_text())
+        responses = [
+            record for record in output["history"] if record["component"] == "response"
+        ]
+        self.assertEqual(
+            [record["outcome"] for record in responses], ["abandoned", "completed"]
+        )
+        self.assertEqual(output["decision"], "stop")
+
     def test_active_continuation_refuses_a_rewritten_response_allowance(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         run = self.root / "tampered-continuation"
@@ -341,7 +391,7 @@ class CoordinatorCliTest(unittest.TestCase):
         )
 
         self.assertEqual(resumed.returncode, 2)
-        self.assertIn("continuation input", resumed.stderr)
+        self.assertIn("continuation lineage", resumed.stderr)
         self.assertEqual(state_path.read_bytes(), before)
 
     def test_each_exhausted_continuation_adds_a_fresh_response_allowance(self):
@@ -398,6 +448,48 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "continuations" / "01" / "output.json").read_bytes(),
             first_output,
         )
+
+    def test_next_continuation_refuses_rewritten_predecessor_allowance(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "rewritten-predecessor"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        first = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="findings",
+            assessment_scenario="address",
+            response_scenario="commit",
+        )
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(first.returncode, 0, first.stderr)
+        continuation = run / "continuations" / "01"
+        continuation_input = json.loads((continuation / "input.json").read_text())
+        continuation_input["additional_responses"] = 2
+        continuation_input["effective_max_responses"] = 2
+        self.write_json(continuation / "input.json", continuation_input)
+        continuation_state = json.loads((continuation / "state.json").read_text())
+        continuation_state["continuation"] = continuation_input
+        self.write_json(continuation / "state.json", continuation_state)
+
+        second = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+        )
+
+        self.assertEqual(second.returncode, 2)
+        self.assertIn("matching Iteration evidence", second.stderr)
+        self.assertFalse((run / "continuations" / "02").exists())
 
     def test_stopped_run_refuses_continuation_without_changing_terminal_evidence(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
@@ -484,6 +576,21 @@ class CoordinatorCliTest(unittest.TestCase):
                     "ADDITIONAL_RESPONSES must be a positive integer", result.stderr
                 )
                 self.assertFalse((self.root / "missing-run").exists())
+
+    def test_continuation_requires_an_existing_run(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        run = self.root / "missing-existing-run"
+
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+        )
+
+        self.assertEqual(continued.returncode, 2)
+        self.assertIn("existing Coordinator Run", continued.stderr)
+        self.assertFalse(run.exists())
 
     def test_restart_consumes_a_result_sealed_after_the_coordinator_crashed(self):
         assignment_path, request_path = self.prepare_run(max_responses=0)

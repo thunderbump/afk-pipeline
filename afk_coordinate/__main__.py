@@ -14,14 +14,13 @@ from afk_coordinate.contract import (
     validate_output,
     validate_request,
 )
-from afk_iterate.__main__ import decide as iteration_decision
-from afk_iterate.__main__ import validate_input as validate_iteration_input
-from afk_iterate.__main__ import verified_assessment
+from afk_iterate.__main__ import validate_sealed_result
 from afk_runtime import progress, repository_state, seal_json, write_json
 
 USAGE = (
     "usage: python3 -m afk_coordinate RUN_JSON RUN_DIRECTORY "
-    "[--abandon-active | --continue-exhausted ADDITIONAL_RESPONSES]"
+    "[--abandon-active | --continue-exhausted ADDITIONAL_RESPONSES "
+    "[--abandon-active]]"
 )
 
 HELP = f"""{USAGE}
@@ -41,15 +40,26 @@ def main():
     if len(sys.argv) == 2 and sys.argv[1] in ("-h", "--help"):
         print(HELP, end="")
         return 0
-    abandon_active = len(sys.argv) == 4 and sys.argv[3] == "--abandon-active"
-    continuing = len(sys.argv) == 5 and sys.argv[3] == "--continue-exhausted"
-    if not (len(sys.argv) == 3 or abandon_active or continuing):
+    if len(sys.argv) < 3:
+        print(USAGE, file=sys.stderr)
+        return 2
+    options = sys.argv[3:]
+    continuing = len(options) in {2, 3} and options[0] == "--continue-exhausted"
+    abandon_active = options == ["--abandon-active"] or (
+        continuing and len(options) == 3 and options[2] == "--abandon-active"
+    )
+    if not (
+        not options
+        or options == ["--abandon-active"]
+        or continuing
+        and (len(options) == 2 or abandon_active)
+    ):
         print(USAGE, file=sys.stderr)
         return 2
     additional_responses = None
     if continuing:
         try:
-            additional_responses = int(sys.argv[4])
+            additional_responses = int(options[1])
         except ValueError:
             raise ValueError(
                 "ADDITIONAL_RESPONSES must be a positive integer"
@@ -61,6 +71,8 @@ def main():
     run_directory = Path(sys.argv[2])
     progress("loading coordinator input")
     request = validate_request(read_json(request_path))
+    if continuing and not run_directory.exists():
+        raise ValueError("continuation requires an existing Coordinator Run")
     if abandon_active and not run_directory.exists():
         raise ValueError("there is no active invocation to abandon")
     if run_directory.exists():
@@ -184,29 +196,49 @@ def start_continuation(run_directory, request, state, additional_responses):
     continuation_root = run_directory / "continuations"
     continuation_directories = existing_continuations(continuation_root)
     prior_output = "../../output.json"
-    if continuation_directories:
-        latest_directory = continuation_directories[-1]
-        continuation_input = validate_continuation_input(
-            read_json(latest_directory / "input.json")
+    expected_max_responses = request["max_responses"]
+    for index, continuation_directory in enumerate(continuation_directories):
+        require_exhausted(
+            run_directory,
+            state,
+            expected_max_responses,
+            check_workspace=False,
         )
-        latest_state = validate_checkpoint(read_json(latest_directory / "state.json"))
-        if latest_state.get("continuation") != continuation_input:
-            raise ValueError("continuation input does not match its checkpoint")
-        if latest_state["status"] == "running":
+        continuation_input = validate_continuation(
+            read_json(continuation_directory / "input.json")
+        )
+        continuation_state = validate_checkpoint(
+            read_json(continuation_directory / "state.json")
+        )
+        validate_continuation_link(
+            state,
+            continuation_state,
+            continuation_input,
+            prior_output,
+        )
+        if continuation_state["status"] == "running":
+            if index != len(continuation_directories) - 1:
+                raise ValueError("continuation lineage has work after a running entry")
             if continuation_input["additional_responses"] != additional_responses:
                 raise ValueError(
                     "active continuation ADDITIONAL_RESPONSES does not match"
                 )
-            if (latest_directory / "output.json").exists():
+            if (continuation_directory / "output.json").exists():
                 raise ValueError("running continuation has terminal output")
             return continuation_runtime(
-                request, latest_state, latest_directory, continuation_input
+                request,
+                continuation_state,
+                continuation_directory,
+                continuation_input,
             )
-        validate_terminal_pair(latest_state, latest_directory / "output.json")
-        state = latest_state
-        prior_output = f"../{latest_directory.name}/output.json"
+        validate_terminal_pair(
+            continuation_state, continuation_directory / "output.json"
+        )
+        state = continuation_state
+        expected_max_responses = continuation_input["effective_max_responses"]
+        prior_output = f"../{continuation_directory.name}/output.json"
 
-    require_exhausted(run_directory, state)
+    require_exhausted(run_directory, state, expected_max_responses)
     completed_responses = sum(
         record["component"] == "response" and record["outcome"] == "completed"
         for record in state["history"]
@@ -267,8 +299,26 @@ def existing_continuations(root):
     return directories
 
 
-def validate_continuation_input(value):
-    return validate_continuation(value)
+def validate_continuation_link(
+    prior_state,
+    continuation_state,
+    continuation_input,
+    expected_prior_output,
+):
+    prior_history = prior_state["history"]
+    completed_responses = sum(
+        record["component"] == "response" and record["outcome"] == "completed"
+        for record in prior_history
+    )
+    if (
+        continuation_input["prior_output"] != expected_prior_output
+        or continuation_input["completed_responses"] != completed_responses
+        or continuation_state.get("continuation") != continuation_input
+        or continuation_state["history"][: len(prior_history)] != prior_history
+        or len(continuation_state["history"]) < len(prior_history)
+        or continuation_state["next_sequence"] < prior_state["next_sequence"]
+    ):
+        raise ValueError("continuation lineage does not match its predecessor")
 
 
 def validate_terminal_pair(state, output_path):
@@ -277,52 +327,35 @@ def validate_terminal_pair(state, output_path):
         raise ValueError("terminal output does not match coordinator checkpoint")
 
 
-def require_exhausted(run_directory, state):
+def require_exhausted(
+    run_directory,
+    state,
+    expected_max_responses,
+    check_workspace=True,
+):
     if state["status"] != "completed" or state["terminal"] != {"decision": "exhausted"}:
         raise ValueError("only an exhausted Coordinator Run can be continued")
     iteration = latest(state, "iteration")
     iteration_directory = run_directory / iteration["directory"]
-    iteration_input = validate_iteration_input(
-        read_json(iteration_directory / "input.json")
-    )
-    iteration_output = read_json(iteration_directory / "output.json")
-    if (
-        not isinstance(iteration_output, dict)
-        or set(iteration_output) != {"schema_version", "outcome", "policy"}
-        or iteration_output.get("schema_version") != 1
-        or iteration_output.get("outcome") != "completed"
-    ):
-        raise ValueError("exhausted continuation requires matching Iteration evidence")
-    policy = iteration_output["policy"]
-    assessment, lineage, _protected = verified_assessment(
-        Path(iteration_input["assessment_directory"])
-    )
-    assessment_output = read_json(
-        Path(iteration_input["assessment_directory"]) / "output.json"
-    )
-    assessed_state = subject_state(assessment_output["repository"]["after"])
-    if (
-        subject_state(repository_state(Path(lineage.assignment["workspace"])))
-        != assessed_state
-    ):
-        raise ValueError("workspace must match the assessed repository state")
-    completed = lineage.response_count
-    actionable_findings = sum(
-        decision["worth_addressing"] for decision in assessment["decisions"]
+    iteration_input, policy, lineage = validate_sealed_result(
+        read_json(iteration_directory / "input.json"),
+        read_json(iteration_directory / "output.json"),
     )
     if (
-        not isinstance(policy, dict)
-        or iteration_input.get("max_responses") != policy.get("max_responses")
-        or policy.get("completed_responses") != completed
-        or policy
-        != iteration_decision(
-            actionable_findings,
-            completed,
-            iteration_input.get("max_responses"),
-        )
+        policy["max_responses"] != expected_max_responses
         or policy["decision"] != "exhausted"
     ):
         raise ValueError("exhausted continuation requires matching Iteration evidence")
+    if check_workspace:
+        assessment_output = read_json(
+            Path(iteration_input["assessment_directory"]) / "output.json"
+        )
+        assessed_state = subject_state(assessment_output["repository"]["after"])
+        if (
+            subject_state(repository_state(Path(lineage.assignment["workspace"])))
+            != assessed_state
+        ):
+            raise ValueError("workspace must match the assessed repository state")
 
 
 def load_checkpoint(run_directory, request, assignment):

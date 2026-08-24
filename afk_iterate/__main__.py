@@ -33,20 +33,8 @@ def main():
     progress("loading iteration-policy input")
     policy_input = validate_input(read_json(input_path))
     progress("iteration-policy input accepted")
-    assessment_directory = Path(policy_input["assessment_directory"])
     progress("loading and verifying Finding Assessment evidence")
-    assessment, lineage, protected_directories = verified_assessment(
-        assessment_directory
-    )
-    completed_responses = lineage.response_count
-    actionable_findings = sum(
-        decision["worth_addressing"] for decision in assessment["decisions"]
-    )
-    policy = decide(
-        actionable_findings,
-        completed_responses,
-        policy_input["max_responses"],
-    )
+    policy, lineage, protected_directories = evaluate_policy(policy_input)
     validate_result_location(
         result_directory,
         Path(lineage.assignment["workspace"]),
@@ -61,6 +49,40 @@ def main():
     seal_json(output_path, output)
     progress(f"sealed completed iteration-policy outcome at {output_path}")
     return 0
+
+
+def evaluate_policy(policy_input):
+    """Verify one assessment lineage and derive its deterministic policy."""
+    assessment, lineage, protected_directories = verified_assessment(
+        Path(policy_input["assessment_directory"])
+    )
+    completed_responses = lineage.response_count
+    actionable_findings = sum(
+        decision["worth_addressing"] for decision in assessment["decisions"]
+    )
+    return (
+        decide(
+            actionable_findings,
+            completed_responses,
+            policy_input["max_responses"],
+        ),
+        lineage,
+        protected_directories,
+    )
+
+
+def validate_sealed_result(input_value, output_value):
+    """Validate a sealed Iteration result against its complete evidence chain."""
+    policy_input = validate_input(input_value)
+    policy, lineage, _protected = evaluate_policy(policy_input)
+    expected_output = {
+        "schema_version": 1,
+        "outcome": "completed",
+        "policy": policy,
+    }
+    if output_value != expected_output:
+        raise ValueError("invalid sealed Iteration result")
+    return policy_input, policy, lineage
 
 
 def validate_input(value):

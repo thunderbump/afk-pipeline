@@ -1004,6 +1004,17 @@ accepted allowance, effective limit, checkpoint, and terminal output under
 active continuation. A continuation that exhausts its allowance can receive a
 later additive allowance in the next numbered directory.
 
+If an active continuation worker is confirmed gone before sealing output, the
+caller can apply the same liveness assertion used by an original run:
+
+```sh
+python3 -m afk_coordinate run.json /existing/run-directory \
+  --continue-exhausted ADDITIONAL_RESPONSES --abandon-active
+```
+
+The accepted allowance must match the active continuation. Coordinator retains
+the orphaned invocation as `abandoned` and allocates a new numbered retry.
+
 Only a clean exhausted run can continue. Stopped and failed runs are immutable,
 and continuation refuses if the workspace no longer matches the repository
 state captured by the terminal Finding Assessment. This keeps manual repairs or
