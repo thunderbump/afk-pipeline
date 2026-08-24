@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from afk_complete.contract import load_result, validate_subject
+from afk_complete.contract import child_executor, load_result, validate_subject
 from afk_parent_review.evidence import validate_terminal_evidence
 from afk_plan.contract import (
     bounded_text,
@@ -115,7 +115,7 @@ def load_fan_in(request: dict[str, object]) -> dict[str, object]:
                 "local_id": child["local_id"],
                 "child_id": child_id,
                 "criteria": child["criteria"],
-                "execution": child["execution"],
+                "execution": child_executor(child),
                 "evidence_basis": output["evidence_basis"],
                 "satisfies_criteria": output["satisfies_criteria"],
                 "subject": output["record"]["subject"],

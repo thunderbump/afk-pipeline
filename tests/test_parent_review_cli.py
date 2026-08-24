@@ -47,6 +47,115 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         self.assertEqual(output["reviewer"]["model"], "gpt-5.6-luna")
         self.assertEqual(output["artifacts"]["input"], "input.json")
 
+    def test_accepts_published_v2_repository_check_fan_in(self):
+        self.request, self.plan = v2_repository_plan()
+        accepted = accept_plan(self.request, self.plan)
+        (self.acceptance / "input.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 2,
+                    "planner_input": self.request,
+                    "plan": self.plan,
+                }
+            )
+        )
+        accepted_output = acceptance_output(self.request, accepted)
+        accepted_output["schema_version"] = 2
+        accepted_output["policy"] = "contract-valid-capability-plan-v2"
+        (self.acceptance / "output.json").write_text(json.dumps(accepted_output))
+        (self.publication / "output.json").write_text(
+            json.dumps(publication_output(self.request, accepted))
+        )
+        check_directories = []
+        for index, child in enumerate(self.plan["children"], start=1):
+            child_id = f"central-child-{index}"
+            record = {
+                "schema_version": 1,
+                "child": child_id,
+                "parent_plan": self.plan["plan_sha256"],
+                "outcome": "satisfied",
+                "producer": {"kind": "repository_check", "identity": child["owner"]},
+                "criteria": child["criteria"],
+                "subject": {"commit": COMMIT},
+                "evidence": [f"repository-check:{child['local_id']}"],
+                "accepted_at": "2026-08-23T00:00:02Z",
+            }
+            completion = self.completions / child["local_id"]
+            (completion / "input.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "acceptance_directory": str(self.acceptance),
+                        "publication_directory": str(self.publication),
+                        "expected_subject": {"commit": COMMIT},
+                        "record": record,
+                    }
+                )
+            )
+            (completion / "output.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "outcome": "completed",
+                        "decision": "satisfied",
+                        "source": {"kind": "bead", "id": child_id},
+                        "started_at": "2026-08-23T00:00:00Z",
+                        "finished_at": "2026-08-23T00:00:01Z",
+                        "duration_seconds": 1,
+                        "acceptance_sha256": accepted["acceptance_sha256"],
+                        "plan_sha256": self.plan["plan_sha256"],
+                        "local_id": child["local_id"],
+                        "criteria": child["criteria"],
+                        "evidence_basis": "repository_check",
+                        "satisfies_criteria": True,
+                        "record": record,
+                        "error_category": None,
+                        "artifacts": {"input": "input.json"},
+                    }
+                )
+            )
+            check = self.root / f"repository-check-{index}"
+            check.mkdir()
+            state = {"head": COMMIT, "dirty": False, "status": []}
+            (check / "input.json").write_text(json.dumps({"schema_version": 1}))
+            (check / "output.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "outcome": "passed",
+                        "finished_at": "2026-08-23T00:00:01Z",
+                        "process": {"exit_code": 0, "signal": None, "error": None},
+                        "repository": {
+                            "head_changed": False,
+                            "before": state,
+                            "after": state,
+                        },
+                    }
+                )
+            )
+            check_directories.append(check)
+        request = self.input_value()
+        for completion, check in zip(
+            request["completions"], check_directories, strict=True
+        ):
+            completion["terminal"] = {
+                "kind": "repository_check",
+                "directory": str(check),
+            }
+
+        completed = self.invoke("accepted", request)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        fan_in = json.loads((self.result / "fan-in.json").read_text())
+        self.assertEqual(
+            [child["execution"] for child in fan_in["children"]],
+            ["caller_agent", "outside_help"],
+        )
+        self.assertEqual(
+            [child["terminal"]["status"] for child in fan_in["children"]],
+            ["passed", "passed"],
+        )
+
     def test_seals_incomplete_with_explicit_gap_and_follow_up(self):
         completed = self.invoke("incomplete")
 
@@ -479,6 +588,85 @@ def coordinator_history():
             "outcome": "completed",
         },
     ]
+
+
+def v2_repository_plan():
+    request = planner_input()
+    request["schema_version"] = 2
+    request["parent"]["acceptance_criteria"] = (
+        "The caller repository check passes. "
+        "The outside-helper repository check passes."
+    )
+    request["catalog"] = {
+        "schema_version": 2,
+        "projects": [
+            {
+                "slug": "example",
+                "routes": [
+                    {
+                        "owner": "Caller agent",
+                        "executor": "caller_agent",
+                        "evidence_route": "repository_check",
+                        "phases": ["implementation"],
+                    },
+                    {
+                        "owner": "Credential holder",
+                        "executor": "outside_help",
+                        "outside_help_reason": "missing_credentials",
+                        "evidence_route": "repository_check",
+                        "phases": ["closure"],
+                    },
+                ],
+            }
+        ],
+    }
+    request = validate_input(request)
+    return request, build_plan(
+        request,
+        {
+            "schema_version": 2,
+            "criteria": [
+                {
+                    "id": "criterion-1",
+                    "source_text": "The caller repository check passes.",
+                    "statement": "Pass the caller repository check.",
+                },
+                {
+                    "id": "criterion-2",
+                    "source_text": "The outside-helper repository check passes.",
+                    "statement": "Pass the outside-helper repository check.",
+                },
+            ],
+            "children": [
+                {
+                    "local_id": "implementation",
+                    "title": "Check the implementation repository",
+                    "objective": "Run the implementation repository check.",
+                    "criteria": ["criterion-1"],
+                    "project": "example",
+                    "owner": "Caller agent",
+                    "phase": "implementation",
+                    "executor": "caller_agent",
+                    "evidence_route": "repository_check",
+                    "depends_on": [],
+                },
+                {
+                    "local_id": "approval",
+                    "title": "Check the repository with outside help",
+                    "objective": "Obtain the outside repository check.",
+                    "criteria": ["criterion-2"],
+                    "project": "example",
+                    "owner": "Credential holder",
+                    "phase": "closure",
+                    "executor": "outside_help",
+                    "outside_help_reason": "missing_credentials",
+                    "evidence_route": "repository_check",
+                    "depends_on": ["implementation"],
+                },
+            ],
+            "ambiguities": [],
+        },
+    )
 
 
 def mixed_plan():

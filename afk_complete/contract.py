@@ -81,9 +81,10 @@ def validate_record(
     subject = validate_subject(record["subject"], "Completion Record subject")
     if subject != expected_subject:
         raise ValueError("Completion Record subject is stale")
+    executor = child_executor(child)
     required_subject = (
         set(child["handoff"]["subject_fields"])
-        if child["execution"] != "agent"
+        if "execution" in child and executor != "agent"
         else set(expected_subject)
     )
     if set(subject) != required_subject:
@@ -99,6 +100,12 @@ def validate_record(
     record["subject"] = subject
     satisfies = kind != "human_waiver"
     return record, kind, satisfies
+
+
+def child_executor(child: dict[str, object]) -> object:
+    """Resolve the execution value from an accepted v1 or v2 child."""
+    field = "execution" if "execution" in child else "executor"
+    return child[field]
 
 
 def validate_subject(value: object, name: str) -> dict[str, str]:
