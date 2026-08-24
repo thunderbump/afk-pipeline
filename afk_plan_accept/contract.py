@@ -95,7 +95,9 @@ def accept_direct(planner_input: object, routing: object) -> dict[str, object]:
                 if route["executor"] == "outside_help"
             }
             if len(reasons) != 1:
-                raise RoutingNeedsOutsideHelp("multiple_outside_capabilities")
+                raise ValueError(
+                    "direct outside_help routes must use one reason or decompose"
+                )
             raise RoutingNeedsOutsideHelp(reasons.pop())
         if "caller_agent" in executors:
             raise RoutingNeedsCallerAgent(

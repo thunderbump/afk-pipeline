@@ -509,6 +509,7 @@ def validate_prepared_routing(source, prepared):
         or policy_input
         != {"schema_version": 2, "planner_input": planner_input, "routing": routing}
         or policy_output.get("decision") != "direct"
+        or policy_output["acceptance"].get("routing") != policy_input["routing"]
     ):
         raise ExportError("invalid prepared Acceptance Routing evidence")
     expected = (

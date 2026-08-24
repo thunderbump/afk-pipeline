@@ -207,6 +207,26 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(publication["admission_outcome"], "accepted")
         self.assertFalse((artifact / "preflight-input.json").exists())
 
+    def test_capability_admission_rejects_incomplete_or_unbound_stage_evidence(self):
+        self.configure_acceptance_routing()
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(result.stdout)
+        planner_input = json.loads((artifact / "planner-input.json").read_text())
+        planner_output_path = artifact / "planner" / "output.json"
+        planner_output = json.loads(planner_output_path.read_text())
+        del planner_output["process"]
+        malformed = artifact / "malformed-planner.json"
+        malformed.write_text(json.dumps(planner_output))
+        self.assertIsNone(afk_run.planner_terminal(malformed, planner_input))
+
+        policy_input = json.loads((artifact / "policy-input.json").read_text())
+        policy_input["routing"]["routing_sha256"] = "0" * 64
+        self.assertIsNone(
+            afk_run.policy_terminal(
+                artifact / "policy" / "output.json", planner_input, policy_input
+            )
+        )
+
     def test_decomposed_capability_routing_stops_before_coordinator(self):
         self.configure_acceptance_routing()
         self.plan_scenario = "capability-run-decompose"
