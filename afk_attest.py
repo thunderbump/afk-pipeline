@@ -1,7 +1,9 @@
 """Caller-side human attestation and retry-safe child reconciliation."""
 
+import fcntl
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -47,6 +49,15 @@ def add_parser(subparsers):
 
 
 def attest(arguments):
+    lock_holder = []
+    try:
+        return _attest(arguments, lock_holder)
+    finally:
+        if lock_holder:
+            os.close(lock_holder.pop())
+
+
+def _attest(arguments, lock_holder):
     attempt = None
     started_at = None
     started = None
@@ -66,7 +77,13 @@ def attest(arguments):
                 print("Attestation declined; no result or Beads mutation was created.")
                 return 1
 
-        attempt, record = open_attempt(scope, arguments.evidence)
+        attempt_path, record = open_attempt(scope, arguments.evidence)
+        # Serialize reconciliation and result sealing for this deterministic
+        # attempt. A retry may begin after request initialization but cannot
+        # race the attachment, close, or terminal output of another caller.
+        descriptor = acquire_attempt_lock(attempt_path)
+        lock_holder.append(descriptor)
+        attempt = attempt_path
         started_at = timestamp()
         started = time.monotonic()
         adapter = Beads(scope["publisher_request"])
@@ -279,55 +296,71 @@ def open_attempt(scope, evidence):
             "existing attestation attempt conflicts with this approval"
         )
     attempt.mkdir(exist_ok=True)
-    request = None
-    if request_path.exists():
-        try:
-            request = json.loads(request_path.read_text())
-        except (OSError, json.JSONDecodeError):
-            # An interrupted initial write is safe to replace only while no later
-            # artifact can have relied on it.
-            if any(
-                path.name not in {"request.json", "request.json.tmp"}
-                for path in attempt.iterdir()
+    lock = acquire_attempt_lock(attempt)
+    try:
+        request = None
+        if request_path.exists():
+            try:
+                request = json.loads(request_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                # An interrupted initial write is safe to replace only while no
+                # later artifact can have relied on it.
+                if any(
+                    path.name not in {"request.json", "request.json.tmp"}
+                    for path in attempt.iterdir()
+                ):
+                    raise AttestationError(
+                        "existing attestation attempt has a corrupt request"
+                    )
+        if request is not None:
+            if (
+                not isinstance(request, dict)
+                or request.get("identity") != identity
+                or not isinstance(request.get("record"), dict)
             ):
-                raise AttestationError(
-                    "existing attestation attempt has a corrupt request"
-                )
-    if request is not None:
-        if (
-            not isinstance(request, dict)
-            or request.get("identity") != identity
-            or not isinstance(request.get("record"), dict)
-        ):
-            if any(
-                path.name not in {"request.json", "request.json.tmp"}
-                for path in attempt.iterdir()
-            ):
-                raise AttestationError(
-                    "existing attestation attempt conflicts with this approval"
-                )
-            request = None
-        else:
-            return attempt, request["record"]
-    child = scope["child"]
-    record = {
-        "schema_version": 1,
-        "child": scope["mapping"]["bead_id"],
-        "parent_plan": scope["acceptance"]["plan"]["plan_sha256"],
-        "outcome": "satisfied",
-        "producer": {
-            "kind": "human_attestation",
-            "identity": child["handoff"]["authority"],
-        },
-        "criteria": child["criteria"],
-        "subject": scope["subject"],
-        "evidence": evidence,
-        "accepted_at": timestamp(),
-    }
-    seal_json(
-        request_path, {"schema_version": 1, "identity": identity, "record": record}
-    )
-    return attempt, record
+                if any(
+                    path.name not in {"request.json", "request.json.tmp"}
+                    for path in attempt.iterdir()
+                ):
+                    raise AttestationError(
+                        "existing attestation attempt conflicts with this approval"
+                    )
+                request = None
+            else:
+                return attempt, request["record"]
+        child = scope["child"]
+        record = {
+            "schema_version": 1,
+            "child": scope["mapping"]["bead_id"],
+            "parent_plan": scope["acceptance"]["plan"]["plan_sha256"],
+            "outcome": "satisfied",
+            "producer": {
+                "kind": "human_attestation",
+                "identity": child["handoff"]["authority"],
+            },
+            "criteria": child["criteria"],
+            "subject": scope["subject"],
+            "evidence": evidence,
+            "accepted_at": timestamp(),
+        }
+        seal_json(
+            request_path,
+            {"schema_version": 1, "identity": identity, "record": record},
+        )
+        return attempt, record
+    finally:
+        os.close(lock)
+
+
+def acquire_attempt_lock(attempt):
+    """Exclusively lock an attempt without adding a mutable lock artifact."""
+    descriptor = os.open(attempt, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    except BaseException:
+        os.close(descriptor)
+        raise
+    return descriptor
 
 
 def reconcile(scope, record, attempt, adapter):

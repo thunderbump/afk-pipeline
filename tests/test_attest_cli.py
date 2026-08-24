@@ -1,6 +1,8 @@
 import json
 import os
 import subprocess
+import threading
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -67,7 +69,7 @@ class AttestCliTest(unittest.TestCase):
             check=False,
         )
 
-    def open_attempt(self):
+    def attestation_scope(self):
         arguments = SimpleNamespace(
             child_id=self.child_id,
             publication=self.publication,
@@ -75,8 +77,11 @@ class AttestCliTest(unittest.TestCase):
             evidence=["bead-comment:central-example#approval-1"],
             config=self.config,
         )
-        scope = afk_attest.load_scope(arguments)
-        return afk_attest.open_attempt(scope, arguments.evidence)[0]
+        return afk_attest.load_scope(arguments), arguments.evidence
+
+    def open_attempt(self):
+        scope, evidence = self.attestation_scope()
+        return afk_attest.open_attempt(scope, evidence)[0]
 
     def test_preview_and_decline_do_not_create_evidence_or_read_beads(self):
         before = self.state.read_text()
@@ -152,6 +157,58 @@ class AttestCliTest(unittest.TestCase):
         self.assertEqual(
             json.loads((attempt / "output.json").read_text())["decision"], "attested"
         )
+
+    def test_concurrent_initialization_reuses_the_exclusively_sealed_request(self):
+        scope, evidence = self.attestation_scope()
+        real_seal = afk_attest.seal_json
+        first_seal_started = threading.Event()
+        release_first_seal = threading.Event()
+        seal_count = 0
+        seal_count_lock = threading.Lock()
+        records = []
+        errors = []
+
+        def delayed_seal(path, value):
+            nonlocal seal_count
+            if path.name == "request.json":
+                with seal_count_lock:
+                    seal_count += 1
+                    current = seal_count
+                if current == 1:
+                    first_seal_started.set()
+                    release_first_seal.wait(timeout=2)
+            real_seal(path, value)
+
+        def initialize():
+            try:
+                records.append(afk_attest.open_attempt(scope, evidence)[1])
+            except (afk_attest.AttestationError, OSError, StopIteration) as error:
+                errors.append(error)
+
+        with (
+            mock.patch.object(afk_attest, "seal_json", side_effect=delayed_seal),
+            mock.patch.object(
+                afk_attest,
+                "timestamp",
+                side_effect=["2026-01-01T00:00:00Z", "2026-01-01T00:00:01Z"],
+            ),
+        ):
+            first = threading.Thread(target=initialize)
+            first.start()
+            self.assertTrue(first_seal_started.wait(timeout=2))
+            second = threading.Thread(target=initialize)
+            second.start()
+            time.sleep(0.1)
+            release_first_seal.set()
+            first.join(timeout=2)
+            second.join(timeout=2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0], records[1])
+        self.assertEqual(seal_count, 1)
 
     def test_retry_replaces_an_unsealed_completion_result(self):
         attempt = self.open_attempt()
