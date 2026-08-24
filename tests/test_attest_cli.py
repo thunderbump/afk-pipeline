@@ -88,7 +88,9 @@ class AttestCliTest(unittest.TestCase):
 
     def open_attempt(self):
         scope, evidence = self.attestation_scope()
-        return afk_attest.open_attempt(scope, evidence)[0]
+        attempt, _, descriptor = afk_attest.open_attempt(scope, evidence)
+        os.close(descriptor)
+        return attempt
 
     def test_preview_and_decline_do_not_create_evidence_or_read_beads(self):
         before = self.state.read_text()
@@ -243,7 +245,9 @@ class AttestCliTest(unittest.TestCase):
         second_entered = threading.Event()
         results = []
 
-        def observe_reconciliation(_scope, record, _attempt, _adapter):
+        def observe_reconciliation(
+            _scope, record, _attempt, _attempt_descriptor, _adapter
+        ):
             if record["evidence"] == first_arguments.evidence:
                 first_entered.set()
                 release_first.wait(timeout=2)
@@ -356,6 +360,18 @@ class AttestCliTest(unittest.TestCase):
         completed = self.invoke("--accept")
 
         self.assertEqual(completed.returncode, 2)
+        self.assertEqual(outside.read_text(), "untouched")
+
+    def test_nested_artifact_hard_link_cannot_redirect_durable_output(self):
+        attempt = self.open_attempt()
+        (attempt / "request.json").unlink()
+        outside = self.root / "outside.json"
+        outside.write_text("untouched")
+        os.link(outside, attempt / "request.json.tmp")
+
+        completed = self.invoke("--accept")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertEqual(outside.read_text(), "untouched")
 
     def test_lost_close_response_reconciles_observed_success(self):
