@@ -640,6 +640,7 @@ def load_source(
             if isinstance(value, str) and value.startswith("/")
         },
         "acceptance_routing": acceptance_routing,
+        "preparation": preparation,
     }
 
 

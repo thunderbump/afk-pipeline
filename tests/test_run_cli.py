@@ -495,6 +495,18 @@ class RunPreparerCliTest(unittest.TestCase):
                         afk_run.policy_terminal(malformed, planner_input, policy_input)
                     )
 
+    def test_null_inference_roles_is_rejected_before_run_creation(self):
+        config = json.loads(self.config.read_text())
+        config["inference_roles"] = None
+        self.config.write_text(json.dumps(config))
+
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("inference_roles contains an invalid role", result.stderr)
+        self.assertFalse((self.root / "runs").exists())
+        self.assertFalse((self.root / "worktrees").exists())
+
     def test_validation_evidence_is_required_before_run_creation(self):
         config = json.loads(self.config.read_text())
         config["projects"]["fixture"]["validation"].pop("evidence")

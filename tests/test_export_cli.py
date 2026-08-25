@@ -110,6 +110,53 @@ class ExportCliTests(unittest.TestCase):
             }
             self.assertEqual(first_files, second_files)
 
+    def test_completed_prepared_exports_retain_all_frozen_inference_roles(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            roles = {
+                "acceptance_planner": {
+                    "model": "planner-frozen",
+                    "thinking": "high",
+                },
+                "review": {"model": "review-frozen", "thinking": "low"},
+                "finding_assessment": {
+                    "model": "assessment-frozen",
+                    "thinking": "minimal",
+                },
+                "feedback_response": {
+                    "model": "response-frozen",
+                    "thinking": "xhigh",
+                },
+            }
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preparation["inference_roles"] = roles
+            preparation_path.write_text(json.dumps(preparation))
+            coordinator_roles = {
+                role: roles[role]
+                for role in ("review", "finding_assessment", "feedback_response")
+            }
+            for request_path in (
+                source / "coordinator-request.json",
+                source / "coordinator" / "input.json",
+            ):
+                request = json.loads(request_path.read_text())
+                request["inference_roles"] = coordinator_roles
+                request_path.write_text(json.dumps(request))
+
+            for schema_version in (1, 2):
+                with self.subTest(schema_version=schema_version):
+                    destination = root / f"bundle-v{schema_version}"
+                    result = (
+                        self.export_v1(source, destination)
+                        if schema_version == 1
+                        else self.export_v2(source, destination)
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    record = json.loads((destination / "workflow-run.json").read_text())
+                    self.assertEqual(record["inference_roles"], roles)
+
     def test_exports_a_direct_coordinator_with_explicit_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

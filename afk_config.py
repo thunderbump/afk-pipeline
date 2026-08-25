@@ -9,11 +9,12 @@ INFERENCE_ROLE_DEFAULTS = {
     "feedback_response": {"model": "gpt-5.6-sol", "thinking": "medium"},
 }
 SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
+_MISSING = object()
 
 
-def effective_inference_roles(value=None):
+def effective_inference_roles(value=_MISSING):
     """Validate configured role overrides and return a complete frozen mapping."""
-    if value is None:
+    if value is _MISSING:
         value = {}
     if not isinstance(value, dict) or not set(value) <= set(INFERENCE_ROLE_DEFAULTS):
         raise ValueError("configuration inference_roles contains an invalid role")

@@ -29,6 +29,7 @@ class InferenceRoleConfigurationTest(unittest.TestCase):
 
     def test_invalid_roles_models_and_thinking_are_rejected(self):
         invalid = (
+            None,
             {"planner": {"model": "model"}},
             {"review": {"model": ""}},
             {"review": {"thinking": "extreme"}},

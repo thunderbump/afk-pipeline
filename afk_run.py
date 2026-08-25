@@ -944,8 +944,10 @@ def load_config(path):
             f"configured central Beads workspace {value['beads_workspace']} is unavailable"
         )
     try:
-        value["inference_roles"] = effective_inference_roles(
-            value.get("inference_roles")
+        value["inference_roles"] = (
+            effective_inference_roles(value["inference_roles"])
+            if "inference_roles" in value
+            else effective_inference_roles()
         )
     except ValueError as error:
         raise PreparationError(str(error)) from error
