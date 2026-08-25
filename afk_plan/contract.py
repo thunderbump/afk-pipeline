@@ -680,6 +680,7 @@ def validate_planner_output(planner_input: object, value: object) -> dict[str, o
         },
         "Planner output",
     )
+    planner_model = request.get("inference", {"model": "gpt-5.6-luna"})["model"]
     if (
         output["schema_version"] != 1
         or output["outcome"] != "completed"
@@ -690,7 +691,7 @@ def validate_planner_output(planner_input: object, value: object) -> dict[str, o
         != {
             "kind": "inference",
             "provider": "openai-codex",
-            "model": "gpt-5.6-luna",
+            "model": planner_model,
             "status": "completed",
         }
         or output["error_category"] is not None

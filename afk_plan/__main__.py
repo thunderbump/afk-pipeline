@@ -134,7 +134,7 @@ def main() -> int:
         "planner": {
             "kind": "inference",
             "provider": "openai-codex",
-            "model": MODEL,
+            "model": inference["model"],
             "status": outcome,
         },
         "routing": routing,

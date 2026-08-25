@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from afk_plan.contract import validate_planner_output
+
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
@@ -67,6 +69,24 @@ class PlanCliTest(unittest.TestCase):
         )
         self.assertTrue((self.result / "events.jsonl").stat().st_size > 0)
         self.assertFalse((self.result / "output.json.tmp").exists())
+
+    def test_seals_and_validates_the_frozen_nondefault_planner_model(self):
+        self.request["inference"] = {
+            "model": "gpt-5.6-terra",
+            "thinking": "medium",
+        }
+
+        completed = self.invoke("valid")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((self.result / "output.json").read_text())
+        self.assertEqual(output["planner"]["model"], "gpt-5.6-terra")
+        self.assertEqual(validate_planner_output(self.request, output), output)
+
+        mismatched_input = {**self.request, "inference": {**self.request["inference"]}}
+        mismatched_input["inference"]["model"] = "gpt-5.6-luna"
+        with self.assertRaises(ValueError):
+            validate_planner_output(mismatched_input, output)
 
     def test_seals_capability_oriented_direct_routing(self):
         self.request["schema_version"] = 2
