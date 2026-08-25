@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime, timedelta
 
-from afk_config import validate_inference_setting
+from afk_config import INFERENCE_ROLE_DEFAULTS, validate_inference_setting
 
 MAX_TEXT = 32 * 1024
 MAX_CRITERIA = 128
@@ -680,7 +680,9 @@ def validate_planner_output(planner_input: object, value: object) -> dict[str, o
         },
         "Planner output",
     )
-    planner_model = request.get("inference", {"model": "gpt-5.6-luna"})["model"]
+    planner_model = request.get(
+        "inference", INFERENCE_ROLE_DEFAULTS["acceptance_planner"]
+    )["model"]
     if (
         output["schema_version"] != 1
         or output["outcome"] != "completed"

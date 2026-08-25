@@ -151,7 +151,7 @@ def continue_run(source, additional_responses, config_path, abandon_active=False
         )
         return 2
     try:
-        config = load_config(config_path)
+        config = load_config(config_path, include_inference_roles=False)
         if config.get("publication") is None:
             raise PreparationError("continuation publication is not configured")
         source = source.absolute().resolve(strict=True)
@@ -891,7 +891,7 @@ def admission_terminal(stdout, exit_code, expected_identity):
     return None, "admission_protocol"
 
 
-def load_config(path):
+def load_config(path, *, include_inference_roles=True):
     try:
         value = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
@@ -912,23 +912,11 @@ def load_config(path):
         raise PreparationError(
             "configuration classification_store is retired; use acceptance_routing"
         )
+    optional = {"publication", "attestation", "inference_roles"}
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != 1
-        or frozenset(value)
-        not in {
-            frozenset(capability | optional)
-            for optional in (
-                set(),
-                {"publication"},
-                {"attestation"},
-                {"inference_roles"},
-                {"publication", "attestation"},
-                {"publication", "inference_roles"},
-                {"attestation", "inference_roles"},
-                {"publication", "attestation", "inference_roles"},
-            )
-        }
+        or not capability <= set(value) <= capability | optional
     ):
         raise PreparationError(
             f"configuration {path} is malformed (expected schema_version 1)"
@@ -943,14 +931,19 @@ def load_config(path):
         raise PreparationError(
             f"configured central Beads workspace {value['beads_workspace']} is unavailable"
         )
-    try:
-        value["inference_roles"] = (
-            effective_inference_roles(value["inference_roles"])
-            if "inference_roles" in value
-            else effective_inference_roles()
-        )
-    except ValueError as error:
-        raise PreparationError(str(error)) from error
+    if include_inference_roles:
+        try:
+            value["inference_roles"] = (
+                effective_inference_roles(value["inference_roles"])
+                if "inference_roles" in value
+                else effective_inference_roles()
+            )
+        except ValueError as error:
+            raise PreparationError(str(error)) from error
+    else:
+        # Continuation consumes the role settings frozen in Coordinator input.
+        # Later operator edits must not change or block that immutable request.
+        value.pop("inference_roles", None)
     validate_acceptance_routing(value["acceptance_routing"])
     validate_assignment_defaults(value["assignment"])
     validate_coordinator(value["coordinator"])

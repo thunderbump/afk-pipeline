@@ -7,6 +7,7 @@ from pathlib import Path
 from afk_agent import agent_response, write_pi_command
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
+from afk_config import INFERENCE_ROLE_DEFAULTS
 from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
 from afk_runtime import (
@@ -57,7 +58,7 @@ def main() -> int:
     command_prefix = None
     if selected:
         inference = response_input.get(
-            "inference", {"model": "gpt-5.6-sol", "thinking": "medium"}
+            "inference", INFERENCE_ROLE_DEFAULTS["feedback_response"]
         )
         command_prefix = write_pi_command(
             "AFK_RESPOND_AGENT_COMMAND",

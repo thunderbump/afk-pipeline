@@ -7,7 +7,7 @@ from pathlib import Path
 from afk_agent import agent_response, read_only_pi_command
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
-from afk_config import validate_inference_setting
+from afk_config import INFERENCE_ROLE_DEFAULTS, validate_inference_setting
 from afk_review.contract import validate_review
 from afk_runtime import (
     process_result,
@@ -45,7 +45,7 @@ def main() -> int:
     assessment_input = json.loads(input_path.read_text())
     validate_input(assessment_input)
     inference = assessment_input.get(
-        "inference", {"model": "gpt-5.6-sol", "thinking": "medium"}
+        "inference", INFERENCE_ROLE_DEFAULTS["finding_assessment"]
     )
     command_prefix = read_only_pi_command(
         "AFK_ASSESS_AGENT_COMMAND",

@@ -77,6 +77,30 @@ class ContinuationPublicationTest(unittest.TestCase):
                     (self.coordinator / "output.json").read_bytes(), b"original-output"
                 )
 
+    def test_continuation_uses_frozen_roles_not_mutable_config_roles(self):
+        before = self.observed("exhausted", [])
+        after = self.observed("stop", [self.continuation])
+
+        def load_config(path, *, include_inference_roles=True):
+            self.assertFalse(include_inference_roles)
+            return self.config
+
+        with (
+            mock.patch("afk_run.load_config", side_effect=load_config),
+            mock.patch("afk_export.load_source", side_effect=[before, after]),
+            mock.patch("afk_run.subprocess.run") as coordinator,
+            mock.patch(
+                "afk_run.publish_terminal_run",
+                return_value={"status": "succeeded"},
+            ),
+        ):
+            coordinator.return_value.returncode = 0
+            code = afk_run.continue_run(
+                self.source, 1, self.source / "mutable-config.json"
+            )
+
+        self.assertEqual(code, 0)
+
     def test_resumed_continuation_failure_publishes_same_directory(self):
         running = self.observed("exhausted", [self.continuation])
         failed = self.observed(None, [self.continuation])
@@ -506,6 +530,15 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("inference_roles contains an invalid role", result.stderr)
         self.assertFalse((self.root / "runs").exists())
         self.assertFalse((self.root / "worktrees").exists())
+
+    def test_continuation_config_ignores_changed_inference_roles(self):
+        config = json.loads(self.config.read_text())
+        config["inference_roles"] = None
+        self.config.write_text(json.dumps(config))
+
+        loaded = afk_run.load_config(self.config, include_inference_roles=False)
+
+        self.assertNotIn("inference_roles", loaded)
 
     def test_validation_evidence_is_required_before_run_creation(self):
         config = json.loads(self.config.read_text())
