@@ -5,13 +5,29 @@ import os
 from pathlib import Path
 
 
-def read_only_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
-    return pi_command(configuration_name, system_prompt, "read,grep,find,ls")
-
-
-def write_pi_command(configuration_name: str, system_prompt: str) -> list[str]:
+def read_only_pi_command(
+    configuration_name: str,
+    system_prompt: str,
+    model: str = "gpt-5.6-sol",
+    thinking: str = "medium",
+) -> list[str]:
     return pi_command(
-        configuration_name, system_prompt, "read,bash,edit,write,grep,find,ls"
+        configuration_name, system_prompt, "read,grep,find,ls", model, thinking
+    )
+
+
+def write_pi_command(
+    configuration_name: str,
+    system_prompt: str,
+    model: str = "gpt-5.6-sol",
+    thinking: str = "medium",
+) -> list[str]:
+    return pi_command(
+        configuration_name,
+        system_prompt,
+        "read,bash,edit,write,grep,find,ls",
+        model,
+        thinking,
     )
 
 

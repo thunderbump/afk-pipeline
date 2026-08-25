@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from afk_config import attestation_result_root
+from afk_config import attestation_result_root, effective_inference_roles
 from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_plan.contract import validate_catalog, validate_planner_output
 from afk_plan.contract import validate_input as validate_planner_input
@@ -317,9 +317,16 @@ def run(bead_id, config_path):
                 "timeout_seconds": project["validation"]["timeout_seconds"],
             },
             **config["coordinator"],
+            "inference_roles": {
+                role: config["inference_roles"][role]
+                for role in ("review", "finding_assessment", "feedback_response")
+            },
         }
         planner_request = acceptance_routing_request(
-            bead_id, bead, config["acceptance_routing"]
+            bead_id,
+            bead,
+            config["acceptance_routing"],
+            config["inference_roles"]["acceptance_planner"],
         )
         started = timestamp()
         preparation = {
@@ -327,6 +334,7 @@ def run(bead_id, config_path):
             "run": {"id": run_id, "artifact_root": str(artifact)},
             "bead": {"id": bead_id},
             "project": {"slug": project_slug},
+            "inference_roles": config["inference_roles"],
             "repository": {
                 "path": str(repository),
                 "base_ref": project["base_ref"],
@@ -914,7 +922,11 @@ def load_config(path):
                 set(),
                 {"publication"},
                 {"attestation"},
+                {"inference_roles"},
                 {"publication", "attestation"},
+                {"publication", "inference_roles"},
+                {"attestation", "inference_roles"},
+                {"publication", "attestation", "inference_roles"},
             )
         }
     ):
@@ -931,6 +943,12 @@ def load_config(path):
         raise PreparationError(
             f"configured central Beads workspace {value['beads_workspace']} is unavailable"
         )
+    try:
+        value["inference_roles"] = effective_inference_roles(
+            value.get("inference_roles")
+        )
+    except ValueError as error:
+        raise PreparationError(str(error)) from error
     validate_acceptance_routing(value["acceptance_routing"])
     validate_assignment_defaults(value["assignment"])
     validate_coordinator(value["coordinator"])
@@ -1200,7 +1218,7 @@ def safe_bead(bead_id, bead):
     return result
 
 
-def acceptance_routing_request(bead_id, bead, routing):
+def acceptance_routing_request(bead_id, bead, routing, inference=None):
     """Freeze the exact capability catalog and source fields used for admission."""
     try:
         return validate_planner_input(
@@ -1215,6 +1233,7 @@ def acceptance_routing_request(bead_id, bead, routing):
                 },
                 "catalog": routing["catalog"],
                 "timeout_seconds": routing["timeout_seconds"],
+                **({"inference": inference} if inference is not None else {}),
             }
         )
     except (TypeError, ValueError) as error:

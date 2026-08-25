@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
+from afk_config import INFERENCE_ROLE_DEFAULTS, effective_inference_roles
 from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
@@ -283,8 +284,12 @@ def load_source_v2(
         "coordinator",
         "errors",
     }
-    if not isinstance(preparation, dict) or set(preparation) != required:
+    if not isinstance(preparation, dict) or set(preparation) not in (
+        required,
+        required | {"inference_roles"},
+    ):
         raise ExportError("invalid paused Run Preparer evidence")
+    validate_prepared_inference_roles(preparation)
     if preparation.get("schema_version") != 1 or preparation.get("errors") != []:
         raise ExportError("invalid paused Run Preparer evidence")
     run, project_record, bead = (
@@ -386,11 +391,12 @@ def load_terminal_routing(
     }
     if (
         not isinstance(preparation, dict)
-        or set(preparation) != expected
+        or set(preparation) not in (expected, expected | {"inference_roles"})
         or preparation.get("schema_version") != 1
         or preparation.get("errors") != []
     ):
         raise ExportError("invalid terminal Acceptance Routing preparation")
+    validate_prepared_inference_roles(preparation)
     run, project_record, bead = (
         preparation.get("run"),
         preparation.get("project"),
@@ -694,6 +700,18 @@ def load_continuation_lineage(
     return state, output, terminal_directory, observed
 
 
+def validate_prepared_inference_roles(value):
+    if "inference_roles" not in value:
+        return
+    roles = value["inference_roles"]
+    try:
+        effective = effective_inference_roles(roles)
+    except ValueError as error:
+        raise ExportError("invalid prepared inference roles") from error
+    if set(roles) != set(INFERENCE_ROLE_DEFAULTS) or roles != effective:
+        raise ExportError("invalid prepared inference roles")
+
+
 def validate_preparation(source, value):
     expected = {
         "schema_version",
@@ -713,10 +731,14 @@ def validate_preparation(source, value):
             frozenset(expected),
             frozenset(expected | {"preflight"}),
             frozenset(expected | {"routing"}),
+            frozenset(expected | {"inference_roles"}),
+            frozenset(expected | {"preflight", "inference_roles"}),
+            frozenset(expected | {"routing", "inference_roles"}),
         }
         or value.get("schema_version") != 1
     ):
         raise ExportError("invalid Run Preparer evidence")
+    validate_prepared_inference_roles(value)
     if value["preparation_status"] != "prepared" or value["errors"] != []:
         raise ExportError("Run Preparer did not seal a prepared Run")
     run = value["run"]
@@ -876,6 +898,11 @@ def normalize_run_v2(observed):
                 observed["assignment"]["objective"], observed["redactions"]
             ),
             "response_limit": observed["request"]["max_responses"],
+            **(
+                {"inference_roles": observed["preparation"]["inference_roles"]}
+                if "inference_roles" in observed["preparation"]
+                else {}
+            ),
             "status": (
                 observed["preparation"]["preparation_status"] if routing else "paused"
             ),
@@ -1431,6 +1458,22 @@ def normalize_run(observed, include_evidence=True):
             observed["assignment"]["objective"], observed["redactions"]
         ),
         "response_limit": observed["request"]["max_responses"],
+        **(
+            {
+                "inference_roles": (
+                    observed["preparation"]["inference_roles"]
+                    if observed.get("preparation") is not None
+                    and "inference_roles" in observed["preparation"]
+                    else observed["request"]["inference_roles"]
+                )
+            }
+            if (
+                observed.get("preparation") is not None
+                and "inference_roles" in observed["preparation"]
+            )
+            or "inference_roles" in observed["request"]
+            else {}
+        ),
         "status": state["status"],
         "terminal": state["terminal"],
         "history": history,

@@ -5,6 +5,8 @@ import json
 import re
 from datetime import datetime, timedelta
 
+from afk_config import validate_inference_setting
+
 MAX_TEXT = 32 * 1024
 MAX_CRITERIA = 128
 MAX_CHILDREN = 64
@@ -30,9 +32,14 @@ PHASES = {"implementation", "closure"}
 
 
 def validate_input(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError("input must be an object")
+    expected = {"schema_version", "parent", "catalog", "timeout_seconds"}
     request = object_with_keys(
-        value, {"schema_version", "parent", "catalog", "timeout_seconds"}, "input"
+        value, expected | ({"inference"} if "inference" in value else set()), "input"
     )
+    if "inference" in request:
+        request["inference"] = validate_inference_setting(request["inference"])
     if request["schema_version"] not in {1, 2}:
         raise ValueError("input schema_version must be 1 or 2")
     timeout = request["timeout_seconds"]

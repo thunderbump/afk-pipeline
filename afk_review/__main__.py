@@ -6,6 +6,7 @@ from pathlib import Path
 
 from afk_agent import agent_response, read_only_pi_command
 from afk_change.contract import validate_change_output, validate_git_transition
+from afk_config import validate_inference_setting
 from afk_review.contract import validate_review
 from afk_runtime import (
     git,
@@ -43,9 +44,14 @@ def main() -> int:
     progress("loading review input")
     review_input = json.loads(input_path.read_text())
     validate_input(review_input)
+    inference = review_input.get(
+        "inference", {"model": "gpt-5.6-sol", "thinking": "medium"}
+    )
     command_prefix = read_only_pi_command(
         "AFK_REVIEW_AGENT_COMMAND",
         "You are a read-only implementation reviewer. Inspect only the prepared workspace and the named diff and evidence paths. Your response must satisfy the JSON contract in the user prompt.",
+        inference["model"],
+        inference["thinking"],
     )
     progress("review input accepted")
 
@@ -152,6 +158,8 @@ def validate_input(value: object) -> None:
         path = value.get(field)
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError(f"review {field} must be an absolute path")
+    if "inference" in value:
+        validate_inference_setting(value["inference"])
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("review timeout_seconds must be a positive integer")

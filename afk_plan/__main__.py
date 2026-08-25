@@ -63,7 +63,13 @@ def main() -> int:
     system_prompt = (
         SYSTEM_PROMPT if request["schema_version"] == 1 else CAPABILITY_SYSTEM_PROMPT
     )
-    command = no_tool_pi_command("AFK_PLAN_AGENT_COMMAND", system_prompt, MODEL, "low")
+    inference = request.get("inference", {"model": MODEL, "thinking": "low"})
+    command = no_tool_pi_command(
+        "AFK_PLAN_AGENT_COMMAND",
+        system_prompt,
+        inference["model"],
+        inference["thinking"],
+    )
     progress("Acceptance Planner input accepted")
 
     result_directory.mkdir()
@@ -75,7 +81,9 @@ def main() -> int:
     started_at = timestamp()
     started = time.monotonic()
     progress(
-        f"starting Acceptance Planner (model={MODEL}; timeout={request['timeout_seconds']}s)"
+        "starting Acceptance Planner "
+        f"(model={inference['model']}; thinking={inference['thinking']}; "
+        f"timeout={request['timeout_seconds']}s)"
     )
     execution = run_command(
         [*command, prompt(request)],

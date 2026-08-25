@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from afk_config import validate_inference_setting
+
 # These are the topology facts needed to prove that terminal history could have
 # been produced by the Coordinator. Runtime module selection and input building
 # deliberately remain in the CLI.
@@ -53,6 +55,8 @@ def validate_request(value):
         "agent_timeout_seconds",
         "max_responses",
     }
+    if isinstance(value, dict) and "inference_roles" in value:
+        expected.add("inference_roles")
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("coordinator input must use schema_version 1")
     if set(value) != expected:
@@ -75,6 +79,13 @@ def validate_request(value):
         raise ValueError("validation command must be a nonempty argv array")
     positive_integer(value["validation"]["timeout_seconds"], "validation timeout")
     positive_integer(value["agent_timeout_seconds"], "agent timeout")
+    roles = value.get("inference_roles")
+    if roles is not None:
+        expected_roles = {"review", "finding_assessment", "feedback_response"}
+        if not isinstance(roles, dict) or set(roles) != expected_roles:
+            raise ValueError("coordinator inference_roles is malformed")
+        for setting in roles.values():
+            validate_inference_setting(setting)
     limit = value["max_responses"]
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
         raise ValueError("max_responses must be a nonnegative integer")

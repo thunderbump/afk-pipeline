@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from afk_config import validate_inference_setting
+
 
 def validate_input(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -10,6 +12,8 @@ def validate_input(value: object) -> dict[str, object]:
         path = value.get(field)
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError(f"feedback response {field} must be an absolute path")
+    if "inference" in value:
+        validate_inference_setting(value["inference"])
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("feedback response timeout_seconds must be a positive integer")

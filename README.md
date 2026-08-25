@@ -386,6 +386,13 @@ Planner input/output and deterministic Policy input/output in the Run root.
 rejects the retired `classification_store` field. Historical v1 Run and
 Preflight evidence remains readable through the exporter and Operations WebUI.
 
+Inference roles can be selected without rebuilding adapter commands. For example,
+`"inference_roles": {"review": {"model": "gpt-5.6-terra", "thinking": "low"}}`
+changes only Review; omitted roles and fields keep their defaults. The preparer
+freezes all four effective settings in Run evidence. Exact-argv `AFK_*_AGENT_COMMAND`
+environment overrides still take precedence, and `assignment.command` remains the
+implementation-worker seam.
+
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace. Run admission requires the Bead to have exactly one
 `ready-for-agent` label and no `ready-for-human` label. Missing, duplicate, or

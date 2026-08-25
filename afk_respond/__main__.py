@@ -56,9 +56,14 @@ def main() -> int:
     selected = actionable_findings(review, assessment)
     command_prefix = None
     if selected:
+        inference = response_input.get(
+            "inference", {"model": "gpt-5.6-sol", "thinking": "medium"}
+        )
         command_prefix = write_pi_command(
             "AFK_RESPOND_AGENT_COMMAND",
             "You are an implementation feedback responder. Modify only the prepared workspace to address the actionable assessed findings in the user prompt, create a clean Git commit, and return the required JSON response. Do not address dismissed findings, run external orchestration, or publish feedback.",
+            inference["model"],
+            inference["thinking"],
         )
 
     progress("preparing feedback-response result directory")
