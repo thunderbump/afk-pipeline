@@ -135,7 +135,10 @@ def agent_response(events_path: Path) -> dict[str, object]:
             if message["role"] == "assistant":
                 if retry_completed:
                     return error("conflicting terminal assistant messages")
-                terminal_message = message
+                if message["stopReason"] != "toolUse":
+                    if terminal_message is not None:
+                        return error("conflicting terminal assistant messages")
+                    terminal_message = message
             continue
 
         if event_type == "auto_retry_end":

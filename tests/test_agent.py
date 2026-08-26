@@ -110,14 +110,19 @@ class AgentResponseRetryTest(unittest.TestCase):
                 self.assertEqual(self.interpret(events)["agent"]["status"], "error")
 
     def test_conflicting_terminal_messages_fail_closed(self):
-        events = self.successful_retry()
-        final_end = next(
-            index
-            for index, event in enumerate(events)
-            if event.get("type") == "agent_end" and event.get("willRetry") is False
-        )
-        events.insert(final_end, self.message("stop", "conflicting answer"))
-        self.assertEqual(self.interpret(events)["agent"]["status"], "error")
+        for following_type in ("auto_retry_end", "agent_end"):
+            with self.subTest(following_type=following_type):
+                events = self.successful_retry()
+                insertion = next(
+                    index
+                    for index, event in enumerate(events)
+                    if event.get("type") == following_type
+                    and (
+                        following_type != "agent_end" or event.get("willRetry") is False
+                    )
+                )
+                events.insert(insertion, self.message("stop", "conflicting answer"))
+                self.assertEqual(self.interpret(events)["agent"]["status"], "error")
 
     def test_export_summary_recognizes_retry_events(self):
         counts = event_counts(
