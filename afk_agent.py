@@ -1,8 +1,13 @@
 """Interpret the durable JSON event protocol emitted by AFK agent adapters."""
 
 import json
+import math
 import os
 from pathlib import Path
+
+# Pi defaults to three model retries. Keep interpretation bounded even when an
+# untrusted event stream advertises a larger maximum.
+MAX_AUTO_RETRIES = 3
 
 
 def read_only_pi_command(
@@ -81,8 +86,11 @@ def pi_command(
 
 
 def agent_response(events_path: Path) -> dict[str, object]:
-    saw_end = False
+    state = "segment"
+    saw_final_end = False
     saw_settled = False
+    retry_count = 0
+    retry_completed = False
     terminal_message = None
     try:
         lines = events_path.read_bytes().decode("utf-8").splitlines()
@@ -95,41 +103,81 @@ def agent_response(events_path: Path) -> dict[str, object]:
             return error("invalid agent event JSON")
         if not isinstance(event, dict):
             return error("invalid agent event JSON")
-        if saw_end:
-            if event.get("type") != "agent_settled" or saw_settled:
+        event_type = event.get("type")
+
+        if saw_final_end:
+            if event_type != "agent_settled" or saw_settled:
                 return error("events follow agent_end")
             saw_settled = True
             continue
-        if event.get("type") == "agent_settled":
+        if event_type == "agent_settled":
             return error("agent_settled precedes agent_end")
-        if event.get("type") == "message_end":
-            message = event.get("message")
-            if not isinstance(message, dict) or not isinstance(
-                message.get("role"), str
+
+        if state == "retry_start":
+            if event_type != "auto_retry_start" or not valid_retry_start(
+                event, retry_count
             ):
+                return error("invalid auto-retry event sequence")
+            state = "agent_start"
+            continue
+        if state == "agent_start":
+            if event_type != "agent_start":
+                return error("invalid auto-retry event sequence")
+            state = "segment"
+            continue
+        if event_type == "auto_retry_start":
+            return error("invalid auto-retry event sequence")
+
+        if event_type == "message_end":
+            message = event.get("message")
+            if not valid_message(message):
                 return error("invalid agent event JSON")
             if message["role"] == "assistant":
-                stop_reason = message.get("stopReason")
-                content = message.get("content", [])
-                if not isinstance(stop_reason, str) or not isinstance(content, list):
-                    return error("invalid agent event JSON")
-                for part in content:
-                    if not isinstance(part, dict) or not isinstance(
-                        part.get("type"), str
-                    ):
-                        return error("invalid agent event JSON")
-                    if part["type"] == "text" and not isinstance(part.get("text"), str):
-                        return error("invalid agent event JSON")
-                if (
-                    stop_reason == "error"
-                    and "errorMessage" in message
-                    and not isinstance(message["errorMessage"], str)
-                ):
-                    return error("invalid agent event JSON")
+                if retry_completed:
+                    return error("conflicting terminal assistant messages")
                 terminal_message = message
-        if event.get("type") == "agent_end":
-            saw_end = True
-    if not saw_end or terminal_message is None:
+            continue
+
+        if event_type == "auto_retry_end":
+            if (
+                retry_count == 0
+                or retry_completed
+                or event.get("success") is not True
+                or not valid_retry_attempt(event.get("attempt"), retry_count)
+                or terminal_message is None
+                or terminal_message.get("stopReason") in {"error", "aborted"}
+            ):
+                return error("invalid auto-retry event sequence")
+            retry_completed = True
+            continue
+
+        if event_type == "agent_end":
+            if "willRetry" in event and not isinstance(event["willRetry"], bool):
+                return error("invalid agent event JSON")
+            if event.get("willRetry") is True:
+                if (
+                    retry_completed
+                    or terminal_message is None
+                    or terminal_message.get("stopReason") != "error"
+                    or retry_count >= MAX_AUTO_RETRIES
+                ):
+                    return error("invalid auto-retry event sequence")
+                retry_count += 1
+                terminal_message = None
+                state = "retry_start"
+                continue
+            if retry_count and (
+                event.get("willRetry") is not False or not retry_completed
+            ):
+                return error("invalid auto-retry event sequence")
+            saw_final_end = True
+
+    if (
+        not saw_final_end
+        or terminal_message is None
+        or state != "segment"
+        or (retry_count > 0 and not saw_settled)
+    ):
         return error("agent event stream did not complete")
     if terminal_message.get("stopReason") == "error":
         return error(terminal_message.get("errorMessage", "agent error"))
@@ -145,6 +193,47 @@ def agent_response(events_path: Path) -> dict[str, object]:
             and isinstance(part.get("text"), str)
         ),
     }
+
+
+def valid_message(message: object) -> bool:
+    if not isinstance(message, dict) or not isinstance(message.get("role"), str):
+        return False
+    if message["role"] != "assistant":
+        return True
+    stop_reason = message.get("stopReason")
+    content = message.get("content", [])
+    if not isinstance(stop_reason, str) or not isinstance(content, list):
+        return False
+    for part in content:
+        if not isinstance(part, dict) or not isinstance(part.get("type"), str):
+            return False
+        if part["type"] == "text" and not isinstance(part.get("text"), str):
+            return False
+    return not (
+        stop_reason == "error"
+        and "errorMessage" in message
+        and not isinstance(message["errorMessage"], str)
+    )
+
+
+def valid_retry_start(event: dict[str, object], attempt: int) -> bool:
+    max_attempts = event.get("maxAttempts")
+    delay_ms = event.get("delayMs")
+    return (
+        valid_retry_attempt(event.get("attempt"), attempt)
+        and isinstance(max_attempts, int)
+        and not isinstance(max_attempts, bool)
+        and attempt <= max_attempts
+        and isinstance(delay_ms, (int, float))
+        and not isinstance(delay_ms, bool)
+        and math.isfinite(delay_ms)
+        and delay_ms >= 0
+        and isinstance(event.get("errorMessage"), str)
+    )
+
+
+def valid_retry_attempt(value: object, expected: int) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value == expected
 
 
 def error(message: str) -> dict[str, object]:

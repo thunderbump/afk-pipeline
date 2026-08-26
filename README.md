@@ -682,6 +682,14 @@ failure instead of discarding the other Attempt evidence.
 - `timed_out`: the configured deadline expired.
 - `interrupted`: the executor received Ctrl-C while the runner was active.
 
+The event interpreter also accepts up to three Pi model auto-retries. Each
+intermediate `agent_end` must set `willRetry: true` and be followed immediately
+by a valid `auto_retry_start` and a new `agent_start`. A successful final segment
+includes its matching `auto_retry_end`, ends with `willRetry: false`, and settles
+once. Intermediate assistant errors never replace the final response text.
+Malformed seams, incomplete retries, and events after the final settlement fail
+closed.
+
 The executor terminates the runner process group on timeout or interruption.
 `timeout_seconds` is the child execution deadline, not a wall-clock cap on the
 wrapper. All components that run children share the same bounded shutdown: they

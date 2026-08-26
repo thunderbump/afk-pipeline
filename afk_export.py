@@ -43,6 +43,8 @@ EVENT_TYPES = {
     "agent_start",
     "agent_end",
     "agent_settled",
+    "auto_retry_start",
+    "auto_retry_end",
     "turn_start",
     "turn_end",
     "message_start",
