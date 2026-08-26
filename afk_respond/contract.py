@@ -8,10 +8,38 @@ from afk_config import validate_inference_setting
 def validate_input(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("feedback response must use schema_version 1")
-    for field in ("workspace", "assessment_directory"):
-        path = value.get(field)
-        if not isinstance(path, str) or not Path(path).is_absolute():
-            raise ValueError(f"feedback response {field} must be an absolute path")
+    workspace = value.get("workspace")
+    if not isinstance(workspace, str) or not Path(workspace).is_absolute():
+        raise ValueError("feedback response workspace must be an absolute path")
+    assessment_present = "assessment_directory" in value
+    validation_present = "validation_directory" in value
+    if assessment_present == validation_present:
+        raise ValueError(
+            "feedback response requires exactly one assessment or validation directory"
+        )
+    evidence_field = (
+        "assessment_directory" if assessment_present else "validation_directory"
+    )
+    evidence_path = value[evidence_field]
+    if not isinstance(evidence_path, str) or not Path(evidence_path).is_absolute():
+        raise ValueError(f"feedback response {evidence_field} must be an absolute path")
+    if validation_present:
+        source = value.get("source")
+        objective = value.get("objective")
+        if (
+            not isinstance(source, dict)
+            or set(source) != {"kind", "directory"}
+            or source.get("kind") not in {"attempt", "feedback_response"}
+            or not isinstance(source.get("directory"), str)
+            or not Path(source["directory"]).is_absolute()
+        ):
+            raise ValueError("validation repair source is malformed")
+        if not isinstance(objective, str) or not objective.strip():
+            raise ValueError("validation repair objective must be a non-empty string")
+    elif "source" in value or "objective" in value:
+        raise ValueError(
+            "review feedback response cannot contain validation repair fields"
+        )
     if "inference" in value:
         validate_inference_setting(value["inference"])
     timeout = value.get("timeout_seconds")

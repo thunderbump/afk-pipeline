@@ -7,6 +7,7 @@ from pathlib import Path
 from afk_agent import agent_response, write_pi_command
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
+from afk_change.evidence import verify_source
 from afk_config import INFERENCE_ROLE_DEFAULTS
 from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
@@ -20,6 +21,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
+from afk_validate.evidence import validate_repairable_failure
 
 USAGE = "usage: python3 -m afk_respond RESPONSE_JSON RESULT_DIRECTORY"
 
@@ -48,21 +50,42 @@ def main() -> int:
     validate_input(response_input)
     progress("feedback-response input accepted")
 
-    progress("loading Finding Assessment evidence")
-    evidence = load_evidence(response_input)
     workspace = Path(response_input["workspace"])
-    progress("observing assessed repository")
+    repair = "validation_directory" in response_input
+    progress("observing response repository")
     before = repository_state(workspace)
-    review, assessment, objective = verify_subject(response_input, before, evidence)
-    selected = actionable_findings(review, assessment)
+    if repair:
+        progress("loading failed Validation evidence")
+        verify_validation_subject(response_input, before)
+        selected = []
+        objective = response_input["objective"]
+    else:
+        progress("loading Finding Assessment evidence")
+        evidence = load_evidence(response_input)
+        review, assessment, objective = verify_subject(response_input, before, evidence)
+        selected = actionable_findings(review, assessment)
+    requires_agent = repair or bool(selected)
     command_prefix = None
-    if selected:
+    if requires_agent:
         inference = response_input.get(
             "inference", INFERENCE_ROLE_DEFAULTS["feedback_response"]
         )
+        system_prompt = (
+            "You are a repository validation repair worker. Modify only the "
+            "prepared workspace to repair the ordinary failed Validation in the "
+            "user prompt, create a clean Git commit, and return the required JSON "
+            "response. Do not treat the failure as an accepted Review finding, "
+            "run external orchestration, or publish feedback."
+            if repair
+            else "You are an implementation feedback responder. Modify only the "
+            "prepared workspace to address the actionable assessed findings in "
+            "the user prompt, create a clean Git commit, and return the required "
+            "JSON response. Do not address dismissed findings, run external "
+            "orchestration, or publish feedback."
+        )
         command_prefix = write_pi_command(
             "AFK_RESPOND_AGENT_COMMAND",
-            "You are an implementation feedback responder. Modify only the prepared workspace to address the actionable assessed findings in the user prompt, create a clean Git commit, and return the required JSON response. Do not address dismissed findings, run external orchestration, or publish feedback.",
+            system_prompt,
             inference["model"],
             inference["thinking"],
         )
@@ -75,7 +98,7 @@ def main() -> int:
     started_at = timestamp()
     started = time.monotonic()
 
-    if not selected:
+    if not requires_agent:
         events_path.touch()
         stderr_path.touch()
         progress("observing repository after no-action feedback response")
@@ -195,6 +218,23 @@ def main() -> int:
     return 0 if outcome == "completed" else 1
 
 
+def verify_validation_subject(response_input, before):
+    validation_directory = Path(response_input["validation_directory"])
+    _validation_input, validation_output = validate_repairable_failure(
+        validation_directory, Path(response_input["workspace"]), before
+    )
+    source = response_input["source"]
+    lineage = verify_source(source["kind"], Path(source["directory"]))
+    if (
+        subject_state(lineage.after)
+        != subject_state(validation_output["repository"]["before"])
+        or Path(lineage.assignment["workspace"]).resolve()
+        != Path(response_input["workspace"]).resolve()
+        or lineage.assignment["objective"] != response_input["objective"]
+    ):
+        raise ValueError("validation repair source does not match failed Validation")
+
+
 def load_evidence(response_input: dict[str, object]) -> dict[str, object]:
     assessment_directory = Path(response_input["assessment_directory"])
     assessment_input = read_json(assessment_directory / "input.json")
@@ -308,6 +348,25 @@ def observe_repository_transition(workspace, before):
 
 
 def prompt(response_input, selected, objective):
+    if "validation_directory" in response_input:
+        validation_directory = Path(response_input["validation_directory"])
+        return f"""Repair the repository validation failure below in the prepared workspace and commit the result. This is failed Validation evidence, not an accepted Review finding.
+
+Implementation objective: {objective}
+Failed Validation evidence: {validation_directory}
+Failed Validation input: {validation_directory / "input.json"}
+Failed Validation output: {validation_directory / "output.json"}
+Failed Validation stdout: {validation_directory / "stdout.log"}
+Failed Validation stderr: {validation_directory / "stderr.log"}
+
+Inspect the complete identified input, output, stdout, and stderr before repairing. Return only one JSON object with this exact shape after creating a clean Git commit:
+{{
+  "summary": "concise description of the validation repair",
+  "finding_responses": []
+}}
+
+Do not invent a Review finding and do not wrap the JSON in Markdown."""
+
     assessment_directory = Path(response_input["assessment_directory"])
     return f"""Address every actionable assessed finding below in the prepared workspace and commit the result. Do not address findings omitted from this list.
 

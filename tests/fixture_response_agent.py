@@ -42,15 +42,26 @@ elif scenario == "invalid-events":
 elif scenario == "damage-git":
     Path(".git").rename(".git-damaged")
     response = valid_response()
-elif scenario in {"commit", "delayed-commit"}:
+elif scenario in {"commit", "delayed-commit", "validation-repair"}:
     if scenario == "delayed-commit":
         time.sleep(0.2)
     commit_response()
-    response = valid_response()
+    response = (
+        {"summary": "Repaired repository validation.", "finding_responses": []}
+        if scenario == "validation-repair"
+        else valid_response()
+    )
 elif scenario == "capture-prompt":
     Path(sys.argv[2]).write_text(sys.argv[-1])
     commit_response()
     response = valid_response()
+elif scenario == "capture-validation-prompt":
+    Path(sys.argv[2]).write_text(sys.argv[-1])
+    commit_response()
+    response = {
+        "summary": "Repaired repository validation.",
+        "finding_responses": [],
+    }
 elif scenario == "dirty":
     Path("README.md").write_text("uncommitted response\n")
     response = valid_response()

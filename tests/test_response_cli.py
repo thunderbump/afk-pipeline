@@ -256,6 +256,159 @@ class ResponseCliTest(unittest.TestCase):
         self.assertIn("Actionable finding", prompt)
         self.assertNotIn("Dismissed finding", prompt)
 
+    def test_validation_repair_identifies_failure_artifacts_and_is_not_review_feedback(
+        self,
+    ):
+        attempt = self.root / "attempt"
+        attempt.mkdir()
+        self.write_json(
+            attempt / "input.json",
+            {
+                "schema_version": 1,
+                "objective": "Make validation pass.",
+                "workspace": str(self.workspace),
+                "command": ["unused"],
+                "timeout_seconds": 5,
+            },
+        )
+        state = self.state()
+        prior = {
+            **state,
+            "head": self.git("rev-parse", "HEAD^"),
+        }
+        self.write_json(
+            attempt / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "succeeded",
+                "repository": {
+                    "before": prior,
+                    "after": state,
+                    "commits_between_heads": [state["head"]],
+                },
+            },
+        )
+        validation = self.root / "failed-validation"
+        validation.mkdir()
+        self.write_json(
+            validation / "input.json",
+            {
+                "schema_version": 1,
+                "workspace": str(self.workspace),
+                "command": ["./scripts/validate"],
+                "timeout_seconds": 5,
+            },
+        )
+        self.write_json(
+            validation / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "failed",
+                "started_at": "2026-01-01T00:00:00Z",
+                "finished_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1.0,
+                "process": {"exit_code": 7, "signal": None},
+                "repository": {
+                    "before": state,
+                    "after": state,
+                    "head_changed": False,
+                },
+                "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+            },
+        )
+        (validation / "stdout.log").write_text("failing test output\n")
+        (validation / "stderr.log").write_text("failure detail\n")
+        response_input = {
+            "schema_version": 1,
+            "workspace": str(self.workspace),
+            "validation_directory": str(validation),
+            "source": {"kind": "attempt", "directory": str(attempt)},
+            "objective": "Make validation pass.",
+            "timeout_seconds": 5,
+        }
+        input_path = self.root / "validation-response.json"
+        self.write_json(input_path, response_input)
+        result = self.root / "validation-response"
+        marker_path = self.root / "validation-prompt.txt"
+        environment = os.environ.copy()
+        environment["AFK_RESPOND_AGENT_COMMAND"] = json.dumps(
+            [
+                sys.executable,
+                str(FIXTURE),
+                "capture-validation-prompt",
+                str(marker_path),
+            ]
+        )
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["response"]["finding_responses"], [])
+        prompt = marker_path.read_text()
+        for name in ("input.json", "output.json", "stdout.log", "stderr.log"):
+            self.assertIn(str(validation / name), prompt)
+        self.assertIn("not an accepted Review finding", prompt)
+
+    def test_validation_repair_refuses_launch_error_and_repository_drift_evidence(self):
+        from afk_validate.evidence import validate_repairable_failure
+
+        validation = self.root / "refused-validation"
+        validation.mkdir()
+        state = self.state()
+        self.write_json(
+            validation / "input.json",
+            {
+                "schema_version": 1,
+                "workspace": str(self.workspace),
+                "command": ["missing"],
+                "timeout_seconds": 5,
+            },
+        )
+        (validation / "stdout.log").touch()
+        (validation / "stderr.log").touch()
+        base = {
+            "schema_version": 1,
+            "outcome": "failed",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "duration_seconds": 1.0,
+            "repository": {"before": state, "after": state, "head_changed": False},
+            "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+        }
+        for process in (
+            {"exit_code": None, "signal": None, "error": "launch failed"},
+            {"exit_code": None, "signal": "SIGTERM"},
+        ):
+            with self.subTest(process=process):
+                self.write_json(
+                    validation / "output.json", {**base, "process": process}
+                )
+                with self.assertRaises(ValueError):
+                    validate_repairable_failure(validation, self.workspace, state)
+        self.write_json(
+            validation / "output.json",
+            {**base, "process": {"exit_code": 7, "signal": None}},
+        )
+        drifted = {**state, "head": "different"}
+        with self.assertRaisesRegex(ValueError, "drifted"):
+            validate_repairable_failure(validation, self.workspace, drifted)
+
+        (validation / "stderr.log").unlink()
+        with self.assertRaisesRegex(ValueError, "logs are unavailable"):
+            validate_repairable_failure(validation, self.workspace, state)
+        (validation / "stderr.log").touch()
+        self.write_json(
+            validation / "output.json",
+            {
+                **base,
+                "outcome": "timed_out",
+                "process": {"exit_code": None, "signal": "SIGTERM"},
+            },
+        )
+        with self.assertRaisesRegex(ValueError, "invalid failed Validation output"):
+            validate_repairable_failure(validation, self.workspace, state)
+
     def test_invalid_input_existing_result_and_stale_workspace_are_refused(self):
         input_path, result, environment = self.prepare_response("commit")
         value = json.loads(input_path.read_text())

@@ -16,6 +16,7 @@ from afk_coordinate.contract import (
 )
 from afk_iterate.__main__ import validate_sealed_result
 from afk_runtime import progress, repository_state, seal_json, write_json
+from afk_validate.evidence import validate_repairable_failure
 
 USAGE = (
     "usage: python3 -m afk_coordinate RUN_JSON RUN_DIRECTORY "
@@ -178,6 +179,20 @@ def main():
         if component != "attempt":
             input_path.unlink(missing_ok=True)
         if outcome != COMPONENTS[component]["success"]:
+            if (
+                component == "validation"
+                and outcome == "failed"
+                and response_allowance_available(request, state)
+                and repairable_validation(
+                    result_directory, Path(assignment["workspace"])
+                )
+            ):
+                state["next_component"] = "response"
+                seal_json(state_path, state)
+                progress(
+                    "routing ordinary failed Validation to bounded Feedback Response"
+                )
+                continue
             return seal_failure(
                 run_directory,
                 state,
@@ -390,6 +405,23 @@ def attempt_input(_request, assignment, _state, _run_directory):
     return assignment
 
 
+def response_allowance_available(request, state):
+    completed = sum(
+        record["component"] == "response" and record["outcome"] == "completed"
+        for record in state["history"]
+    )
+    return completed < request["max_responses"]
+
+
+def repairable_validation(result_directory, workspace):
+    try:
+        observed = repository_state(workspace)
+        validate_repairable_failure(result_directory, workspace, observed)
+    except (OSError, TypeError, ValueError, KeyError, subprocess.SubprocessError):
+        return False
+    return True
+
+
 def validation_input(request, assignment, state, _run_directory):
     return {
         "schema_version": 1,
@@ -442,6 +474,21 @@ def iteration_input(request, _assignment, state, run_directory):
 
 
 def response_input(request, assignment, state, run_directory):
+    if state["history"][-1]["component"] == "validation":
+        validation = state["history"][-1]["directory"]
+        source = latest(state, "attempt", "response")
+        kind = "attempt" if source["component"] == "attempt" else "feedback_response"
+        return stage_input(
+            assignment["workspace"],
+            request["agent_timeout_seconds"],
+            inference=role_inference(request, "feedback_response"),
+            validation_directory=str((run_directory / validation).resolve()),
+            source={
+                "kind": kind,
+                "directory": str((run_directory / source["directory"]).resolve()),
+            },
+            objective=assignment["objective"],
+        )
     assessment = latest(state, "assessment")["directory"]
     return stage_input(
         assignment["workspace"],

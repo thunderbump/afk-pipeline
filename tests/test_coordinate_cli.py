@@ -903,6 +903,147 @@ class CoordinatorCliTest(unittest.TestCase):
             ["succeeded", "passed", "completed", "failed"],
         )
 
+    def test_ordinary_validation_failure_is_repaired_within_response_allowance(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(0 if 'response applied' in Path('README.md').read_text() else 7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "validation-repair-run"
+
+        completed = self.invoke(
+            request_path, run, response_scenario="validation-repair"
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            [
+                "attempt",
+                "validation",
+                "response",
+                "validation",
+                "change",
+                "review",
+                "assessment",
+                "iteration",
+            ],
+        )
+        self.assertEqual(output["history"][1]["outcome"], "failed")
+        response_input = json.loads((run / "03-response" / "input.json").read_text())
+        self.assertEqual(
+            response_input["validation_directory"],
+            str((run / "02-validation").resolve()),
+        )
+        prompt_events = (run / "03-response" / "events.jsonl").read_text()
+        self.assertIn("Repaired repository validation", prompt_events)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_continuation_and_export_preserve_validation_repair_history(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(0 if 'response applied' in Path('README.md').read_text() else 7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "continued-validation-repair"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+            response_scenario="validation-repair",
+        )
+
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            response_scenario="commit",
+        )
+        bundle = self.root / "validation-repair-bundle"
+        exported = subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(run),
+                str(bundle),
+                "--project",
+                "fixture",
+                "--run-id",
+                "validation-repair",
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+        self.assertEqual(exported.returncode, 0, exported.stderr)
+        output = json.loads((run / "continuations" / "01" / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(
+            [record["component"] for record in output["history"]].count("response"),
+            2,
+        )
+        self.assertEqual(output["history"][1]["outcome"], "failed")
+        self.assertTrue((bundle / "workflow-run.json").is_file())
+
+    def test_validation_launch_error_cannot_allocate_repair(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [str(self.root / "missing-validation")]
+        self.write_json(request_path, request)
+        run = self.root / "validation-launch-error"
+
+        completed = self.invoke(
+            request_path, run, response_scenario="validation-repair"
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            ["attempt", "validation"],
+        )
+        validation = json.loads((run / "02-validation" / "output.json").read_text())
+        self.assertIn("error", validation["process"])
+        self.assertFalse((run / "03-response").exists())
+
+    def test_repeated_validation_failure_exhausts_allowance_without_extra_repair(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
+        self.write_json(request_path, request)
+        run = self.root / "validation-repair-exhausted"
+
+        completed = self.invoke(
+            request_path, run, response_scenario="validation-repair"
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["failed_component"], "validation")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            ["attempt", "validation", "response", "validation"],
+        )
+        self.assertEqual(
+            [record["component"] for record in output["history"]].count("response"),
+            1,
+        )
+        self.assertFalse((run / "05-response").exists())
+
     def test_sealed_component_failure_seals_the_run_and_resume_is_idempotent(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         request = json.loads(request_path.read_text())

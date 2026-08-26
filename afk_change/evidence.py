@@ -16,6 +16,7 @@ from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import validate_input as validate_response_input
 from afk_review.contract import validate_review
 from afk_runtime import git
+from afk_validate.evidence import validate_repairable_failure
 
 
 @dataclass
@@ -94,53 +95,98 @@ def _committed_response(source_directory, visited, lineage):
         raise TypeError("invalid Feedback Response repository evidence")
     before = clean_repository_state(response_repository.get("before"))
     after = clean_repository_state(response_repository.get("after"))
-
-    assessment_directory = Path(response_input["assessment_directory"])
-    lineage.include(assessment_directory)
-    assessment_input = read_object(
-        assessment_directory / "input.json", "Finding Assessment input"
-    )
-    assessment_output = read_object(
-        assessment_directory / "output.json", "Finding Assessment output"
-    )
-    review_directory = absolute_evidence_path(assessment_input, "review_directory")
-    lineage.include(review_directory)
-    review_input = read_object(review_directory / "input.json", "Review input")
-    review_output = read_object(review_directory / "output.json", "Review output")
-    change_directory = absolute_evidence_path(review_input, "change_directory")
-    validation_directory = absolute_evidence_path(review_input, "validation_directory")
-    lineage.include(validation_directory)
-    assignment, _source_before, source_after = _committed_change(
-        change_directory, visited, lineage
-    )
-
     workspace = Path(response_input["workspace"])
-    require_same_workspace(workspace, assignment, assessment_input, review_input)
-    assessed_state = validate_read_only_stage(assessment_output, "Finding Assessment")
-    reviewed_state = validate_read_only_stage(review_output, "Review")
-    if not (
-        assessed_state
-        == reviewed_state
-        == subject_state(source_after)
-        == subject_state(before)
-    ):
-        raise ValueError("Feedback Response evidence must identify one source state")
-    try:
-        review_value = review_output["review"]
-        assessment_value = assessment_output["assessment"]
-        response_value = response_output["response"]
-    except KeyError as error:
-        raise ValueError("invalid Feedback Response evidence") from error
-    reviewed = validate_review(review_value, workspace, before["head"])
-    assessed = validate_assessment(reviewed, assessment_value)
-    selected = actionable_findings(reviewed, assessed)
-    if not selected:
-        raise ValueError("committed change requires an actionable Feedback Response")
-    validate_response(selected, response_value)
+
+    if "validation_directory" in response_input:
+        assignment = _validation_repair_source(response_input, before, visited, lineage)
+        validate_response([], response_output.get("response"))
+    else:
+        assessment_directory = Path(response_input["assessment_directory"])
+        lineage.include(assessment_directory)
+        assessment_input = read_object(
+            assessment_directory / "input.json", "Finding Assessment input"
+        )
+        assessment_output = read_object(
+            assessment_directory / "output.json", "Finding Assessment output"
+        )
+        review_directory = absolute_evidence_path(assessment_input, "review_directory")
+        lineage.include(review_directory)
+        review_input = read_object(review_directory / "input.json", "Review input")
+        review_output = read_object(review_directory / "output.json", "Review output")
+        change_directory = absolute_evidence_path(review_input, "change_directory")
+        validation_directory = absolute_evidence_path(
+            review_input, "validation_directory"
+        )
+        lineage.include(validation_directory)
+        assignment, _source_before, source_after = _committed_change(
+            change_directory, visited, lineage
+        )
+
+        require_same_workspace(workspace, assignment, assessment_input, review_input)
+        assessed_state = validate_read_only_stage(
+            assessment_output, "Finding Assessment"
+        )
+        reviewed_state = validate_read_only_stage(review_output, "Review")
+        if not (
+            assessed_state
+            == reviewed_state
+            == subject_state(source_after)
+            == subject_state(before)
+        ):
+            raise ValueError(
+                "Feedback Response evidence must identify one source state"
+            )
+        try:
+            review_value = review_output["review"]
+            assessment_value = assessment_output["assessment"]
+            response_value = response_output["response"]
+        except KeyError as error:
+            raise ValueError("invalid Feedback Response evidence") from error
+        reviewed = validate_review(review_value, workspace, before["head"])
+        assessed = validate_assessment(reviewed, assessment_value)
+        selected = actionable_findings(reviewed, assessed)
+        if not selected:
+            raise ValueError(
+                "committed change requires an actionable Feedback Response"
+            )
+        validate_response(selected, response_value)
+
     if response_repository.get("descends_from_before") is not True:
         raise ValueError("Feedback Response must record descendant commits")
     validate_transition(workspace, before, after, response_repository)
     return assignment, before, after
+
+
+def _validation_repair_source(response_input, response_before, visited, lineage):
+    validation_directory = Path(response_input["validation_directory"])
+    lineage.include(validation_directory)
+    _validation_input, validation_output = validate_repairable_failure(
+        validation_directory, Path(response_input["workspace"])
+    )
+    source = response_input["source"]
+    source_directory = Path(source["directory"])
+    if source["kind"] == "attempt":
+        assignment, _source_before, source_after = _committed_attempt(
+            source_directory, lineage
+        )
+    else:
+        assignment, _source_before, source_after = _committed_response(
+            source_directory, visited, lineage
+        )
+    validation_state = clean_repository_state(validation_output["repository"]["after"])
+    if not (
+        subject_state(source_after)
+        == subject_state(validation_state)
+        == subject_state(response_before)
+    ):
+        raise ValueError("validation repair evidence must identify one source state")
+    if (
+        Path(assignment["workspace"]).resolve()
+        != Path(response_input["workspace"]).resolve()
+        or assignment["objective"] != response_input["objective"]
+    ):
+        raise ValueError("validation repair does not match its Assignment")
+    return assignment
 
 
 def _committed_change(change_directory, visited, lineage):

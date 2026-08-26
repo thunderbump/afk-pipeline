@@ -306,7 +306,11 @@ def validate_history_position(state):
         if record["outcome"] == "abandoned":
             continue
         if record["outcome"] != COMPONENT_TOPOLOGY[expected_component]["success"]:
-            expected_component = None
+            expected_component = (
+                "response"
+                if expected_component == "validation" and record["outcome"] == "failed"
+                else None
+            )
         else:
             expected_component = COMPONENT_TOPOLOGY[expected_component]["next"]
 
@@ -343,7 +347,11 @@ def expected_input_sources(component, history):
         }
     if component == "assessment":
         return {"review": latest_record(history, "review")["directory"]}
-    if component in {"iteration", "response"}:
+    if component == "iteration":
+        return {"assessment": latest_record(history, "assessment")["directory"]}
+    if component == "response":
+        if history and history[-1]["component"] == "validation":
+            return {"validation": history[-1]["directory"]}
         return {"assessment": latest_record(history, "assessment")["directory"]}
     raise ValueError("invalid coordinator checkpoint")
 

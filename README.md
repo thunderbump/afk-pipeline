@@ -852,6 +852,17 @@ workspace to be at its exact clean assessed `HEAD`. The branch remains implicit
 and may be detached. Stale, malformed, failed, dirty, or mismatched evidence is
 refused with exit status `2`.
 
+Coordinator may instead supply `validation_directory`, the originating
+Attempt/Feedback Response `source`, and the frozen `objective`. This validation
+repair form accepts only an ordinary positive nonzero command exit with sealed
+input/output, regular `stdout.log` and `stderr.log`, identical clean repository
+observations, and a workspace still at that state. It rejects malformed or
+missing evidence, launch and observation errors, timeouts, interruptions,
+signals, dirty results, and repository drift before creating a result. Its
+prompt identifies all four Validation artifacts and explicitly distinguishes a
+validation repair from an accepted Review finding; its structured result uses
+an empty `finding_responses` array.
+
 One invocation selects all and only Assessment decisions whose
 `worth_addressing` value is true. The default adapter invokes Pi with
 `gpt-5.6-sol` and workspace-writing tools, and requires it to create a clean Git
@@ -991,8 +1002,17 @@ an optional active invocation, ordered history, and terminal facts.
 The same command resumes an existing run. If an active module has sealed its
 `output.json`, the coordinator consumes it and continues without repeating the
 module. If no sealed output exists, the coordinator exits `1` without changing
-state because it cannot infer whether the worker is alive. After an operator or
-execution substrate confirms that worker is gone, run:
+state because it cannot infer whether the worker is alive. An ordinary nonzero
+Validation with stable, clean, inspectable repository evidence may consume one
+remaining Feedback Response allowance. That repair receives the failed
+Validation input, output, stdout, and stderr, then returns through Validation,
+Committed Change, and Review in normal order. Every completed repair counts
+against `max_responses`; a repeated failure with no allowance is terminal.
+Malformed or missing evidence, timeout, interruption, launch or observation
+error, signals, dirty output, and repository drift remain terminal and never
+allocate repair.
+
+After an operator or execution substrate confirms that worker is gone, run:
 
 ```sh
 python3 -m afk_coordinate run.json /existing/run-directory --abandon-active
