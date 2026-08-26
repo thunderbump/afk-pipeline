@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_review.contract import REVIEW_AUDIT
+
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_response_agent.py"
 
@@ -97,6 +99,7 @@ class ResponseCliTest(unittest.TestCase):
                 "review": {
                     "summary": "One finding reported.",
                     "findings": [self.finding("Actionable finding")],
+                    "audit": REVIEW_AUDIT,
                 },
                 "repository": {"before": state, "after": state, "unchanged": True},
                 "artifacts": {

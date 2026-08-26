@@ -7,6 +7,16 @@ from pathlib import Path
 
 scenario = sys.argv[1]
 
+AUDIT = {
+    "completed": True,
+    "scopes": [
+        "objective",
+        "acceptance_criteria",
+        "reviewed_diff",
+        "supplied_evidence",
+    ],
+}
+
 if scenario == "hang":
     marker = Path(sys.argv[2])
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -40,7 +50,11 @@ elif scenario in ("null-content", "object-content", "invalid-text-part"):
     print(json.dumps({"type": "agent_end"}), flush=True)
     raise SystemExit
 elif scenario in ("mutate-workspace", "damage-git"):
-    review = {"summary": "No actionable defects found.", "findings": []}
+    review = {
+        "summary": "No actionable defects found.",
+        "findings": [],
+        "audit": AUDIT,
+    }
     if scenario == "mutate-workspace":
         Path("reviewer-change.txt").write_text("reviewer changed the workspace\n")
     else:
@@ -48,9 +62,14 @@ elif scenario in ("mutate-workspace", "damage-git"):
 elif scenario in ("no-findings", "delayed-no-findings"):
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
-    review = {"summary": "No actionable defects found.", "findings": []}
+    review = {
+        "summary": "No actionable defects found.",
+        "findings": [],
+        "audit": AUDIT,
+    }
 elif scenario in (
     "findings",
+    "multiple-findings",
     "missing-line",
     "missing-path",
     "outside-path",
@@ -79,8 +98,21 @@ elif scenario in (
                 "title": "Fixture finding",
                 "details": "The fixture demonstrates a line-anchored finding.",
                 "locations": [location],
-            }
+            },
+            *(
+                [
+                    {
+                        "severity": "low",
+                        "title": "Second fixture finding",
+                        "details": "The audit returns every discovered finding together.",
+                        "locations": [{"path": "docs/note.txt", "line": 1}],
+                    }
+                ]
+                if scenario == "multiple-findings"
+                else []
+            ),
         ],
+        "audit": AUDIT,
     }
 else:
     raise SystemExit(f"unknown review fixture scenario: {scenario}")

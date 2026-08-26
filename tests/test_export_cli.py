@@ -16,6 +16,7 @@ from afk_plan_accept.contract import (
     direct_policy,
     plan_policy,
 )
+from afk_review.contract import REVIEW_AUDIT
 
 ROOT = Path(__file__).parents[1]
 
@@ -1726,6 +1727,7 @@ class ExportCliTests(unittest.TestCase):
                             "locations": [{"path": "README.md", "line": 1}],
                         }
                     ],
+                    "audit": REVIEW_AUDIT,
                 },
                 "artifacts": {
                     "diff": "review.diff",

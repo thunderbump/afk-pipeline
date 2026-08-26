@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from afk_review.contract import REVIEW_AUDIT
+
 ROOT = Path(__file__).parents[1]
 
 
@@ -346,7 +348,11 @@ class IterationPolicyCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "outcome": "completed",
-                "review": {"summary": "One finding.", "findings": [finding]},
+                "review": {
+                    "summary": "One finding.",
+                    "findings": [finding],
+                    "audit": REVIEW_AUDIT,
+                },
                 "repository": {
                     "before": response_state,
                     "after": response_state,
@@ -455,7 +461,11 @@ class IterationPolicyCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "outcome": "completed",
-                "review": {"summary": "One finding.", "findings": [finding]},
+                "review": {
+                    "summary": "One finding.",
+                    "findings": [finding],
+                    "audit": REVIEW_AUDIT,
+                },
                 "repository": {
                     "before": self.implementation,
                     "after": self.implementation,

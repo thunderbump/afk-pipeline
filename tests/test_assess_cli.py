@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_review.contract import REVIEW_AUDIT
+
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_assessment_agent.py"
 
@@ -103,6 +105,7 @@ class AssessmentCliTest(unittest.TestCase):
                             "locations": [{"path": "README.md", "line": 1}],
                         }
                     ],
+                    "audit": REVIEW_AUDIT,
                 },
                 "repository": {
                     "before": state,

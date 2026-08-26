@@ -138,7 +138,19 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(output["agent"], {"status": "completed"})
         self.assertEqual(
             output["review"],
-            {"summary": "No actionable defects found.", "findings": []},
+            {
+                "summary": "No actionable defects found.",
+                "findings": [],
+                "audit": {
+                    "completed": True,
+                    "scopes": [
+                        "objective",
+                        "acceptance_criteria",
+                        "reviewed_diff",
+                        "supplied_evidence",
+                    ],
+                },
+            },
         )
         self.assertEqual(output["repository"]["before"], self.after)
         self.assertEqual(output["repository"]["after"], self.after)
@@ -169,14 +181,27 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIn("-before", (result / "diff.patch").read_text())
 
     def test_findings_are_completed_and_require_line_anchors(self):
-        result, completed = self.run_review("findings")
+        result, completed = self.run_review("multiple-findings")
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "completed")
+        self.assertEqual(len(output["review"]["findings"]), 2)
         self.assertEqual(
             output["review"]["findings"][0]["locations"],
             [{"path": "README.md", "line": 1}],
+        )
+        self.assertEqual(
+            output["review"]["audit"],
+            {
+                "completed": True,
+                "scopes": [
+                    "objective",
+                    "acceptance_criteria",
+                    "reviewed_diff",
+                    "supplied_evidence",
+                ],
+            },
         )
 
         result, completed = self.run_review("missing-line", result_name="invalid")

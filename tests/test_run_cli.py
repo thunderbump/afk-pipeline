@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest import mock
 
 import afk_run
+from afk_review.contract import REVIEW_AUDIT
 
 ROOT = Path(__file__).parents[1]
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
@@ -1165,7 +1166,11 @@ class RunPreparerCliTest(unittest.TestCase):
             "04-review": {
                 "schema_version": 1,
                 "outcome": "completed",
-                "review": {"summary": "Clean.", "findings": []},
+                "review": {
+                    "summary": "Clean.",
+                    "findings": [],
+                    "audit": REVIEW_AUDIT,
+                },
                 "artifacts": {
                     "diff": "review.diff",
                     "events": "events.jsonl",

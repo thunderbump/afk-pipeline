@@ -3,6 +3,27 @@
 import subprocess
 from pathlib import Path
 
+REVIEW_AUDIT = {
+    "completed": True,
+    "scopes": [
+        "objective",
+        "acceptance_criteria",
+        "reviewed_diff",
+        "supplied_evidence",
+    ],
+}
+
+
+def validate_audit(value: object) -> dict[str, object]:
+    """Validate the Review's ordered declaration of the completed audit scope."""
+    if not isinstance(value, dict):
+        raise TypeError("review audit must be an object")
+    if list(value) != ["completed", "scopes"]:
+        raise ValueError("review audit fields must be completed then scopes")
+    if value["completed"] is not True or value["scopes"] != REVIEW_AUDIT["scopes"]:
+        raise ValueError("review audit declaration is malformed")
+    return value
+
 
 def validate_review(
     value: object, workspace: Path, reviewed_head: str
@@ -11,6 +32,7 @@ def validate_review(
         raise TypeError("review response must be an object")
     if not isinstance(value.get("summary"), str):
         raise TypeError("review summary must be a string")
+    validate_audit(value.get("audit"))
     findings = value.get("findings")
     if not isinstance(findings, list):
         raise TypeError("review findings must be an array")

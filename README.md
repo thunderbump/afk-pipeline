@@ -781,10 +781,24 @@ prompt as the final argument. Do not put credentials in this configuration or
 the Review input.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
-and an atomically sealed `output.json`. A completed response contains a summary
-and a possibly empty findings array. Every finding requires severity, title,
-details, and at least one repository-relative path with a positive 1-based line
-number that exists in a text file under the reviewed `HEAD`. Findings do not
+and an atomically sealed `output.json`. Before responding, the reviewer is
+instructed to inspect the objective, its stated acceptance criteria, the complete
+reviewed diff, and all supplied evidence, then return every actionable finding
+discovered in that audit together. This applies equally to code and documentation
+work. A completed response contains a summary, a possibly empty findings array,
+and exactly this ordered audit declaration:
+
+```json
+{"completed":true,"scopes":["objective","acceptance_criteria","reviewed_diff","supplied_evidence"]}
+```
+
+The declaration records that the reviewer performed those inspection scopes; it
+is not mechanical proof that every possible defect was found. It neither maps
+findings to scopes nor assigns identities to acceptance criteria that the input
+does not provide. Missing, extra, reordered, or malformed audit fields and values
+invalidate the Review and its downstream use. Every finding requires severity,
+title, details, and at least one repository-relative path with a positive 1-based
+line number that exists in a text file under the reviewed `HEAD`. Findings do not
 make execution fail and do not authorize repair or GitHub posting.
 
 Review outcomes are `completed`, `failed`, `timed_out`, or `interrupted`. A

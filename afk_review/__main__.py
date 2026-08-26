@@ -249,9 +249,9 @@ Read the complete reviewed diff from: {diff_path}
 Committed Change evidence: {review_input["change_directory"]}
 Validation evidence: {review_input["validation_directory"]}
 
-Look for concrete correctness defects, regressions, missing necessary tests, and violations of the stated objective. Validation passing is evidence, not proof of correctness. Do not propose or perform repairs.
+Before responding, complete one audit by inspecting the full objective (including its stated acceptance criteria), the complete reviewed diff, and all supplied Committed Change and Validation evidence. Look for concrete correctness defects, regressions, missing necessary tests, and violations of the objective or stated acceptance criteria. Validation passing is evidence, not proof of correctness. Do not propose or perform repairs. Return all actionable findings discovered during this audit together in this one response; do not stop after finding the first defect.
 
-Return only one JSON object with this exact shape:
+Return only one JSON object with this exact shape and field order:
 {{
   "summary": "concise scope and conclusion",
   "findings": [
@@ -261,10 +261,14 @@ Return only one JSON object with this exact shape:
       "details": "why it matters and when it occurs",
       "locations": [{{"path": "relative/file.py", "line": 1}}]
     }}
-  ]
+  ],
+  "audit": {{
+    "completed": true,
+    "scopes": ["objective", "acceptance_criteria", "reviewed_diff", "supplied_evidence"]
+  }}
 }}
 
-Every finding must have at least one location. Each location uses a repository-relative path and a positive 1-based line number in the reviewed HEAD. Use an empty findings array when you find no actionable problem. Do not wrap the JSON in Markdown."""
+Every finding must have at least one location. Each location uses a repository-relative path and a positive 1-based line number in the reviewed HEAD. Use an empty findings array when you find no actionable problem. The audit object is a declaration that you performed the required audit, not mechanical proof that every possible defect was found. Do not add audit fields, map findings to scopes, or invent identities for acceptance criteria that the objective does not provide. Do not wrap the JSON in Markdown."""
 
 
 def read_json(path: Path) -> dict[str, object]:

@@ -25,6 +25,7 @@ from afk_plan.contract import validate_planner_output
 from afk_plan_accept.contract import validate_policy_output
 from afk_preflight.contract import validate_input as validate_preflight_input
 from afk_preflight.contract import validate_output as validate_preflight_output
+from afk_review.contract import validate_audit
 
 SAFE_PROJECT = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -1534,12 +1535,17 @@ def component_details(component, value, redactions):
         review = value.get("review")
         if not isinstance(review, dict) or not isinstance(review.get("findings"), list):
             raise ExportError("invalid Review details")
+        try:
+            audit = validate_audit(review.get("audit"))
+        except (TypeError, ValueError) as error:
+            raise ExportError("invalid Review audit") from error
         return {
             "kind": "review",
             "summary": bounded_text(review.get("summary"), redactions),
             "findings": [
                 normalize_finding(item, redactions) for item in review["findings"]
             ],
+            "audit": audit,
         }
     if component == "assessment":
         assessment = value.get("assessment")
