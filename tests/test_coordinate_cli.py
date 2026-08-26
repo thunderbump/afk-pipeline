@@ -971,6 +971,29 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertFalse((run / "03-response").exists())
 
+    def test_resumed_validation_repair_rechecks_exhausted_allowance(self):
+        assignment_path, request_path = self.prepare_run(max_responses=0)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "raise SystemExit(7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "exhausted-resumed-validation-repair"
+        self.prepare_validation_repair_checkpoint(assignment_path, request_path, run)
+
+        resumed = self.invoke(request_path, run, response_scenario="validation-repair")
+
+        self.assertEqual(resumed.returncode, 1, resumed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["failed_component"], "validation")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            ["attempt", "validation"],
+        )
+        self.assertFalse((run / "03-response").exists())
+
     def test_abandoned_validation_repair_can_be_retried(self):
         assignment_path, request_path = self.prepare_run(max_responses=1)
         request = json.loads(request_path.read_text())

@@ -121,12 +121,15 @@ def main():
             component = state["next_component"]
             if component == "response":
                 validation = validation_repair_source(state["history"])
-                if validation is not None and not repairable_validation(
-                    run_directory / validation["directory"],
-                    Path(assignment["workspace"]),
+                if validation is not None and (
+                    not response_allowance_available(request, state)
+                    or not repairable_validation(
+                        run_directory / validation["directory"],
+                        Path(assignment["workspace"]),
+                    )
                 ):
                     progress(
-                        "failed Validation is no longer safe to repair; "
+                        "failed Validation cannot allocate a bounded repair; "
                         "sealing terminal failure"
                     )
                     return seal_failure(
