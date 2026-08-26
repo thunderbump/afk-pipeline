@@ -944,6 +944,69 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("Repaired repository validation", prompt_events)
         self.assertEqual(self.git("status", "--porcelain"), "")
 
+    def test_resumed_validation_repair_rechecks_repository_drift(self):
+        assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "raise SystemExit(7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "drifted-validation-repair"
+        self.prepare_validation_repair_checkpoint(assignment_path, request_path, run)
+        (self.workspace / "README.md").write_text("drifted after validation\n")
+
+        resumed = self.invoke(request_path, run, response_scenario="validation-repair")
+
+        self.assertEqual(resumed.returncode, 1, resumed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["failed_component"], "validation")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            ["attempt", "validation"],
+        )
+        self.assertIsNone(
+            json.loads((run / "state.json").read_text())["active_invocation"]
+        )
+        self.assertFalse((run / "03-response").exists())
+
+    def test_abandoned_validation_repair_can_be_retried(self):
+        assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(0 if 'response applied' in Path('README.md').read_text() else 7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "abandoned-validation-repair"
+        self.prepare_validation_repair_checkpoint(
+            assignment_path, request_path, run, active_response=True
+        )
+
+        resumed = self.invoke(
+            request_path,
+            run,
+            "--abandon-active",
+            response_scenario="validation-repair",
+        )
+
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        responses = [
+            record for record in output["history"] if record["component"] == "response"
+        ]
+        self.assertEqual(
+            [record["outcome"] for record in responses], ["abandoned", "completed"]
+        )
+        self.assertEqual(responses[1]["input_from"], {"validation": "02-validation"})
+        response_input = json.loads((run / "04-response" / "input.json").read_text())
+        self.assertEqual(
+            response_input["validation_directory"],
+            str((run / "02-validation").resolve()),
+        )
+
     def test_continuation_and_export_preserve_validation_repair_history(self):
         _assignment_path, request_path = self.prepare_run(max_responses=1)
         request = json.loads(request_path.read_text())
@@ -1298,6 +1361,89 @@ class CoordinatorCliTest(unittest.TestCase):
         request_path = self.root / f"run-{max_responses}.json"
         self.write_json(request_path, request)
         return assignment_path, request_path
+
+    def prepare_validation_repair_checkpoint(
+        self, assignment_path, request_path, run, active_response=False
+    ):
+        assignment = json.loads(assignment_path.read_text())
+        request = json.loads(request_path.read_text())
+        run.mkdir()
+        self.write_json(run / "input.json", request)
+        self.write_json(run / "assignment.json", assignment)
+        attempt = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "afk_attempt",
+                str(run / "assignment.json"),
+                str(run / "01-attempt"),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(attempt.returncode, 0, attempt.stderr)
+        validation_input = {
+            "schema_version": 1,
+            "workspace": assignment["workspace"],
+            **request["validation"],
+        }
+        self.write_json(run / "active-input.json", validation_input)
+        validation = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "afk_validate",
+                str(run / "active-input.json"),
+                str(run / "02-validation"),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(validation.returncode, 1, validation.stderr)
+        (run / "active-input.json").unlink()
+        history = [
+            {
+                "sequence": 1,
+                "component": "attempt",
+                "directory": "01-attempt",
+                "input_from": {"assignment": "assignment.json"},
+                "outcome": "succeeded",
+            },
+            {
+                "sequence": 2,
+                "component": "validation",
+                "directory": "02-validation",
+                "input_from": {
+                    "workspace": "assignment.json",
+                    "change": "01-attempt",
+                },
+                "outcome": "failed",
+            },
+        ]
+        active = None
+        if active_response:
+            active = {
+                "sequence": 3,
+                "component": "response",
+                "directory": "03-response",
+                "input_from": {"validation": "02-validation"},
+            }
+        self.write_json(
+            run / "state.json",
+            {
+                "schema_version": 1,
+                "status": "running",
+                "next_sequence": 4 if active_response else 3,
+                "next_component": "response",
+                "active_invocation": active,
+                "history": history,
+                "terminal": None,
+            },
+        )
 
     def invoke(
         self,

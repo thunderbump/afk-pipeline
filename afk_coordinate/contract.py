@@ -282,12 +282,25 @@ def validate_terminal_history(state):
             raise ValueError("invalid coordinator checkpoint")
         return
     terminal = state["terminal"]
-    specification = COMPONENT_TOPOLOGY[last["component"]]
+    # A failed Validation can remain the terminal cause after one or more
+    # unsealed repair invocations were explicitly abandoned. Those records are
+    # retained, but do not replace the failure that made repair necessary.
+    terminal_record = next(
+        (
+            record
+            for record in reversed(state["history"])
+            if record["outcome"] != "abandoned"
+        ),
+        None,
+    )
+    if terminal_record is None:
+        raise ValueError("invalid coordinator checkpoint")
+    specification = COMPONENT_TOPOLOGY[terminal_record["component"]]
     if (
-        last["component"] != terminal["failed_component"]
-        or last["outcome"] != terminal["component_outcome"]
-        or last["outcome"] not in specification["outcomes"]
-        or last["outcome"] == specification["success"]
+        terminal_record["component"] != terminal["failed_component"]
+        or terminal_record["outcome"] != terminal["component_outcome"]
+        or terminal_record["outcome"] not in specification["outcomes"]
+        or terminal_record["outcome"] == specification["success"]
     ):
         raise ValueError("invalid coordinator checkpoint")
 
@@ -350,10 +363,22 @@ def expected_input_sources(component, history):
     if component == "iteration":
         return {"assessment": latest_record(history, "assessment")["directory"]}
     if component == "response":
-        if history and history[-1]["component"] == "validation":
-            return {"validation": history[-1]["directory"]}
+        validation = validation_repair_source(history)
+        if validation is not None:
+            return {"validation": validation["directory"]}
         return {"assessment": latest_record(history, "assessment")["directory"]}
     raise ValueError("invalid coordinator checkpoint")
+
+
+def validation_repair_source(history):
+    """Return the failed Validation behind a response, across abandoned retries."""
+    for record in reversed(history):
+        if record["component"] == "response" and record["outcome"] == "abandoned":
+            continue
+        if record["component"] == "validation" and record["outcome"] == "failed":
+            return record
+        return None
+    return None
 
 
 def latest_record(history, *components):

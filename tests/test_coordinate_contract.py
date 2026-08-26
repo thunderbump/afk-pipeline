@@ -30,6 +30,43 @@ class CoordinatorTerminalContractTest(unittest.TestCase):
 
         self.assertIs(validate_output(output), output)
 
+    def test_validation_failure_remains_terminal_after_abandoned_repair(self):
+        output = {
+            "schema_version": 1,
+            "outcome": "failed",
+            "failed_component": "validation",
+            "component_outcome": "failed",
+            "exit_code": None,
+            "history": [
+                {
+                    "sequence": 1,
+                    "component": "attempt",
+                    "directory": "01-attempt",
+                    "input_from": {"assignment": "assignment.json"},
+                    "outcome": "succeeded",
+                },
+                {
+                    "sequence": 2,
+                    "component": "validation",
+                    "directory": "02-validation",
+                    "input_from": {
+                        "workspace": "assignment.json",
+                        "change": "01-attempt",
+                    },
+                    "outcome": "failed",
+                },
+                {
+                    "sequence": 3,
+                    "component": "response",
+                    "directory": "03-response",
+                    "input_from": {"validation": "02-validation"},
+                    "outcome": "abandoned",
+                },
+            ],
+        }
+
+        self.assertIs(validate_output(output), output)
+
     def test_rejects_terminal_output_with_forged_topology(self):
         output = {
             "schema_version": 1,

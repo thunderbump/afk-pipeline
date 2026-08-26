@@ -13,6 +13,7 @@ from afk_coordinate.contract import (
     validate_continuation,
     validate_output,
     validate_request,
+    validation_repair_source,
 )
 from afk_iterate.__main__ import validate_sealed_result
 from afk_runtime import progress, repository_state, seal_json, write_json
@@ -118,6 +119,25 @@ def main():
         active = state["active_invocation"]
         if active is None:
             component = state["next_component"]
+            if component == "response":
+                validation = validation_repair_source(state["history"])
+                if validation is not None and not repairable_validation(
+                    run_directory / validation["directory"],
+                    Path(assignment["workspace"]),
+                ):
+                    progress(
+                        "failed Validation is no longer safe to repair; "
+                        "sealing terminal failure"
+                    )
+                    return seal_failure(
+                        run_directory,
+                        state,
+                        "validation",
+                        validation["outcome"],
+                        None,
+                        state_path,
+                        terminal_output_path,
+                    )
             sequence = state["next_sequence"]
             directory_name = f"{sequence:02d}-{component}"
             component_input = COMPONENTS[component]["build_input"](
@@ -474,8 +494,9 @@ def iteration_input(request, _assignment, state, run_directory):
 
 
 def response_input(request, assignment, state, run_directory):
-    if state["history"][-1]["component"] == "validation":
-        validation = state["history"][-1]["directory"]
+    failed_validation = validation_repair_source(state["history"])
+    if failed_validation is not None:
+        validation = failed_validation["directory"]
         source = latest(state, "attempt", "response")
         kind = "attempt" if source["component"] == "attempt" else "feedback_response"
         return stage_input(
