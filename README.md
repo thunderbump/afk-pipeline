@@ -326,7 +326,7 @@ schema:
               "owner": "Credential holder",
               "executor": "outside_help",
               "outside_help_reason": "missing_credentials",
-              "evidence_route": "human_attestation",
+              "evidence_route": "external_check",
               "phases": ["implementation", "closure"]
             }
           ]
@@ -380,7 +380,10 @@ depends only on its small versioned JSON result contract.
 
 `acceptance_routing` freezes the complete trusted v2 capability catalog and the
 Planner timeout. The catalog must include the source Project and may include
-other Projects used by decomposed work. The Run Preparer retains the exact
+other Projects used by decomposed work. An `outside_help` route means the agent
+system lacks the named capability and always uses `external_check` evidence of
+the work performed outside that system; it is not an attestation route. The Run
+Preparer retains the exact
 Planner input/output and deterministic Policy input/output in the Run root.
 `acceptance_routing` is the only Run admission configuration. Run Preparer
 rejects the retired `classification_store` field. Historical v1 Run and

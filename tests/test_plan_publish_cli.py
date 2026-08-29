@@ -240,7 +240,7 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         self.assertEqual(children[0]["labels"], ["project:example", "ready-for-agent"])
         self.assertNotIn("handoff", children[0]["description"].lower())
         self.assertEqual(children[1]["labels"], ["project:example", "ready-for-human"])
-        self.assertIn("## Outside help required", children[1]["description"])
+        self.assertIn("## Outside capability required", children[1]["description"])
         self.assertIn("`missing_credentials`", children[1]["description"])
         self.assertNotIn("approval", children[1]["description"].lower())
 

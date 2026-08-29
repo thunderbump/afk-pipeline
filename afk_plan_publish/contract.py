@@ -108,7 +108,7 @@ def child_acceptance(plan: dict[str, object], child: dict[str, object]) -> str:
         )
     if child.get("executor") == "outside_help":
         statements.append(
-            "- Evidence from the named outside helper must be attached before this child closes."
+            "- external_check evidence of the work performed by the named outside source must be attached before this child closes."
         )
     return "\n".join(statements)
 
@@ -130,17 +130,17 @@ def child_description(
         lines.extend(
             [
                 "",
-                "## Outside help required",
+                "## Outside capability required",
                 "",
-                "The agent system cannot complete this child with its current capabilities.",
-                f"- Reason: `{child['outside_help_reason']}`",
-                f"- Expected helper: `{child['owner']}`",
-                f"- Evidence route: `{child['evidence_route']}`",
+                "The agent system cannot perform this child with its available capabilities.",
+                f"- Unavailable capability reason: `{child['outside_help_reason']}`",
+                f"- Expected outside source: `{child['owner']}`",
+                f"- Performed-work evidence route: `{child['evidence_route']}`",
                 f"- Parent Bead: `{parent_id}`",
                 f"- Parent plan: `{plan['plan_sha256']}`",
                 *([f"- Child Bead: `{bead_id}`"] if bead_id is not None else []),
                 "",
-                "Attach the resulting evidence before closing this child.",
+                "Attach external_check evidence of the work performed before closing this child.",
             ]
         )
     if (

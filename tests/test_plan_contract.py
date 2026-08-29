@@ -1,6 +1,7 @@
 import copy
 import unittest
 
+from afk_plan.__main__ import CAPABILITY_SYSTEM_PROMPT
 from afk_plan.contract import build_plan, validate_input, validate_plan
 
 
@@ -225,6 +226,14 @@ def capability_proposal():
 
 
 class PlanContractTest(unittest.TestCase):
+    def test_capability_prompt_describes_only_unavailable_capability_evidence(self):
+        prompt = CAPABILITY_SYSTEM_PROMPT.lower()
+        self.assertIn("lacks a required capability", prompt)
+        self.assertIn("evidence of the work performed", prompt)
+        self.assertIn("external_check", prompt)
+        self.assertNotIn("approval", prompt)
+        self.assertNotIn("waiver", prompt)
+
     def test_builds_capability_routing_without_approval_semantics(self):
         request = validate_input(capability_input())
 
@@ -261,6 +270,25 @@ class PlanContractTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "requires outside_help"):
             validate_input(extra)
+
+    def test_outside_help_requires_external_check_evidence(self):
+        request = capability_input()
+        request["catalog"]["projects"][0]["routes"][2]["evidence_route"] = (
+            "human_attestation"
+        )
+
+        with self.assertRaisesRegex(
+            ValueError, "outside_help evidence_route must be external_check"
+        ):
+            validate_input(request)
+
+        request = capability_input()
+        proposal = capability_proposal()
+        proposal["children"][2]["evidence_route"] = "repository_check"
+        with self.assertRaisesRegex(
+            ValueError, "outside_help evidence_route must be external_check"
+        ):
+            build_plan(validate_input(request), proposal)
 
     def test_builds_a_canonical_unapproved_plan(self):
         accepted_input = validate_input(planner_input())

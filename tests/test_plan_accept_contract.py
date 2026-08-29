@@ -116,7 +116,7 @@ def capability_input():
                         "owner": "Credential holder",
                         "executor": "outside_help",
                         "outside_help_reason": "missing_credentials",
-                        "evidence_route": "human_attestation",
+                        "evidence_route": "external_check",
                         "phases": ["closure"],
                     },
                 ],
@@ -128,7 +128,7 @@ def capability_input():
 
 def capability_plan(request, executor="caller_agent", ambiguities=None):
     owner = "Caller agent" if executor == "caller_agent" else "Credential holder"
-    evidence = "external_check" if executor == "caller_agent" else "human_attestation"
+    evidence = "external_check"
     reason = (
         {"outside_help_reason": "missing_credentials"}
         if executor == "outside_help"

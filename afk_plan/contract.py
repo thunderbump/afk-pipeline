@@ -648,6 +648,10 @@ def validate_executor(route: dict[str, object], version: int, name: str) -> None
     reason = route.get("outside_help_reason")
     if version == 2 and route[field] == "outside_help":
         enum(reason, OUTSIDE_HELP_REASONS, f"{name} outside_help_reason")
+        if route.get("evidence_route") != "external_check":
+            raise ValueError(
+                f"{name} outside_help evidence_route must be external_check"
+            )
     elif reason is not None:
         raise ValueError(f"{name} outside_help_reason requires outside_help")
 

@@ -333,7 +333,7 @@ class PlanAcceptanceCliTest(unittest.TestCase):
                         "phase": "closure",
                         "executor": "outside_help",
                         "outside_help_reason": "missing_credentials",
-                        "evidence_route": "human_attestation",
+                        "evidence_route": "external_check",
                     }
                     for index in (1, 2)
                 ],

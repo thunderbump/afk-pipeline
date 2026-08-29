@@ -47,7 +47,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         self.assertEqual(output["reviewer"]["model"], "gpt-5.6-luna")
         self.assertEqual(output["artifacts"]["input"], "input.json")
 
-    def test_accepts_published_v2_repository_check_fan_in(self):
+    def test_accepts_published_v2_capability_fan_in(self):
         self.request, self.plan = v2_repository_plan()
         accepted = accept_plan(self.request, self.plan)
         (self.acceptance / "input.json").write_text(
@@ -69,18 +69,20 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         check_directories = []
         for index, child in enumerate(self.plan["children"], start=1):
             child_id = f"central-child-{index}"
+            evidence_kind = child["evidence_route"]
             record = {
                 "schema_version": 1,
                 "child": child_id,
                 "parent_plan": self.plan["plan_sha256"],
                 "outcome": "satisfied",
-                "producer": {"kind": "repository_check", "identity": child["owner"]},
+                "producer": {"kind": evidence_kind, "identity": child["owner"]},
                 "criteria": child["criteria"],
                 "subject": {"commit": COMMIT},
                 "evidence": [f"repository-check:{child['local_id']}"],
                 "accepted_at": "2026-08-23T00:00:02Z",
             }
             completion = self.completions / child["local_id"]
+            completion.mkdir(exist_ok=True)
             (completion / "input.json").write_text(
                 json.dumps(
                     {
@@ -106,7 +108,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
                         "plan_sha256": self.plan["plan_sha256"],
                         "local_id": child["local_id"],
                         "criteria": child["criteria"],
-                        "evidence_basis": "repository_check",
+                        "evidence_basis": evidence_kind,
                         "satisfies_criteria": True,
                         "record": record,
                         "error_category": None,
@@ -135,13 +137,22 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
             )
             check_directories.append(check)
         request = self.input_value()
-        for completion, check in zip(
-            request["completions"], check_directories, strict=True
+        request["completions"][1]["local_id"] = "outside-check"
+        request["completions"][1]["directory"] = str(self.completions / "outside-check")
+        for completion, check, child in zip(
+            request["completions"],
+            check_directories,
+            self.plan["children"],
+            strict=True,
         ):
-            completion["terminal"] = {
-                "kind": "repository_check",
-                "directory": str(check),
-            }
+            completion["terminal"] = (
+                {
+                    "kind": "repository_check",
+                    "directory": str(check),
+                }
+                if child["evidence_route"] == "repository_check"
+                else {"kind": "completion_record"}
+            )
 
         completed = self.invoke("accepted", request)
 
@@ -153,7 +164,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         )
         self.assertEqual(
             [child["terminal"]["status"] for child in fan_in["children"]],
-            ["passed", "passed"],
+            ["passed", "validated"],
         )
 
     def test_seals_incomplete_with_explicit_gap_and_follow_up(self):
@@ -525,8 +536,8 @@ def publication_output(request, accepted):
         "acceptance_sha256": accepted["acceptance_sha256"],
         "plan_sha256": accepted["plan_sha256"],
         "children": [
-            {"local_id": "implementation", "bead_id": "central-child-1"},
-            {"local_id": "approval", "bead_id": "central-child-2"},
+            {"local_id": child["local_id"], "bead_id": f"central-child-{index}"}
+            for index, child in enumerate(accepted["plan"]["children"], start=1)
         ],
         "error_category": None,
         "artifacts": {
@@ -613,7 +624,7 @@ def v2_repository_plan():
                         "owner": "Credential holder",
                         "executor": "outside_help",
                         "outside_help_reason": "missing_credentials",
-                        "evidence_route": "repository_check",
+                        "evidence_route": "external_check",
                         "phases": ["closure"],
                     },
                 ],
@@ -651,7 +662,7 @@ def v2_repository_plan():
                     "depends_on": [],
                 },
                 {
-                    "local_id": "approval",
+                    "local_id": "outside-check",
                     "title": "Check the repository with outside help",
                     "objective": "Obtain the outside repository check.",
                     "criteria": ["criterion-2"],
@@ -660,7 +671,7 @@ def v2_repository_plan():
                     "phase": "closure",
                     "executor": "outside_help",
                     "outside_help_reason": "missing_credentials",
-                    "evidence_route": "repository_check",
+                    "evidence_route": "external_check",
                     "depends_on": ["implementation"],
                 },
             ],

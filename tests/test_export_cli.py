@@ -1299,7 +1299,7 @@ class ExportCliTests(unittest.TestCase):
                 "owner": "Credential holder",
                 "executor": "outside_help",
                 "outside_help_reason": "missing_credentials",
-                "evidence_route": "human_attestation",
+                "evidence_route": "external_check",
                 "phases": ["closure"],
             },
         ]
@@ -1354,7 +1354,7 @@ class ExportCliTests(unittest.TestCase):
                         "phase": "closure" if outside_help else "implementation",
                         "executor": "outside_help" if outside_help else "afk_run",
                         "evidence_route": (
-                            "human_attestation" if outside_help else "repository_check"
+                            "external_check" if outside_help else "repository_check"
                         ),
                         **(
                             {"outside_help_reason": "missing_credentials"}

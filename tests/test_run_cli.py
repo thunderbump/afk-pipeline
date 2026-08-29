@@ -1239,7 +1239,7 @@ class RunPreparerCliTest(unittest.TestCase):
                                     "owner": "Credential holder",
                                     "executor": "outside_help",
                                     "outside_help_reason": "missing_credentials",
-                                    "evidence_route": "human_attestation",
+                                    "evidence_route": "external_check",
                                     "phases": ["closure"],
                                 },
                             ],

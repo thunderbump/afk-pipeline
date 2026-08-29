@@ -124,6 +124,7 @@ def load_fan_in(request: dict[str, object]) -> dict[str, object]:
             }
         )
     return {
+        "schema_version": plan["schema_version"],
         "parent": planner_input["parent"],
         "plan_sha256": plan["plan_sha256"],
         "criteria": plan["criteria"],
@@ -193,7 +194,12 @@ def validate_follow_up(
         criterion for criterion in fan_in["criteria"] if criterion["id"] in incomplete
     ]
     children = validate_children(
-        {"catalog": fan_in["catalog"]}, [value], incomplete_criteria
+        {
+            "schema_version": fan_in.get("schema_version", 1),
+            "catalog": fan_in["catalog"],
+        },
+        [value],
+        incomplete_criteria,
     )
     if children[0]["local_id"] in {child["local_id"] for child in fan_in["children"]}:
         raise ValueError("follow-up local_id must be new within the accepted Plan")

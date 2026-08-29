@@ -170,9 +170,7 @@ elif scenario in {
                         if outside
                         else {}
                     ),
-                    "evidence_route": "human_attestation"
-                    if outside
-                    else "pipeline_run",
+                    "evidence_route": "external_check" if outside else "pipeline_run",
                 }
             ],
             "children": [],
