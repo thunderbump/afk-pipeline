@@ -295,14 +295,17 @@ elif scenario == "decompose-project-registration":
             },
         ],
     )
-elif scenario == "decompose-human-approval":
+elif scenario == "decompose-external-check":
     value = decomposed_proposal(
         [
             (
                 "Presentation options are prototyped.",
                 "Prototype the presentation options.",
             ),
-            ("Brian accepts one direction.", "Accept one presentation direction."),
+            (
+                "An external service verifies one direction.",
+                "Verify one presentation direction.",
+            ),
         ],
         [
             {
@@ -318,20 +321,20 @@ elif scenario == "decompose-human-approval":
                 "depends_on": [],
             },
             {
-                "local_id": "approval",
-                "title": "Choose the paused Run presentation",
-                "objective": "Review the prototypes and accept one direction.",
+                "local_id": "verification",
+                "title": "Verify the paused Run presentation",
+                "objective": "Check the prototypes and verify one direction.",
                 "criteria": ["criterion-2"],
                 "project": "operations-webui",
-                "owner": "Brian",
+                "owner": "Presentation verifier",
                 "phase": "closure",
-                "execution": "human",
-                "evidence_route": "human_attestation",
+                "execution": "external",
+                "evidence_route": "external_check",
                 "depends_on": ["prototype"],
                 "handoff": {
-                    "authority": "Brian",
+                    "authority": "Presentation verifier",
                     "subject_fields": ["commit"],
-                    "completion_record": "human_attestation",
+                    "completion_record": "external_check",
                 },
             },
         ],

@@ -13,7 +13,7 @@ MAX_CHILDREN = 64
 MAX_PROJECTS = 64
 MAX_ROUTES = 16
 DOMAIN_ID_PATTERN = re.compile(r"[a-z0-9][a-z0-9-]{0,127}\Z")
-EXECUTIONS = {"agent", "human", "external"}
+EXECUTIONS = {"agent", "external"}
 EXECUTORS = {"afk_run", "caller_agent", "outside_help"}
 OUTSIDE_HELP_REASONS = {
     "missing_authority",
@@ -26,7 +26,6 @@ EVIDENCE_ROUTES = {
     "pipeline_run",
     "repository_check",
     "external_check",
-    "human_attestation",
 }
 PHASES = {"implementation", "closure"}
 
@@ -559,10 +558,10 @@ def validate_handoff(value, owner, evidence_route):
     fields = string_list(handoff["subject_fields"], "handoff subject_fields", 8, 64)
     if not fields or not set(fields) <= {"commit", "environment"}:
         raise ValueError("handoff subject_fields are invalid")
-    if handoff["completion_record"] != evidence_route or evidence_route not in {
-        "human_attestation",
-        "external_check",
-    }:
+    if (
+        handoff["completion_record"] != evidence_route
+        or evidence_route != "external_check"
+    ):
         raise ValueError("handoff completion_record must match its evidence route")
     handoff["subject_fields"] = fields
     return handoff

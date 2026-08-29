@@ -148,16 +148,16 @@ class PlanAcceptanceCliTest(unittest.TestCase):
                 [],
             ),
             (
-                "human",
+                "external-owner",
                 "example",
                 "Brian",
-                "human",
-                "human_attestation",
+                "external",
+                "external_check",
                 "implementation",
                 [],
             ),
             (
-                "external",
+                "external-host",
                 "example",
                 "Host operator",
                 "external",
@@ -191,8 +191,8 @@ class PlanAcceptanceCliTest(unittest.TestCase):
                     [
                         {
                             "owner": "Brian",
-                            "execution": "human",
-                            "evidence_route": "human_attestation",
+                            "execution": "external",
+                            "evidence_route": "external_check",
                             "phases": ["implementation"],
                         },
                         {

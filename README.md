@@ -41,9 +41,9 @@ slugs and their allowed combinations of `execution`, `evidence_route`, and
             "phases": ["implementation"]
           },
           {
-            "owner": "Example operations owner",
-            "execution": "human",
-            "evidence_route": "human_attestation",
+            "owner": "Example operations service",
+            "execution": "external",
+            "evidence_route": "external_check",
             "phases": ["closure"]
           }
         ]
@@ -80,9 +80,11 @@ For decompose, the existing Plan Contract also requires every criterion to
 belong to exactly one child. Child Projects, owners, and
 execution/evidence/phase combinations must exist in the trusted catalog;
 dependencies must form a DAG; and closure children must follow implementation
-when implementation work exists. Human and external work must include a
-handoff whose authority matches the trusted owner, commit and/or environment
-subject, and matching completion-record type. The Plan Contract still derives
+when implementation work exists. External work must include a handoff whose
+authority matches the trusted owner, commit and/or environment subject, and an
+`external_check` completion-record
+type. Legacy v1 human handoffs are rejected by the current contract. The Plan
+Contract still derives
 `ready-for-agent`/`ready-for-human` and computes the canonical plan digest used
 by the Child Graph Publisher.
 
@@ -111,8 +113,8 @@ Input contains exactly `schema_version: 1`, the original validated
 
 A direct record is accepted only when every route targets the unchanged source
 Bead in its source Project, uses agent execution in the implementation phase,
-and requests `pipeline_run` or `repository_check` evidence. Human, external,
-cross-project, closure-phase, or ambiguous direct records seal
+and requests `pipeline_run` or `repository_check` evidence. External,
+cross-project, closure-phase, or ambiguous valid direct records seal
 `decision: needs_human` and cannot enter the pipeline. Accepted direct output
 uses policy `pipeline-compatible-direct-v1`, contains no Plan, and has no Child
 Graph Publisher authority.
@@ -165,11 +167,10 @@ created with exact project/readiness labels and a parent relationship; existing
 children must still match the accepted plan. Planned `depends_on` edges become
 Beads `blocks` relationships.
 
-Human and external children receive a fixed completion handoff section after
-their actual Bead ID is known; the human form is titled `Human completion
-handoff`. It names the parent, plan digest, child, criteria, expected authority,
-required subject fields, Completion Record shape, and scoped-approval
-invalidation rule. Inference never receives Beads write authority.
+External children receive a fixed completion handoff section after their actual
+Bead ID is known. It names the parent, plan digest, child, criteria, expected
+authority, required subject fields, and Completion Record shape. Inference never
+receives Beads write authority.
 
 Each invocation uses a new result directory. Success seals `decision: published`;
 an exact replay seals `decision: replayed` without duplicate
@@ -206,8 +207,8 @@ python3 -m afk_complete completion.json /new/result-directory
     "parent_plan": "<canonical plan digest>",
     "outcome": "satisfied",
     "producer": {
-      "kind": "human_attestation",
-      "identity": "Brian"
+      "kind": "external_check",
+      "identity": "Deployment verifier"
     },
     "criteria": ["criterion-2"],
     "subject": {
@@ -223,64 +224,16 @@ python3 -m afk_complete completion.json /new/result-directory
 The deterministic validator revalidates the complete Acceptance Policy record,
 the successful Publisher envelope, the exact planned-child mapping, criterion
 coverage, producer identity and kind, required subject fields, caller-frozen
-subject values, evidence references, and UTC timestamp. Producer kinds remain
-distinct: `pipeline_run`, `repository_check`, `external_check`,
-`human_attestation`, and `human_waiver`. The producer kind must match the
-child's accepted evidence route, except that a human-attestation child may
-carry an explicit human waiver.
-
-All kinds except `human_waiver` require `outcome: satisfied` and seal
-`decision: satisfied` with `satisfies_criteria: true`. A human waiver requires
-`outcome: waived`, seals `decision: waived`, and keeps
-`satisfies_criteria: false`; validation never presents it as verified evidence.
+subject values, evidence references, and UTC timestamp. Producer kinds are
+`pipeline_run`, `repository_check`, and `external_check`. The producer kind must
+match the child's accepted evidence route. Every valid
+record requires `outcome: satisfied` and seals `decision: satisfied` with
+`satisfies_criteria: true`.
 Changing the child, Plan digest, criteria, authority, or expected
 commit/environment fails before result creation. A valid result contains
 `input.json` and atomically sealed `output.json`. The module performs no
 inference, evidence retrieval, Beads access, work execution, child closure, or
 parent acceptance review.
-
-## Human Attestation
-
-Approve one explicitly published human child from any working directory:
-
-```sh
-/path/to/afk-pipeline/afk attest central-child-2 \
-  --publication /absolute/path/to/publisher-result \
-  --subject commit=abc123 --subject environment=production \
-  --evidence bead-comment:central-parent#approval-1
-# Automation must add --accept.
-```
-
-The command reads `~/.config/afk/config.json` (or the test/non-default
-`--config` path) and requires the configured `attestation.result_root` to be an
-existing directory. It revalidates the immutable Publisher input, accepted
-Plan, successful publication, exact child mapping, human handoff, authority,
-criteria, and subject-field shape before showing the frozen scope. A decline
-creates no result and does not read or mutate Beads. End-of-input is not
-approval, and piped input cannot confirm; interactive confirmation requires a
-terminal. Noninteractive callers must pass `--accept` explicitly.
-
-After approval it creates or resumes one content-addressed durable attempt under
-the attestation result root. It re-reads the frozen parent, exact current child,
-Plan-controlled dependencies, dependency closure, status, and existing
-Completion Record comments. The helper invokes the existing `afk_complete`
-validator and retains its sealed result. Only then does it attach the exact
-validated Completion Record as canonical JSON in a child comment and close that
-child. It never creates an approval, runs inference or Parent Acceptance Review,
-or closes the parent. Beads operations use the trusted host-side `bd` command,
-not the command recorded in Publisher evidence. Tests and controlled deployment
-adapters may replace that argv with `AFK_ATTEST_BEADS_COMMAND` JSON.
-
-Attachment and close reconcile independently. Retrying the same exact scope
-reuses its accepted timestamp and sealed Completion Validator evidence, does
-not duplicate the comment, and finishes a missing close. A sealed successful
-attempt remains immutable even after later parent-state changes. Interrupted
-validator directories are retained as numbered abandoned evidence before a
-replacement validator attempt begins. A stale or conflicting child, incomplete
-dependency, malformed evidence, validator failure, or Beads failure seals
-inspectable attempt evidence and does not newly close the child.
-The explicit `--publication` directory is intentional; this MVP does not scan
-for publications or maintain an invocation registry.
 
 ## Run Preparer
 
@@ -334,9 +287,6 @@ schema:
       ]
     }
   },
-  "attestation": {
-    "result_root": "/absolute/afk-owned/path/to/attestations"
-  },
   "assignment": {
     "command": ["agent", "--mode", "json", "Read", "{assignment_path}"],
     "timeout_seconds": 1800
@@ -368,10 +318,6 @@ schema:
 }
 ```
 
-`attestation` is optional for `afk run` and required by `afk attest`; its result
-root must already exist and remain separate from Beads and immutable Plan and
-Publisher evidence.
-
 `publication` is optional. When present, its command must contain exactly one
 argv element equal to `{bundle_path}`. The preparer replaces that element with
 a private temporary Publication Bundle path and invokes the command without a
@@ -386,7 +332,9 @@ the work performed outside that system; it is not an attestation route. The Run
 Preparer retains the exact
 Planner input/output and deterministic Policy input/output in the Run root.
 `acceptance_routing` is the only Run admission configuration. Run Preparer
-rejects the retired `classification_store` field. Historical v1 Run and
+rejects the retired `classification_store` field. The retired `attestation`
+section is also rejected with instructions to use capability-based
+`outside_help`. Historical v1 Run and
 Preflight evidence remains readable through the exporter and Operations WebUI.
 
 Inference roles can be selected without rebuilding adapter commands. For example,
@@ -1132,17 +1080,15 @@ and satisfaction state.
 Pipeline terminal evidence is a prepared Run that must belong to the published
 child, end at Coordinator `completed/stop`, contain a valid Committed Change,
 and match the current commit subject. Repository-check evidence must be a passed,
-unchanged-head Validation result at that commit. Human and external authority
-remain visibly typed as Completion Record evidence instead of being relabeled as
-deterministic verification. Completion timestamps cannot predate their pipeline
-Run.
+unchanged-head Validation result at that commit. `external_check` remains visibly
+typed as Completion Record evidence instead of being relabeled as deterministic
+verification. Completion timestamps cannot predate its terminal evidence.
 
 These deterministic checks finish before result creation or inference. The
 default adapter then invokes Pi with `gpt-5.6-luna`, low thinking, and no tools.
 `AFK_PARENT_REVIEW_AGENT_COMMAND` may contain a JSON argv override for testing
 or deployment. The model sees only the verified fan-in summary; it does not
-read repositories, retrieve evidence, mutate Beads, run work, or ask for an
-unchanged scoped human approval again.
+read repositories, retrieve evidence, mutate Beads, or run work.
 
 The immutable result directory contains `input.json`, the deterministic
 `fan-in.json`, raw `events.jsonl`, raw `stderr.log`, and an atomically sealed
@@ -1151,8 +1097,7 @@ decision per canonical parent criterion, and lists exactly one gap per
 incomplete criterion. An incomplete result also proposes one advisory follow-up
 child using the existing Plan child shape: project, owner, phase, execution,
 evidence route, dependencies, and handoff are checked against the trusted
-catalog before sealing. That proposal has no publication or work authority. A
-human waiver remains non-satisfying and cannot be accepted by the model.
+catalog before sealing. That proposal has no publication or work authority.
 
 Exit status is `0` only for an accepted parent, `1` for incomplete or sealed
 agent failure, and `2` for invalid invocation, configuration, or evidence. A

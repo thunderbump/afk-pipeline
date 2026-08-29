@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from afk_config import attestation_result_root, effective_inference_roles
+from afk_config import effective_inference_roles
 from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_plan.contract import validate_catalog, validate_planner_output
 from afk_plan.contract import validate_input as validate_planner_input
@@ -45,11 +45,9 @@ def main(argv=None):
         usage=(
             "afk run <bead-id> [--config PATH] | "
             "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
-            "afk attest CHILD_ID --publication DIRECTORY --subject FIELD=VALUE "
-            "--evidence VALUE [--accept] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"
         ),
-        description="Prepare, execute, attest, or export AFK work.",
+        description="Prepare, execute, continue, or export AFK work.",
     )
     subparsers = parser.add_subparsers(dest="operation", required=True)
     run_parser = subparsers.add_parser("run", help="prepare and execute a Bead")
@@ -64,9 +62,6 @@ def main(argv=None):
     )
     continue_parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     continue_parser.add_argument("--abandon-active", action="store_true")
-    from afk_attest import add_parser as add_attest_parser
-
-    add_attest_parser(subparsers)
     export_parser = subparsers.add_parser(
         "export", help="export one sealed Run as a portable bundle"
     )
@@ -94,10 +89,6 @@ def main(argv=None):
             arguments.config,
             arguments.abandon_active,
         )
-    if arguments.operation == "attest":
-        from afk_attest import attest
-
-        return attest(arguments)
     if arguments.operation == "export":
         from afk_export import ExportError, ExportUsageError, export_run
 
@@ -912,7 +903,11 @@ def load_config(path, *, include_inference_roles=True):
         raise PreparationError(
             "configuration classification_store is retired; use acceptance_routing"
         )
-    optional = {"publication", "attestation", "inference_roles"}
+    if isinstance(value, dict) and "attestation" in value:
+        raise PreparationError(
+            "configuration attestation is retired; use capability-based outside_help"
+        )
+    optional = {"publication", "inference_roles"}
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != 1
@@ -949,8 +944,6 @@ def load_config(path, *, include_inference_roles=True):
     validate_coordinator(value["coordinator"])
     if "publication" in value:
         validate_publication(value["publication"])
-    if "attestation" in value:
-        validate_attestation(value["attestation"])
     projects = value["projects"]
     if not isinstance(projects, dict) or not projects:
         raise PreparationError("configuration projects must be a nonempty object")
@@ -1029,13 +1022,6 @@ def validate_publication(value):
     if value["command"][0] == PUBLICATION_BUNDLE_PLACEHOLDER:
         raise PreparationError("publication {bundle_path} cannot be the executable")
     positive(value["timeout_seconds"], "publication timeout_seconds")
-
-
-def validate_attestation(value):
-    try:
-        value["result_root"] = attestation_result_root(value)
-    except (TypeError, ValueError) as error:
-        raise PreparationError(str(error)) from error
 
 
 def validate_project(slug, value):

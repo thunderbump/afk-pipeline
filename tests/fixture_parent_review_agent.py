@@ -14,7 +14,7 @@ criteria = [
     {
         "id": "criterion-2",
         "decision": "accepted",
-        "rationale": "The scoped human attestation covers this criterion.",
+        "rationale": "The scoped external check covers this criterion.",
     },
 ]
 gaps = []

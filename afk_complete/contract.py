@@ -9,8 +9,6 @@ PRODUCER_KINDS = {
     "pipeline_run",
     "repository_check",
     "external_check",
-    "human_attestation",
-    "human_waiver",
 }
 SUBJECT_FIELDS = {"commit", "environment"}
 OUTPUT_FIELDS = {
@@ -63,9 +61,7 @@ def validate_record(
         raise ValueError("Completion Record producer kind is invalid")
     bounded_text(producer["identity"], "Completion Record producer identity", 256)
     allowed_kinds = {child["evidence_route"]}
-    if child["evidence_route"] == "human_attestation":
-        allowed_kinds.add("human_waiver")
-    expected_outcome = "waived" if kind == "human_waiver" else "satisfied"
+    expected_outcome = "satisfied"
     if (
         record["schema_version"] != 1
         or record["child"] != child_id
@@ -98,8 +94,7 @@ def validate_record(
     record["producer"] = producer
     record["criteria"] = criteria
     record["subject"] = subject
-    satisfies = kind != "human_waiver"
-    return record, kind, satisfies
+    return record, kind, True
 
 
 def child_executor(child: dict[str, object]) -> object:

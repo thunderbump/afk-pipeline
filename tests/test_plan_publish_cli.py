@@ -119,8 +119,8 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         self.assertEqual(retried.returncode, 0, retried.stderr)
         self.assertEqual(len(json.loads(self.state.read_text())["children"]), 2)
 
-    def test_human_child_contains_the_fixed_completion_handoff(self):
-        request, plan = self.human_plan()
+    def test_external_child_contains_the_fixed_completion_handoff(self):
+        request, plan = self.external_plan()
         self.replace_acceptance(request, plan)
         state = json.loads(self.state.read_text())
         state["parent"] = {
@@ -137,16 +137,16 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         human = json.loads(self.state.read_text())["children"][1]
         self.assertEqual(human["labels"], ["project:example", "ready-for-human"])
-        self.assertIn("## Human completion handoff", human["description"])
+        self.assertIn("## External completion handoff", human["description"])
         self.assertIn("`central-child-2`", human["description"])
         self.assertIn("`Brian`", human["description"])
         self.assertIn('"parent_plan":', human["description"])
         self.assertIn('"outcome": "satisfied"', human["description"])
         self.assertIn('"producer":', human["description"])
-        self.assertIn('"kind": "human_attestation"', human["description"])
+        self.assertIn('"kind": "external_check"', human["description"])
         self.assertIn("changed parent plan", human["description"])
         self.assertIn(
-            "A valid Completion Record must be attached before this child closes.",
+            "Valid external-check evidence must be attached before this child closes.",
             human["acceptance_criteria"],
         )
         state = json.loads(self.state.read_text())
@@ -163,7 +163,7 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         )
 
     def test_retry_repairs_only_the_known_human_description_placeholder(self):
-        request, plan = self.human_plan()
+        request, plan = self.external_plan()
         self.replace_acceptance(request, plan)
         state = json.loads(self.state.read_text())
         state["parent"] = {
@@ -183,7 +183,7 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         self.assertEqual(retried.returncode, 0, retried.stderr)
         human = json.loads(self.state.read_text())["children"][1]
         self.assertIn("`central-child-2`", human["description"])
-        self.assertIn("## Human completion handoff", human["description"])
+        self.assertIn("## External completion handoff", human["description"])
 
     def test_interrupt_seals_the_known_partial_mapping(self):
         state = json.loads(self.state.read_text())
@@ -317,13 +317,13 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
             )
         )
 
-    def human_plan(self):
+    def external_plan(self):
         request = planner_input()
         request["catalog"]["projects"][0]["routes"].append(
             {
                 "owner": "Brian",
-                "execution": "human",
-                "evidence_route": "human_attestation",
+                "execution": "external",
+                "evidence_route": "external_check",
                 "phases": ["closure"],
             }
         )
@@ -363,13 +363,13 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
                     "project": "example",
                     "owner": "Brian",
                     "phase": "closure",
-                    "execution": "human",
-                    "evidence_route": "human_attestation",
+                    "execution": "external",
+                    "evidence_route": "external_check",
                     "depends_on": ["implementation"],
                     "handoff": {
                         "authority": "Brian",
                         "subject_fields": ["commit", "environment"],
-                        "completion_record": "human_attestation",
+                        "completion_record": "external_check",
                     },
                 },
             ],

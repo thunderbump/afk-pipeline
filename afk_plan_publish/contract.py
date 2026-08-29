@@ -102,9 +102,9 @@ def external_reference(plan_sha256: str, local_id: str) -> str:
 def child_acceptance(plan: dict[str, object], child: dict[str, object]) -> str:
     criteria = {item["id"]: item for item in plan["criteria"]}
     statements = [f"- {criteria[item]['statement']}" for item in child["criteria"]]
-    if child.get("execution") == "human":
+    if child.get("execution") == "external":
         statements.append(
-            "- A valid Completion Record must be attached before this child closes."
+            "- Valid external-check evidence must be attached before this child closes."
         )
     if child.get("executor") == "outside_help":
         statements.append(
@@ -149,16 +149,8 @@ def child_description(
         and bead_id is not None
     ):
         handoff = child["handoff"]
-        heading = (
-            "Human completion handoff"
-            if child["execution"] == "human"
-            else "External completion handoff"
-        )
-        ownership = (
-            "This child is not agent-executable."
-            if child["execution"] == "human"
-            else "This child is completed by the named external authority."
-        )
+        heading = "External completion handoff"
+        ownership = "This child is completed by the named external authority."
         subject = {field: f"<{field}>" for field in handoff["subject_fields"]}
         record = {
             "schema_version": 1,
@@ -193,8 +185,7 @@ def child_description(
                 json.dumps(record, indent=2),
                 "```",
                 "",
-                "This scoped approval is consumed once. A changed parent plan or",
-                "referenced subject requires new approval.",
+                "A changed parent plan or referenced subject requires new evidence.",
             ]
         )
     return "\n".join(lines)

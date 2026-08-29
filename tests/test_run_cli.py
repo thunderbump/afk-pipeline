@@ -777,6 +777,20 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("retired", retired.stderr)
         self.assertFalse((self.root / "runs").exists())
 
+    def test_attestation_configuration_is_retired(self):
+        config = json.loads(self.config.read_text())
+        config["attestation"] = {"result_root": str(self.root / "attestations")}
+        self.config.write_text(json.dumps(config))
+
+        retired = self.invoke("run", self.bead["id"], "--config", str(self.config))
+
+        self.assertEqual(retired.returncode, 2)
+        self.assertIn(
+            "configuration attestation is retired; use capability-based outside_help",
+            retired.stderr,
+        )
+        self.assertFalse((self.root / "runs").exists())
+
     def test_assignment_command_requires_one_exact_path_placeholder_before_mutation(
         self,
     ):

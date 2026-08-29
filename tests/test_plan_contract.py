@@ -43,8 +43,8 @@ def planner_input():
                         },
                         {
                             "owner": "Operations owner",
-                            "execution": "human",
-                            "evidence_route": "human_attestation",
+                            "execution": "external",
+                            "evidence_route": "external_check",
                             "phases": ["closure"],
                         },
                     ],
@@ -108,13 +108,13 @@ def proposal():
                 "project": "operations-webui",
                 "owner": "Operations owner",
                 "phase": "closure",
-                "execution": "human",
-                "evidence_route": "human_attestation",
+                "execution": "external",
+                "evidence_route": "external_check",
                 "depends_on": ["operations-closure"],
                 "handoff": {
                     "authority": "Operations owner",
                     "subject_fields": ["environment"],
-                    "completion_record": "human_attestation",
+                    "completion_record": "external_check",
                 },
             },
         ],
@@ -274,9 +274,8 @@ class PlanContractTest(unittest.TestCase):
     def test_outside_help_requires_external_check_evidence(self):
         request = capability_input()
         request["catalog"]["projects"][0]["routes"][2]["evidence_route"] = (
-            "human_attestation"
+            "repository_check"
         )
-
         with self.assertRaisesRegex(
             ValueError, "outside_help evidence_route must be external_check"
         ):
@@ -289,6 +288,19 @@ class PlanContractTest(unittest.TestCase):
             ValueError, "outside_help evidence_route must be external_check"
         ):
             build_plan(validate_input(request), proposal)
+
+    def test_rejects_retired_approval_routes_and_v1_human_handoffs(self):
+        retired_route = planner_input()
+        retired_route["catalog"]["projects"][1]["routes"][1]["evidence_route"] = (
+            "human_attestation"
+        )
+        with self.assertRaisesRegex(ValueError, "evidence_route is invalid"):
+            validate_input(retired_route)
+
+        human_handoff = planner_input()
+        human_handoff["catalog"]["projects"][1]["routes"][1]["execution"] = "human"
+        with self.assertRaisesRegex(ValueError, "execution is invalid"):
+            validate_input(human_handoff)
 
     def test_builds_a_canonical_unapproved_plan(self):
         accepted_input = validate_input(planner_input())

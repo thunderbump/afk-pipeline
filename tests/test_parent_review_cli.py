@@ -304,7 +304,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         unsuccessful = self.invoke("accepted", result=self.root / "unsuccessful")
         self.assertEqual(unsuccessful.returncode, 2)
 
-    def test_non_satisfying_waiver_cannot_be_accepted_by_inference(self):
+    def test_retired_approval_record_is_rejected_by_parent_contract(self):
         directory = self.completions / "approval"
         input_path = directory / "input.json"
         output_path = directory / "output.json"
@@ -321,10 +321,8 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
 
         completed = self.invoke("accepted")
 
-        self.assertEqual(completed.returncode, 1, completed.stderr)
-        sealed = json.loads((self.result / "output.json").read_text())
-        self.assertEqual(sealed["outcome"], "failed")
-        self.assertEqual(sealed["error_category"], "invalid_review")
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertFalse(self.result.exists())
 
     def test_agent_protocol_and_process_failures_are_sealed(self):
         for scenario, category in (
@@ -479,7 +477,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
                     "Example agent",
                     ["criterion-1"],
                 ),
-                ("approval", "human_attestation", "Brian", ["criterion-2"]),
+                ("approval", "external_check", "Brian", ["criterion-2"]),
             ),
             start=1,
         ):
@@ -764,8 +762,8 @@ def mixed_plan():
     request["catalog"]["projects"][0]["routes"].append(
         {
             "owner": "Brian",
-            "execution": "human",
-            "evidence_route": "human_attestation",
+            "execution": "external",
+            "evidence_route": "external_check",
             "phases": ["closure"],
         }
     )
@@ -807,13 +805,13 @@ def mixed_plan():
                     "project": "example",
                     "owner": "Brian",
                     "phase": "closure",
-                    "execution": "human",
-                    "evidence_route": "human_attestation",
+                    "execution": "external",
+                    "evidence_route": "external_check",
                     "depends_on": ["implementation"],
                     "handoff": {
                         "authority": "Brian",
                         "subject_fields": ["commit"],
-                        "completion_record": "human_attestation",
+                        "completion_record": "external_check",
                     },
                 },
             ],

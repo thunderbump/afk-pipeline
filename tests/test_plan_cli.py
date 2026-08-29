@@ -254,13 +254,14 @@ class PlanCliTest(unittest.TestCase):
             [[], ["implementation"]],
         )
 
-    def test_prototype_direction_separates_human_approval(self):
+    def test_prototype_direction_separates_external_verification(self):
         self.request["parent"].update(
             {
                 "id": "central-1m8a",
                 "title": "Expose why an AFK Run paused in the Operations Console",
                 "acceptance_criteria": (
-                    "Presentation options are prototyped. Brian accepts one direction."
+                    "Presentation options are prototyped. "
+                    "An external service verifies one direction."
                 ),
                 "labels": ["project:operations-webui"],
             }
@@ -276,23 +277,23 @@ class PlanCliTest(unittest.TestCase):
                         "phases": ["implementation"],
                     },
                     {
-                        "owner": "Brian",
-                        "execution": "human",
-                        "evidence_route": "human_attestation",
+                        "owner": "Presentation verifier",
+                        "execution": "external",
+                        "evidence_route": "external_check",
                         "phases": ["closure"],
                     },
                 ],
             }
         ]
 
-        completed = self.invoke("decompose-human-approval")
+        completed = self.invoke("decompose-external-check")
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((self.result / "output.json").read_text())
         self.assertEqual(output["routing"]["decision"], "decompose")
         self.assertEqual(
             [child["execution"] for child in output["plan"]["children"]],
-            ["agent", "human"],
+            ["agent", "external"],
         )
         self.assertEqual(output["plan"]["children"][1]["depends_on"], ["prototype"])
 

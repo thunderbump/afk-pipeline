@@ -18,9 +18,9 @@ class CompletionRecordCliTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        self.request, self.plan = human_plan()
+        self.request, self.plan = external_plan()
         self.acceptance, self.publication, self.child_id = self.publish_plan(
-            self.request, self.plan, "human"
+            self.request, self.plan, "external"
         )
         self.completion_input = self.root / "completion.json"
         self.result = self.root / "completion-result"
@@ -91,52 +91,29 @@ class CompletionRecordCliTest(unittest.TestCase):
         ][1]["bead_id"]
         return acceptance_directory, publication_directory, child_id
 
-    def test_validates_one_manual_human_attestation_end_to_end(self):
+    def test_validates_one_manual_external_check_end_to_end(self):
         completed = self.invoke()
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((self.result / "output.json").read_text())
         self.assertEqual(output["outcome"], "completed")
         self.assertEqual(output["decision"], "satisfied")
-        self.assertEqual(output["evidence_basis"], "human_attestation")
+        self.assertEqual(output["evidence_basis"], "external_check")
         self.assertEqual(output["source"], {"kind": "bead", "id": self.child_id})
         self.assertEqual(output["record"], self.human_record())
 
-    def test_human_waiver_is_valid_but_does_not_satisfy_criteria(self):
-        record = self.human_record()
-        record["producer"]["kind"] = "human_waiver"
-        record["outcome"] = "waived"
-        self.write_input(record)
+    def test_rejects_retired_approval_producer_kinds(self):
+        for kind in ("human_attestation", "human_waiver"):
+            with self.subTest(kind=kind):
+                record = self.human_record()
+                record["producer"]["kind"] = kind
+                self.write_input(record)
+                result = self.root / f"result-{kind}"
 
-        completed = self.invoke()
+                completed = self.invoke(result=result)
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        output = json.loads((self.result / "output.json").read_text())
-        self.assertEqual(output["decision"], "waived")
-        self.assertFalse(output["satisfies_criteria"])
-
-    def test_validates_one_external_check_end_to_end(self):
-        request, plan = human_plan(execution="external")
-        acceptance, publication, child_id = self.publish_plan(request, plan, "external")
-        record = {
-            **self.human_record(),
-            "child": child_id,
-            "parent_plan": plan["plan_sha256"],
-            "producer": {"kind": "external_check", "identity": "CI service"},
-        }
-        path = self.root / "external-completion.json"
-        result = self.root / "external-result"
-        value = self.input_value(record)
-        value["acceptance_directory"] = str(acceptance)
-        value["publication_directory"] = str(publication)
-        path.write_text(json.dumps(value))
-
-        completed = self.invoke(path, result)
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        output = json.loads((result / "output.json").read_text())
-        self.assertEqual(output["evidence_basis"], "external_check")
-        self.assertTrue(output["satisfies_criteria"])
+                self.assertEqual(completed.returncode, 2, completed.stderr)
+                self.assertFalse(result.exists())
 
     def test_stale_plan_or_subject_fails_before_result_creation(self):
         for name, mutate in (
@@ -194,7 +171,7 @@ class CompletionRecordCliTest(unittest.TestCase):
             "child": self.child_id,
             "parent_plan": self.plan["plan_sha256"],
             "outcome": "satisfied",
-            "producer": {"kind": "human_attestation", "identity": "Brian"},
+            "producer": {"kind": "external_check", "identity": "Deployment verifier"},
             "criteria": ["criterion-2"],
             "subject": {"commit": "abc123", "environment": "local production"},
             "evidence": ["bead-comment:central-example#approval-1"],
@@ -271,10 +248,11 @@ def acceptance_output(request, acceptance):
     }
 
 
-def human_plan(execution="human"):
+def external_plan():
     request = planner_input()
-    owner = "Brian" if execution == "human" else "CI service"
-    evidence_route = "human_attestation" if execution == "human" else "external_check"
+    owner = "Deployment verifier"
+    execution = "external"
+    evidence_route = "external_check"
     request["catalog"]["projects"][0]["routes"].append(
         {
             "owner": owner,
@@ -314,9 +292,9 @@ def human_plan(execution="human"):
                     "depends_on": [],
                 },
                 {
-                    "local_id": "approval",
-                    "title": "Approve the documentation",
-                    "objective": "Approve the published documentation.",
+                    "local_id": "verification",
+                    "title": "Verify the documentation",
+                    "objective": "Verify the published documentation.",
                     "criteria": ["criterion-2"],
                     "project": "example",
                     "owner": owner,
