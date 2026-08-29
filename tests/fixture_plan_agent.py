@@ -119,6 +119,52 @@ elif scenario == "capability-direct":
         "children": [],
         "ambiguities": [],
     }
+elif scenario == "capability-fan-in":
+    value = {
+        "schema_version": 2,
+        "decision": "decompose",
+        "criteria": [
+            {
+                "id": "criterion-1",
+                "source_text": "The caller repository check passes.",
+                "statement": "Pass the caller repository check.",
+            },
+            {
+                "id": "criterion-2",
+                "source_text": "The outside-helper repository check passes.",
+                "statement": "Pass the outside-helper repository check.",
+            },
+        ],
+        "direct_routes": [],
+        "children": [
+            {
+                "local_id": "implementation",
+                "title": "Check the implementation repository",
+                "objective": "Run the implementation repository check.",
+                "criteria": ["criterion-1"],
+                "project": "example",
+                "owner": "Caller agent",
+                "phase": "implementation",
+                "executor": "caller_agent",
+                "evidence_route": "repository_check",
+                "depends_on": [],
+            },
+            {
+                "local_id": "outside-check",
+                "title": "Check the repository with outside help",
+                "objective": "Obtain the outside repository check.",
+                "criteria": ["criterion-2"],
+                "project": "example",
+                "owner": "Credential holder",
+                "phase": "closure",
+                "executor": "outside_help",
+                "outside_help_reason": "missing_credentials",
+                "evidence_route": "external_check",
+                "depends_on": ["implementation"],
+            },
+        ],
+        "ambiguities": [],
+    }
 elif scenario in {
     "capability-run-direct",
     "capability-run-decompose",

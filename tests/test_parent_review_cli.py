@@ -48,9 +48,26 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         self.assertEqual(output["artifacts"]["input"], "input.json")
 
     def test_accepts_published_v2_capability_fan_in(self):
-        self.request, self.plan = v2_repository_plan()
-        accepted = accept_plan(self.request, self.plan)
-        (self.acceptance / "input.json").write_text(
+        self.request, _ = v2_repository_plan()
+        fixture = ROOT / "tests" / "fixture_plan_agent.py"
+        fake_bd = ROOT / "tests" / "fixtures" / "fake_bd.py"
+
+        planner_input_path = self.root / "capability-planner.json"
+        planner_result = self.root / "capability-planner"
+        planner_input_path.write_text(json.dumps(self.request))
+        environment = os.environ.copy()
+        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
+            [sys.executable, str(fixture), "capability-fan-in"]
+        )
+        planned = self.run_cli(
+            "afk_plan", planner_input_path, planner_result, environment
+        )
+        self.assertEqual(planned.returncode, 0, planned.stderr)
+        self.plan = json.loads((planner_result / "output.json").read_text())["plan"]
+
+        acceptance_input = self.root / "capability-acceptance.json"
+        self.acceptance = self.root / "capability-acceptance"
+        acceptance_input.write_text(
             json.dumps(
                 {
                     "schema_version": 2,
@@ -59,104 +76,125 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
                 }
             )
         )
-        accepted_output = acceptance_output(self.request, accepted)
-        accepted_output["schema_version"] = 2
-        accepted_output["policy"] = "contract-valid-capability-plan-v2"
-        (self.acceptance / "output.json").write_text(json.dumps(accepted_output))
-        (self.publication / "output.json").write_text(
-            json.dumps(publication_output(self.request, accepted))
+        accepted = self.run_cli("afk_plan_accept", acceptance_input, self.acceptance)
+        self.assertEqual(accepted.returncode, 0, accepted.stderr)
+
+        beads = self.root / "capability-beads"
+        beads.mkdir()
+        state_path = beads / "state.json"
+        state_path.write_text(
+            json.dumps(
+                {
+                    "parent": {
+                        **self.request["parent"],
+                        "status": "in_progress",
+                        "issue_type": "task",
+                        "priority": 2,
+                        "dependencies": [],
+                    },
+                    "children": [],
+                }
+            )
         )
-        check_directories = []
-        for index, child in enumerate(self.plan["children"], start=1):
-            child_id = f"central-child-{index}"
-            evidence_kind = child["evidence_route"]
-            record = {
-                "schema_version": 1,
-                "child": child_id,
-                "parent_plan": self.plan["plan_sha256"],
-                "outcome": "satisfied",
-                "producer": {"kind": evidence_kind, "identity": child["owner"]},
-                "criteria": child["criteria"],
-                "subject": {"commit": COMMIT},
-                "evidence": [f"repository-check:{child['local_id']}"],
-                "accepted_at": "2026-08-23T00:00:02Z",
-            }
+        publication_input = self.root / "capability-publication.json"
+        self.publication = self.root / "capability-publication"
+        publication_input.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "acceptance_directory": str(self.acceptance),
+                    "beads_workspace": str(beads),
+                    "command": [sys.executable, str(fake_bd), str(state_path)],
+                    "timeout_seconds": 30,
+                }
+            )
+        )
+        published = self.run_cli(
+            "afk_plan_publish", publication_input, self.publication
+        )
+        self.assertEqual(published.returncode, 0, published.stderr)
+        publication = json.loads((self.publication / "output.json").read_text())
+        mappings = {
+            item["local_id"]: item["bead_id"] for item in publication["children"]
+        }
+
+        self.completions = self.root / "capability-completions"
+        self.completions.mkdir()
+        completion_requests = []
+        for child in self.plan["children"]:
+            child_id = mappings[child["local_id"]]
+            completion_input = self.root / f"complete-{child['local_id']}.json"
             completion = self.completions / child["local_id"]
-            completion.mkdir(exist_ok=True)
-            (completion / "input.json").write_text(
+            completion_input.write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
                         "acceptance_directory": str(self.acceptance),
                         "publication_directory": str(self.publication),
                         "expected_subject": {"commit": COMMIT},
-                        "record": record,
-                    }
-                )
-            )
-            (completion / "output.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "outcome": "completed",
-                        "decision": "satisfied",
-                        "source": {"kind": "bead", "id": child_id},
-                        "started_at": "2026-08-23T00:00:00Z",
-                        "finished_at": "2026-08-23T00:00:01Z",
-                        "duration_seconds": 1,
-                        "acceptance_sha256": accepted["acceptance_sha256"],
-                        "plan_sha256": self.plan["plan_sha256"],
-                        "local_id": child["local_id"],
-                        "criteria": child["criteria"],
-                        "evidence_basis": evidence_kind,
-                        "satisfies_criteria": True,
-                        "record": record,
-                        "error_category": None,
-                        "artifacts": {"input": "input.json"},
-                    }
-                )
-            )
-            check = self.root / f"repository-check-{index}"
-            check.mkdir()
-            state = {"head": COMMIT, "dirty": False, "status": []}
-            (check / "input.json").write_text(json.dumps({"schema_version": 1}))
-            (check / "output.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "outcome": "passed",
-                        "finished_at": "2026-08-23T00:00:01Z",
-                        "process": {"exit_code": 0, "signal": None, "error": None},
-                        "repository": {
-                            "head_changed": False,
-                            "before": state,
-                            "after": state,
+                        "record": {
+                            "schema_version": 1,
+                            "child": child_id,
+                            "parent_plan": self.plan["plan_sha256"],
+                            "outcome": "satisfied",
+                            "producer": {
+                                "kind": child["evidence_route"],
+                                "identity": child["owner"],
+                            },
+                            "criteria": child["criteria"],
+                            "subject": {"commit": COMMIT},
+                            "evidence": [f"repository-check:{child['local_id']}"],
+                            "accepted_at": "2026-08-23T00:00:02Z",
                         },
                     }
                 )
             )
-            check_directories.append(check)
-        request = self.input_value()
-        request["completions"][1]["local_id"] = "outside-check"
-        request["completions"][1]["directory"] = str(self.completions / "outside-check")
-        for completion, check, child in zip(
-            request["completions"],
-            check_directories,
-            self.plan["children"],
-            strict=True,
-        ):
-            completion["terminal"] = (
+            completed = self.run_cli("afk_complete", completion_input, completion)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            terminal = {"kind": "completion_record"}
+            if child["evidence_route"] == "repository_check":
+                check = self.write_repository_check(child["local_id"])
+                terminal = {"kind": "repository_check", "directory": str(check)}
+            completion_requests.append(
                 {
-                    "kind": "repository_check",
-                    "directory": str(check),
+                    "local_id": child["local_id"],
+                    "directory": str(completion),
+                    "current_subject": {"commit": COMMIT},
+                    "terminal": terminal,
                 }
-                if child["evidence_route"] == "repository_check"
-                else {"kind": "completion_record"}
             )
+            closed = subprocess.run(
+                [
+                    sys.executable,
+                    str(fake_bd),
+                    str(state_path),
+                    "close",
+                    child_id,
+                    "--json",
+                ],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(closed.returncode, 0, closed.stderr)
 
-        completed = self.invoke("accepted", request)
+        state = json.loads(state_path.read_text())
+        review_request = {
+            "schema_version": 1,
+            "acceptance_directory": str(self.acceptance),
+            "publication_directory": str(self.publication),
+            "child_graph": [
+                {key: child[key] for key in ("id", "status", "dependencies")}
+                for child in state["children"]
+            ],
+            "completions": completion_requests,
+            "timeout_seconds": 5,
+        }
+        reviewed = self.invoke("accepted", review_request)
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
         fan_in = json.loads((self.result / "fan-in.json").read_text())
         self.assertEqual(
             [child["execution"] for child in fan_in["children"]],
@@ -166,6 +204,44 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
             [child["terminal"]["status"] for child in fan_in["children"]],
             ["passed", "validated"],
         )
+        outside = next(
+            child
+            for child in fan_in["children"]
+            if child["execution"] == "outside_help"
+        )
+        self.assertEqual(outside["evidence_basis"], "external_check")
+
+    def run_cli(self, module, input_path, result, environment=None):
+        return subprocess.run(
+            [sys.executable, "-m", module, input_path, result],
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def write_repository_check(self, local_id):
+        check = self.root / f"repository-check-{local_id}"
+        check.mkdir()
+        state = {"head": COMMIT, "dirty": False, "status": []}
+        (check / "input.json").write_text(json.dumps({"schema_version": 1}))
+        (check / "output.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "outcome": "passed",
+                    "finished_at": "2026-08-23T00:00:01Z",
+                    "process": {"exit_code": 0, "signal": None, "error": None},
+                    "repository": {
+                        "head_changed": False,
+                        "before": state,
+                        "after": state,
+                    },
+                }
+            )
+        )
+        return check
 
     def test_seals_incomplete_with_explicit_gap_and_follow_up(self):
         completed = self.invoke("incomplete")
