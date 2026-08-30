@@ -2,6 +2,7 @@ import json
 import tempfile
 import time
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
@@ -160,6 +161,36 @@ class InferenceRuntimeTest(unittest.TestCase):
                 result = self.invoke(root, adapter)
             self.assertEqual(result.outcome, "interrupted")
             self.assertEqual(result.receipt["protocol"], {"status": "interrupted"})
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+    def test_prompt_construction_interruptions_are_normalized_and_sealed(self):
+        class InterruptingMapping(Mapping):
+            def __getitem__(self, key):
+                raise KeyError(key)
+
+            def __iter__(self):
+                raise KeyboardInterrupt
+
+            def __len__(self):
+                return 1
+
+        adapter = FixtureAdapter((ScriptedResult(response="ok"),))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = InferenceRuntime().invoke(
+                purpose="classify",
+                trusted_task_instructions="Return a category.",
+                untrusted_task_data=InterruptingMapping(),
+                requested_capability=Capability.NO_TOOLS,
+                execution_root=root,
+                timeout_seconds=1,
+                evidence_directory=root / "evidence",
+                validator=lambda value: value,
+                adapter=adapter,
+            )
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertEqual(result.receipt["protocol"], {"status": "not_started"})
+            self.assertIsNone(result.receipt["hashes"]["invocation_sha256"])
             self.assertTrue((root / "evidence/receipt.json").is_file())
 
     def test_evidence_setup_interruptions_are_normalized_and_sealed(self):

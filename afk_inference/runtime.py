@@ -217,22 +217,6 @@ class InferenceRuntime:
         started = time.monotonic()
         deadline = started + timeout_seconds
 
-        prompt = {
-            "system": _SYSTEM_INSTRUCTIONS[capability],
-            "purpose": purpose,
-            "trusted_task_instructions": trusted_task_instructions,
-            "untrusted_task_data": _thaw(_freeze(untrusted_task_data)),
-        }
-        invocation_value = {
-            "schema_version": 1,
-            "purpose": purpose,
-            "prompt": prompt,
-            "requested_capability": capability.value,
-            "execution_root": str(root),
-            "timeout_seconds": timeout_seconds,
-            "adapter": adapter.descriptor(),
-        }
-        invocation = _freeze(invocation_value)
         script_path = evidence / "fixture-script.json"
         attempts_directory = evidence / "attempts"
         attempts: list[dict[str, Any]] = []
@@ -246,6 +230,24 @@ class InferenceRuntime:
 
         setup_interrupted = False
         try:
+            # Prompt construction traverses caller-owned untrusted data and is
+            # therefore part of the interruption-normalized invocation phase.
+            prompt = {
+                "system": _SYSTEM_INSTRUCTIONS[capability],
+                "purpose": purpose,
+                "trusted_task_instructions": trusted_task_instructions,
+                "untrusted_task_data": _thaw(_freeze(untrusted_task_data)),
+            }
+            invocation_value = {
+                "schema_version": 1,
+                "purpose": purpose,
+                "prompt": prompt,
+                "requested_capability": capability.value,
+                "execution_root": str(root),
+                "timeout_seconds": timeout_seconds,
+                "adapter": adapter.descriptor(),
+            }
+            invocation = _freeze(invocation_value)
             _prepare_evidence(
                 evidence,
                 invocation_value,
@@ -255,9 +257,9 @@ class InferenceRuntime:
                 attempts_directory,
             )
         except KeyboardInterrupt:
-            # Setup may have published only a prefix of the evidence. Ensure
-            # there is a sealing location, retain that prefix, and describe
-            # unavailable hashes as such in the interrupted receipt.
+            # Construction or setup may have published no evidence, or only a
+            # prefix. Ensure there is a sealing location, retain that prefix,
+            # and describe unavailable hashes in the interrupted receipt.
             setup_interrupted = True
             outcome = "interrupted"
             evidence.mkdir(exist_ok=True)
