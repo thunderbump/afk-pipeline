@@ -162,6 +162,84 @@ class InferenceRuntimeTest(unittest.TestCase):
             self.assertEqual(result.receipt["protocol"], {"status": "interrupted"})
             self.assertTrue((root / "evidence/receipt.json").is_file())
 
+    def test_evidence_setup_interruptions_are_normalized_and_sealed(self):
+        adapter = FixtureAdapter((ScriptedResult(response="ok"),))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch(
+                "afk_inference.runtime._prepare_evidence",
+                side_effect=KeyboardInterrupt,
+            ):
+                result = self.invoke(root, adapter)
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertEqual(result.receipt["protocol"], {"status": "not_started"})
+            self.assertIsNone(result.receipt["hashes"]["invocation_sha256"])
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime_module = __import__(
+                "afk_inference.runtime", fromlist=["_write_json"]
+            )
+            real_write_json = runtime_module._write_json
+            interrupted = False
+
+            def interrupt_prompt_write(path, value):
+                nonlocal interrupted
+                if path.name == "prompt.json" and not interrupted:
+                    interrupted = True
+                    raise KeyboardInterrupt
+                return real_write_json(path, value)
+
+            with mock.patch(
+                "afk_inference.runtime._write_json", side_effect=interrupt_prompt_write
+            ):
+                result = self.invoke(root, adapter)
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertEqual(len(result.receipt["hashes"]["invocation_sha256"]), 64)
+            self.assertIsNone(result.receipt["hashes"]["prompt_sha256"])
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch(
+                "afk_inference.runtime._make_attempt_directory",
+                side_effect=KeyboardInterrupt,
+            ):
+                result = self.invoke(root, adapter)
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertEqual(result.receipt["protocol"], {"status": "interrupted"})
+            self.assertEqual(result.receipt["attempt_count"], 1)
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+    def test_timing_includes_evidence_setup_and_receipt_hashing(self):
+        adapter = FixtureAdapter((ScriptedResult(response="ok"),))
+        clock = [10.0]
+        runtime_module = __import__("afk_inference.runtime", fromlist=["_write_json"])
+        real_write_json = runtime_module._write_json
+        real_sha256 = runtime_module._sha256
+
+        def timed_write(path, value):
+            if path.name == "invocation.json":
+                clock[0] += 2.0
+            return real_write_json(path, value)
+
+        def timed_hash(path):
+            if path.name in {"invocation.json", "prompt.json", "fixture-script.json"}:
+                clock[0] += 3.0
+            return real_sha256(path)
+
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch(
+                "afk_inference.runtime.time.monotonic", side_effect=lambda: clock[0]
+            ),
+            mock.patch("afk_inference.runtime._write_json", side_effect=timed_write),
+            mock.patch("afk_inference.runtime._sha256", side_effect=timed_hash),
+        ):
+            result = self.invoke(Path(temporary), adapter, timeout_seconds=100)
+        self.assertEqual(result.receipt["timing"]["duration_seconds"], 11.0)
+
     def test_receipt_hashing_interruption_is_normalized_and_sealed(self):
         adapter = FixtureAdapter((ScriptedResult(response="ok"),))
         with tempfile.TemporaryDirectory() as temporary:

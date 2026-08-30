@@ -211,6 +211,12 @@ class InferenceRuntime:
                 f"adapter {adapter.identity} does not support {capability.value}"
             )
 
+        # Invocation timing includes evidence setup and the hashes needed to
+        # assemble the final receipt, not only adapter and validator work.
+        started_at = _timestamp()
+        started = time.monotonic()
+        deadline = started + timeout_seconds
+
         prompt = {
             "system": _SYSTEM_INSTRUCTIONS[capability],
             "purpose": purpose,
@@ -227,17 +233,8 @@ class InferenceRuntime:
             "adapter": adapter.descriptor(),
         }
         invocation = _freeze(invocation_value)
-        evidence.mkdir()
-        _write_json(evidence / "invocation.json", invocation_value)
-        _write_json(evidence / "prompt.json", prompt)
         script_path = evidence / "fixture-script.json"
-        _write_json(script_path, [item.json_value() for item in adapter.script])
         attempts_directory = evidence / "attempts"
-        attempts_directory.mkdir()
-
-        started_at = _timestamp()
-        started = time.monotonic()
-        deadline = started + timeout_seconds
         attempts: list[dict[str, Any]] = []
         validation: dict[str, Any] = {
             "status": "not_run",
@@ -247,19 +244,53 @@ class InferenceRuntime:
         response = None
         value = None
 
+        setup_interrupted = False
+        try:
+            _prepare_evidence(
+                evidence,
+                invocation_value,
+                prompt,
+                script_path,
+                adapter,
+                attempts_directory,
+            )
+        except KeyboardInterrupt:
+            # Setup may have published only a prefix of the evidence. Ensure
+            # there is a sealing location, retain that prefix, and describe
+            # unavailable hashes as such in the interrupted receipt.
+            setup_interrupted = True
+            outcome = "interrupted"
+            evidence.mkdir(exist_ok=True)
+
         for attempt_number in range(1, adapter.max_attempts + 1):
+            if setup_interrupted:
+                break
             if time.monotonic() >= deadline:
                 outcome = "timed_out"
                 break
             attempt_started = time.monotonic()
             attempt_dir = attempts_directory / str(attempt_number)
-            attempt_dir.mkdir()
             events_path = attempt_dir / "events.jsonl"
             stderr_path = attempt_dir / "stderr.log"
             response_path = attempt_dir / "response.json"
             scripted: ScriptedResult | None = None
             protocol: dict[str, Any]
             interrupted = False
+            try:
+                _make_attempt_directory(attempt_dir)
+            except KeyboardInterrupt:
+                outcome = "interrupted"
+                attempts.append(
+                    {
+                        "attempt_number": attempt_number,
+                        "duration_seconds": time.monotonic() - attempt_started,
+                        "protocol": {"status": "interrupted"},
+                        "artifacts": _available_artifacts(
+                            evidence, events_path, stderr_path, response_path
+                        ),
+                    }
+                )
+                break
             try:
                 adapter_outcome = adapter.attempt(invocation, attempt_number, deadline)
                 scripted = adapter_outcome.result
@@ -474,6 +505,25 @@ def invoke(**arguments: Any) -> InferenceResult:
     return InferenceRuntime().invoke(**arguments)
 
 
+def _prepare_evidence(
+    evidence: Path,
+    invocation: dict[str, Any],
+    prompt: dict[str, Any],
+    script_path: Path,
+    adapter: FixtureAdapter,
+    attempts_directory: Path,
+) -> None:
+    evidence.mkdir()
+    _write_json(evidence / "invocation.json", invocation)
+    _write_json(evidence / "prompt.json", prompt)
+    _write_json(script_path, [item.json_value() for item in adapter.script])
+    attempts_directory.mkdir()
+
+
+def _make_attempt_directory(path: Path) -> None:
+    path.mkdir()
+
+
 def _write_attempt_artifacts(
     events_path: Path,
     stderr_path: Path,
@@ -533,15 +583,18 @@ def _receipt(
     response: Any,
     outcome: str,
 ) -> dict[str, Any]:
+    # Hashing is invocation work and must finish before the recorded end.
+    # Missing files are possible only when evidence setup was interrupted.
+    hashes = {
+        "invocation_sha256": _sha256_if_file(evidence / "invocation.json"),
+        "prompt_sha256": _sha256_if_file(evidence / "prompt.json"),
+        "adapter_script_sha256": _sha256_if_file(script_path),
+    }
     ended = time.monotonic()
     return {
         "schema_version": 1,
         "identity": {"runtime": "afk-inference-v1", "adapter": adapter.identity},
-        "hashes": {
-            "invocation_sha256": _sha256(evidence / "invocation.json"),
-            "prompt_sha256": _sha256(evidence / "prompt.json"),
-            "adapter_script_sha256": _sha256(script_path),
-        },
+        "hashes": hashes,
         "policy": {
             "requested_capability": capability.value,
             "system_instructions": _SYSTEM_INSTRUCTIONS[capability],
@@ -576,6 +629,10 @@ def _seal_json(path: Path, value: Any) -> None:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sha256_if_file(path: Path) -> str | None:
+    return _sha256(path) if path.is_file() else None
 
 
 def _timestamp() -> str:
