@@ -162,6 +162,10 @@ class FixtureAdapter:
             return _AdapterOutcome(result, timed_out=True)
         if result.delay_seconds:
             time.sleep(result.delay_seconds)
+        # Sleeping for less than the observed remaining duration does not
+        # guarantee that the scheduler will resume us before the deadline.
+        if time.monotonic() >= deadline:
+            return _AdapterOutcome(result, timed_out=True)
         return _AdapterOutcome(result)
 
 
@@ -259,7 +263,9 @@ class InferenceRuntime:
             try:
                 adapter_outcome = adapter.attempt(invocation, attempt_number, deadline)
                 scripted = adapter_outcome.result
-                if adapter_outcome.timed_out:
+                # Defend at the runtime boundary as well as in the fixture so
+                # no terminal output is processed after the shared deadline.
+                if adapter_outcome.timed_out or time.monotonic() >= deadline:
                     # The delayed result did not become observable by the hard
                     # deadline, so do not publish its scripted terminal output.
                     scripted = None
@@ -296,7 +302,16 @@ class InferenceRuntime:
             attempts.append(attempt)
             if interrupted or outcome in {"timed_out", "interrupted"}:
                 break
+            # Evidence writes happen before trusted validation. Do not start
+            # the validator, or retain an adapter-failure outcome, if they
+            # consumed the remainder of the shared deadline.
+            if time.monotonic() >= deadline:
+                outcome = "timed_out"
+                break
             if protocol["status"] != "accepted":
+                # A later protocol failure supersedes any rejection from an
+                # earlier accepted response.
+                outcome = "adapter_failed"
                 continue
 
             response = _thaw(scripted.response)

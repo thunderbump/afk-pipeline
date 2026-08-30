@@ -94,6 +94,22 @@ class InferenceRuntimeTest(unittest.TestCase):
             self.assertEqual(result.outcome, "validator_failed")
             self.assertEqual(result.receipt["attempt_count"], 1)
             self.assertIn("ZeroDivisionError", result.receipt["validation"]["error"])
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.invoke(
+                Path(temporary),
+                FixtureAdapter(
+                    (
+                        ScriptedResult(response="bad"),
+                        ScriptedResult(response="unused", exit_code=9),
+                    )
+                ),
+                validator,
+            )
+            self.assertEqual(result.outcome, "adapter_failed")
+            self.assertEqual(
+                result.receipt["protocol"],
+                {"status": "adapter_failed", "exit_code": 9},
+            )
 
     def test_capability_and_adapter_failures(self):
         restricted = FixtureAdapter(
@@ -132,6 +148,28 @@ class InferenceRuntimeTest(unittest.TestCase):
                 result = self.invoke(Path(temporary), adapter)
             self.assertEqual(result.outcome, "interrupted")
             self.assertTrue((Path(temporary) / "evidence/receipt.json").is_file())
+
+    def test_scheduler_overrun_is_normalized_before_result_processing(self):
+        clock = [10.0]
+        validator = mock.Mock(return_value="should not run")
+
+        def oversleep(_seconds):
+            clock[0] = 12.0
+
+        adapter = FixtureAdapter(
+            (ScriptedResult(response="late", exit_code=3, delay_seconds=0.1),)
+        )
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            mock.patch(
+                "afk_inference.runtime.time.monotonic", side_effect=lambda: clock[0]
+            ),
+            mock.patch("afk_inference.runtime.time.sleep", side_effect=oversleep),
+        ):
+            result = self.invoke(Path(temporary), adapter, validator, timeout_seconds=1)
+        self.assertEqual(result.outcome, "timed_out")
+        self.assertEqual(result.receipt["protocol"], {"status": "timed_out"})
+        validator.assert_not_called()
 
     def test_fixture_and_invocation_are_deeply_immutable(self):
         adapter = FixtureAdapter((ScriptedResult(response={"a": [1]}),))
