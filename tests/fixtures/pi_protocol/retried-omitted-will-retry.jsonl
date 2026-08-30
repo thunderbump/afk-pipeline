@@ -1,0 +1,11 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"temporary synthetic failure","content":[{"type":"text","text":"discarded"}]}}
+{"type":"agent_end","willRetry":true}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":100,"errorMessage":"temporary synthetic failure"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse","content":[{"type":"toolCall","id":"synthetic-call","name":"read","arguments":{"path":"synthetic.txt"}}]}}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"message_end","message":{"role":"toolResult"}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"synthetic final"}]}}
+{"type":"agent_end"}
+{"type":"agent_settled"}

@@ -103,6 +103,12 @@ class PiInferenceAdapterTest(unittest.TestCase):
         cases = (
             ("successful.jsonl", 0, "succeeded", "accepted"),
             ("retried.jsonl", 0, "succeeded", "accepted"),
+            (
+                "retried-omitted-will-retry.jsonl",
+                0,
+                "succeeded",
+                "accepted",
+            ),
             ("malformed.jsonl", 0, "adapter_failed", "protocol_malformed"),
             ("interrupted.jsonl", 0, "interrupted", "interrupted"),
             ("failed.jsonl", 0, "adapter_failed", "adapter_failed"),

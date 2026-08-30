@@ -105,6 +105,7 @@ def classified_agent_response_bytes(data: bytes) -> dict[str, object]:
     saw_settled = False
     retry_count = 0
     retry_completed = False
+    retry_response_seen = False
     terminal_message = None
     try:
         lines = data.decode("utf-8").splitlines()
@@ -147,9 +148,14 @@ def classified_agent_response_bytes(data: bytes) -> dict[str, object]:
             if not valid_message(message):
                 return protocol_error("invalid agent event JSON")
             if message["role"] == "assistant":
-                if retry_completed:
-                    return protocol_error("conflicting terminal assistant messages")
-                if message["stopReason"] != "toolUse":
+                stop_reason = message["stopReason"]
+                if (
+                    retry_count
+                    and not retry_completed
+                    and stop_reason not in {"error", "aborted"}
+                ):
+                    retry_response_seen = True
+                if stop_reason != "toolUse":
                     if terminal_message is not None:
                         return protocol_error("conflicting terminal assistant messages")
                     terminal_message = message
@@ -161,8 +167,11 @@ def classified_agent_response_bytes(data: bytes) -> dict[str, object]:
                 or retry_completed
                 or event.get("success") is not True
                 or not valid_retry_attempt(event.get("attempt"), retry_count)
-                or terminal_message is None
-                or terminal_message.get("stopReason") in {"error", "aborted"}
+                or not retry_response_seen
+                or (
+                    terminal_message is not None
+                    and terminal_message.get("stopReason") in {"error", "aborted"}
+                )
             ):
                 return protocol_error("invalid auto-retry event sequence")
             retry_completed = True
@@ -180,12 +189,11 @@ def classified_agent_response_bytes(data: bytes) -> dict[str, object]:
                 ):
                     return protocol_error("invalid auto-retry event sequence")
                 retry_count += 1
+                retry_response_seen = False
                 terminal_message = None
                 state = "retry_start"
                 continue
-            if retry_count and (
-                event.get("willRetry") is not False or not retry_completed
-            ):
+            if retry_count and not retry_completed:
                 return protocol_error("invalid auto-retry event sequence")
             saw_final_end = True
 

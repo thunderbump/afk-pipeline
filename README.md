@@ -682,8 +682,9 @@ failure instead of discarding the other Attempt evidence.
 The event interpreter also accepts up to three Pi model auto-retries. Each
 intermediate `agent_end` must set `willRetry: true` and be followed immediately
 by a valid `auto_retry_start` and a new `agent_start`. A successful final segment
-includes its matching `auto_retry_end`, ends with `willRetry: false`, and settles
-once. Intermediate assistant errors never replace the final response text.
+includes its matching `auto_retry_end`, ends with `willRetry: false` or an omitted
+`willRetry` field, and settles once. Intermediate assistant errors never replace
+the final response text.
 Malformed seams, incomplete retries, and events after the final settlement fail
 closed.
 

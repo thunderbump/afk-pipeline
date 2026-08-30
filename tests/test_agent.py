@@ -26,6 +26,24 @@ class AgentResponseRetryTest(unittest.TestCase):
         return {"type": "message_end", "message": message}
 
     @staticmethod
+    def tool_use():
+        return {
+            "type": "message_end",
+            "message": {
+                "role": "assistant",
+                "stopReason": "toolUse",
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "id": "synthetic-call",
+                        "name": "read",
+                        "arguments": {"path": "synthetic.txt"},
+                    }
+                ],
+            },
+        }
+
+    @staticmethod
     def retry_start(attempt):
         return {
             "type": "auto_retry_start",
@@ -45,9 +63,11 @@ class AgentResponseRetryTest(unittest.TestCase):
             self.retry_start(1),
             {"type": "agent_start"},
             {"type": "turn_start"},
-            self.message("stop", "final answer"),
+            self.tool_use(),
             {"type": "auto_retry_end", "success": True, "attempt": 1},
             {"type": "turn_end"},
+            {"type": "message_end", "message": {"role": "toolResult"}},
+            self.message("stop", "final answer"),
             {"type": "agent_end", "willRetry": False},
             {"type": "agent_settled"},
         ]
@@ -55,6 +75,20 @@ class AgentResponseRetryTest(unittest.TestCase):
     def test_accepts_pi_auto_retry_and_uses_only_final_message(self):
         self.assertEqual(
             self.interpret(self.successful_retry()),
+            {"agent": {"status": "completed"}, "text": "final answer"},
+        )
+
+    def test_accepts_omitted_will_retry_on_final_retry_terminal(self):
+        events = self.successful_retry()
+        final_end = next(
+            event
+            for event in events
+            if event.get("type") == "agent_end" and event.get("willRetry") is False
+        )
+        del final_end["willRetry"]
+
+        self.assertEqual(
+            self.interpret(events),
             {"agent": {"status": "completed"}, "text": "final answer"},
         )
 
@@ -87,7 +121,18 @@ class AgentResponseRetryTest(unittest.TestCase):
             "missing retry completion": [
                 event for event in valid if event.get("type") != "auto_retry_end"
             ],
+            "retry completes before successful response": [
+                event
+                for event in valid
+                if event.get("message", {}).get("stopReason") != "toolUse"
+            ],
             "missing final settlement": valid[:-1],
+            "final terminal retries again": [
+                {**event, "willRetry": True}
+                if event.get("type") == "agent_end" and event.get("willRetry") is False
+                else event
+                for event in valid
+            ],
             "events after final end": valid + [{"type": "queue_update"}],
         }
         for name, events in variants.items():
