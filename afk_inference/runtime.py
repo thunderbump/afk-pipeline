@@ -133,6 +133,7 @@ _PRODUCTION_ROLE_POLICY = {
     "acceptance_planning": {"model": "gpt-5.6-luna", "thinking": "low"},
     "parent_acceptance_review": {"model": "gpt-5.6-luna", "thinking": "low"},
 }
+_INFERENCE_UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -742,19 +743,53 @@ class InferenceRuntime:
 
 
 def invoke(**arguments: Any) -> InferenceResult:
-    """Invoke a production role through runtime-owned adapter policy."""
+    """Invoke directly, or select production policy for a semantic role call.
+
+    Supplying an adapter preserves the runtime's direct public entry point.
+    Adapter-free calls use :func:`invoke_role`, so production stages need not
+    provide process policy.
+    """
+    if "inference" in arguments:
+        inference = arguments.pop("inference")
+        return invoke_role(inference=inference, **arguments)
+    if "adapter" in arguments:
+        return InferenceRuntime().invoke(**arguments)
     return invoke_role(**arguments)
 
 
-def invoke_role(**arguments: Any) -> InferenceResult:
-    """Select and construct the production adapter solely from semantic purpose."""
-    purpose = arguments.get("purpose")
-    try:
-        policy = _PRODUCTION_ROLE_POLICY[purpose]
-    except (KeyError, TypeError) as error:
-        raise ValueError(
-            "inference purpose has no production adapter policy"
-        ) from error
+def invoke_role(
+    *, inference: Any = _INFERENCE_UNSET, **arguments: Any
+) -> InferenceResult:
+    """Construct an adapter from explicit or runtime-owned role policy."""
+    if inference is _INFERENCE_UNSET:
+        purpose = arguments.get("purpose")
+        try:
+            policy = _PRODUCTION_ROLE_POLICY[purpose]
+        except (KeyError, TypeError) as error:
+            raise ValueError(
+                "inference purpose has no production adapter policy"
+            ) from error
+    else:
+        # Preserve the original explicit-policy entry point for callers outside
+        # the two production roles. Importing config validation here would
+        # create a dependency cycle, so validate the closed adapter contract.
+        if not isinstance(inference, Mapping) or set(inference) not in (
+            {"model", "thinking"},
+            {
+                "adapter_family",
+                "adapter_contract_version",
+                "model",
+                "thinking",
+            },
+        ):
+            raise ValueError("inference role policy is malformed")
+        if (
+            inference.get("adapter_family", "pi") != "pi"
+            or type(inference.get("adapter_contract_version", 1)) is not int
+            or inference.get("adapter_contract_version", 1) != 1
+        ):
+            raise ValueError("inference adapter policy is unsupported")
+        policy = inference
     adapter = PiAdapter(model=policy["model"], thinking=policy["thinking"])
     return InferenceRuntime().invoke(adapter=adapter, **arguments)
 

@@ -12,7 +12,9 @@ from afk_inference import (
     InferenceRuntime,
     ResponseRejected,
     ScriptedResult,
+    invoke_role,
 )
+from afk_inference import invoke as invoke_inference
 
 
 class InferenceRuntimeTest(unittest.TestCase):
@@ -28,6 +30,47 @@ class InferenceRuntimeTest(unittest.TestCase):
             validator=validator,
             adapter=adapter,
         )
+
+    def test_exported_invoke_accepts_direct_adapter_for_arbitrary_purpose(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = invoke_inference(
+                purpose="classify",
+                trusted_task_instructions="Return the value.",
+                untrusted_task_data={"value": "ok"},
+                requested_capability=Capability.NO_TOOLS,
+                execution_root=root,
+                timeout_seconds=1,
+                evidence_directory=root / "evidence",
+                validator=lambda value: value,
+                adapter=FixtureAdapter((ScriptedResult(response="ok"),)),
+            )
+
+            self.assertEqual(result.outcome, "succeeded")
+            self.assertEqual(result.receipt["terminal_response"], "ok")
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+    def test_exported_invoke_role_accepts_explicit_inference_policy(self):
+        expected = object()
+        with mock.patch.object(
+            InferenceRuntime, "invoke", autospec=True, return_value=expected
+        ) as runtime_invoke:
+            result = invoke_role(
+                inference={"model": "test-model", "thinking": "medium"},
+                purpose="custom_role",
+                trusted_task_instructions="Do the task.",
+                untrusted_task_data={},
+                requested_capability=Capability.NO_TOOLS,
+                execution_root=".",
+                timeout_seconds=1,
+                evidence_directory="evidence",
+                validator=lambda value: value,
+            )
+
+        self.assertIs(result, expected)
+        adapter = runtime_invoke.call_args.kwargs["adapter"]
+        self.assertEqual((adapter.model, adapter.thinking), ("test-model", "medium"))
+        self.assertEqual(runtime_invoke.call_args.kwargs["purpose"], "custom_role")
 
     def test_success_retains_exact_evidence_and_seals_receipt_last(self):
         adapter = FixtureAdapter(
