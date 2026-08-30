@@ -149,6 +149,45 @@ class InferenceRuntimeTest(unittest.TestCase):
             self.assertEqual(result.outcome, "interrupted")
             self.assertTrue((Path(temporary) / "evidence/receipt.json").is_file())
 
+    def test_artifact_processing_interruptions_are_normalized_and_sealed(self):
+        adapter = FixtureAdapter((ScriptedResult(response="ok"),))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with mock.patch(
+                "afk_inference.runtime._write_attempt_artifacts",
+                side_effect=KeyboardInterrupt,
+            ):
+                result = self.invoke(root, adapter)
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertEqual(result.receipt["protocol"], {"status": "interrupted"})
+            self.assertTrue((root / "evidence/receipt.json").is_file())
+
+    def test_receipt_hashing_interruption_is_normalized_and_sealed(self):
+        adapter = FixtureAdapter((ScriptedResult(response="ok"),))
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            real_sha256 = __import__(
+                "afk_inference.runtime", fromlist=["_sha256"]
+            )._sha256
+            interrupted = False
+
+            def interrupt_once(path):
+                nonlocal interrupted
+                if path.name == "invocation.json" and not interrupted:
+                    interrupted = True
+                    raise KeyboardInterrupt
+                return real_sha256(path)
+
+            with mock.patch(
+                "afk_inference.runtime._sha256", side_effect=interrupt_once
+            ):
+                result = self.invoke(root, adapter)
+            self.assertEqual(result.outcome, "interrupted")
+            self.assertIsNone(result.value)
+            receipt = json.loads((root / "evidence/receipt.json").read_text())
+            self.assertEqual(receipt["outcome"], "interrupted")
+            self.assertEqual(len(receipt["hashes"]["invocation_sha256"]), 64)
+
     def test_scheduler_overrun_is_normalized_before_result_processing(self):
         clock = [10.0]
         validator = mock.Mock(return_value="should not run")

@@ -290,14 +290,29 @@ class InferenceRuntime:
                     "error": f"{type(error).__name__}: {error}",
                 }
 
-            _write_attempt_artifacts(events_path, stderr_path, response_path, scripted)
+            try:
+                _write_attempt_artifacts(
+                    events_path, stderr_path, response_path, scripted
+                )
+                artifacts = _artifacts(
+                    evidence, events_path, stderr_path, response_path
+                )
+            except KeyboardInterrupt:
+                # Artifact publication and hashing are part of the invocation,
+                # too. Preserve whatever reached disk, but do not perform more
+                # hashing while normalizing the interruption.
+                protocol = {"status": "interrupted"}
+                outcome = "interrupted"
+                value = None
+                interrupted = True
+                artifacts = _available_artifacts(
+                    evidence, events_path, stderr_path, response_path
+                )
             attempt = {
                 "attempt_number": attempt_number,
                 "duration_seconds": time.monotonic() - attempt_started,
                 "protocol": protocol,
-                "artifacts": _artifacts(
-                    evidence, events_path, stderr_path, response_path
-                ),
+                "artifacts": artifacts,
             }
             attempts.append(attempt)
             if interrupted or outcome in {"timed_out", "interrupted"}:
@@ -371,37 +386,39 @@ class InferenceRuntime:
             outcome = "succeeded"
             break
 
-        ended = time.monotonic()
-        receipt_value = {
-            "schema_version": 1,
-            "identity": {"runtime": "afk-inference-v1", "adapter": adapter.identity},
-            "hashes": {
-                "invocation_sha256": _sha256(evidence / "invocation.json"),
-                "prompt_sha256": _sha256(evidence / "prompt.json"),
-                "adapter_script_sha256": _sha256(script_path),
-            },
-            "policy": {
-                "requested_capability": capability.value,
-                "system_instructions": _SYSTEM_INSTRUCTIONS[capability],
-                "max_attempts": adapter.max_attempts,
-                "single_deadline": True,
-                "validator_trust": "trusted_in_process",
-            },
-            "timing": {
-                "started_at": started_at,
-                "ended_at": _timestamp(),
-                "timeout_seconds": timeout_seconds,
-                "duration_seconds": ended - started,
-            },
-            "attempt_count": len(attempts),
-            "attempts": attempts,
-            "protocol": attempts[-1]["protocol"]
-            if attempts
-            else {"status": "not_started"},
-            "validation": validation,
-            "terminal_response": response,
-            "outcome": outcome,
-        }
+        try:
+            receipt_value = _receipt(
+                adapter=adapter,
+                capability=capability,
+                evidence=evidence,
+                script_path=script_path,
+                timeout_seconds=timeout_seconds,
+                started_at=started_at,
+                started=started,
+                attempts=attempts,
+                validation=validation,
+                response=response,
+                outcome=outcome,
+            )
+        except KeyboardInterrupt:
+            # Receipt assembly reads and hashes evidence. An interruption at
+            # that stage is still a normalized invocation outcome, not an
+            # escape hatch that leaves the evidence directory unsealed.
+            outcome = "interrupted"
+            value = None
+            receipt_value = _receipt(
+                adapter=adapter,
+                capability=capability,
+                evidence=evidence,
+                script_path=script_path,
+                timeout_seconds=timeout_seconds,
+                started_at=started_at,
+                started=started,
+                attempts=attempts,
+                validation=validation,
+                response=response,
+                outcome=outcome,
+            )
         # Atomic receipt sealing is intentionally the final evidence operation.
         try:
             _seal_json(evidence / "receipt.json", receipt_value)
@@ -485,6 +502,65 @@ def _artifacts(
         "stderr_sha256": _sha256(stderr),
         "response": str(response.relative_to(evidence)) if response.is_file() else None,
         "response_sha256": _sha256(response) if response.is_file() else None,
+    }
+
+
+def _available_artifacts(
+    evidence: Path, events: Path, stderr: Path, response: Path
+) -> dict[str, Any]:
+    """Describe partial attempt evidence without another interruptible hash pass."""
+    return {
+        "events": str(events.relative_to(evidence)) if events.is_file() else None,
+        "events_sha256": None,
+        "stderr": str(stderr.relative_to(evidence)) if stderr.is_file() else None,
+        "stderr_sha256": None,
+        "response": str(response.relative_to(evidence)) if response.is_file() else None,
+        "response_sha256": None,
+    }
+
+
+def _receipt(
+    *,
+    adapter: FixtureAdapter,
+    capability: Capability,
+    evidence: Path,
+    script_path: Path,
+    timeout_seconds: float,
+    started_at: str,
+    started: float,
+    attempts: list[dict[str, Any]],
+    validation: dict[str, Any],
+    response: Any,
+    outcome: str,
+) -> dict[str, Any]:
+    ended = time.monotonic()
+    return {
+        "schema_version": 1,
+        "identity": {"runtime": "afk-inference-v1", "adapter": adapter.identity},
+        "hashes": {
+            "invocation_sha256": _sha256(evidence / "invocation.json"),
+            "prompt_sha256": _sha256(evidence / "prompt.json"),
+            "adapter_script_sha256": _sha256(script_path),
+        },
+        "policy": {
+            "requested_capability": capability.value,
+            "system_instructions": _SYSTEM_INSTRUCTIONS[capability],
+            "max_attempts": adapter.max_attempts,
+            "single_deadline": True,
+            "validator_trust": "trusted_in_process",
+        },
+        "timing": {
+            "started_at": started_at,
+            "ended_at": _timestamp(),
+            "timeout_seconds": timeout_seconds,
+            "duration_seconds": ended - started,
+        },
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+        "protocol": attempts[-1]["protocol"] if attempts else {"status": "not_started"},
+        "validation": validation,
+        "terminal_response": response,
+        "outcome": outcome,
     }
 
 
