@@ -12,17 +12,29 @@ trusted in-process response validator. The runtime supplies the fixed system
 instructions for the requested capability; callers do not provide executable
 paths, argument arrays, or system prompts.
 
-The deterministic `FixtureAdapter` is an immutable in-process test adapter. Its
-frozen script is indexed only by the one-based attempt number, and all attempts
-share the invocation deadline. It is not a sandbox. Validators likewise run
-directly as trusted pipeline code; their rejection, failure, and duration are
-recorded, but the runtime does not isolate or forcibly stop them.
+The production `PiAdapter` maps those instructions to Pi's provider system
+prompt and sends one task prompt containing separate trusted instructions and
+base64-encoded JSON task data. Its argv, provider, JSON protocol, session and
+retry behavior, working directory handling, and disabling flags are closed
+runtime policy. `NO_TOOLS` uses `--no-tools`, `READ_ONLY` allows
+`read,grep,find,ls`, and `WRITE` allows `read,bash,edit,write,grep,find,ls`.
+Pi's provider-managed retries remain in one process event stream and share the
+invocation deadline; malformed streams fail closed and there is no adapter
+fallback.
 
-Each invocation retains the exact structured prompt and invocation, frozen
-fixture script, per-attempt event stream, stderr and response, and an atomically
-sealed `receipt.json`. The receipt is written last and binds identities,
-hashes, capability policy, timing, protocol, validation, terminal response,
-and outcome.
+The deterministic `FixtureAdapter` remains an immutable in-process test
+adapter. Its frozen script is indexed only by the one-based attempt number. It
+is not a sandbox. Validators likewise run directly as trusted pipeline code;
+their rejection, failure, and duration are recorded, but the runtime does not
+isolate or forcibly stop them.
+
+Each invocation retains the exact structured and rendered private prompt,
+adapter contract or fixture script, per-attempt event stream, stderr and
+response, and an atomically sealed `receipt.json`. The receipt is written last
+and binds identities, hashes, frozen adapter/model/thinking policy, timing,
+process, protocol, validation, terminal response, and outcome. Run preparation
+freezes Pi adapter family `pi` and contract version `1` in every inference role
+setting; continuation consumes that frozen setting rather than mutable config.
 
 ## Acceptance Planner
 

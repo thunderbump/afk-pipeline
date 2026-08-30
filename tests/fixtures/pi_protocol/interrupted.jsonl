@@ -1,0 +1,3 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"aborted","content":[]}}
+{"type":"agent_end"}

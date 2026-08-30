@@ -4,7 +4,11 @@ from pathlib import Path
 from unittest import mock
 
 from afk_agent import read_only_pi_command
-from afk_config import INFERENCE_ROLE_DEFAULTS, effective_inference_roles
+from afk_config import (
+    INFERENCE_ROLE_DEFAULTS,
+    effective_inference_roles,
+    validate_inference_setting,
+)
 from afk_coordinate.__main__ import assessment_input, response_input, review_input
 from afk_coordinate.contract import validate_request
 
@@ -18,9 +22,10 @@ class InferenceRoleConfigurationTest(unittest.TestCase):
                 "feedback_response": {"thinking": "high"},
             }
         )
-        self.assertEqual(
-            selected["review"], {"model": "gpt-5.6-terra", "thinking": "medium"}
-        )
+        self.assertEqual(selected["review"]["model"], "gpt-5.6-terra")
+        self.assertEqual(selected["review"]["thinking"], "medium")
+        self.assertEqual(selected["review"]["adapter_family"], "pi")
+        self.assertEqual(selected["review"]["adapter_contract_version"], 1)
         self.assertEqual(selected["feedback_response"]["thinking"], "high")
         self.assertEqual(
             selected["acceptance_planner"],
@@ -33,10 +38,24 @@ class InferenceRoleConfigurationTest(unittest.TestCase):
             {"planner": {"model": "model"}},
             {"review": {"model": ""}},
             {"review": {"thinking": "extreme"}},
+            {"review": {"adapter_family": "fixture"}},
+            {"review": {"adapter_contract_version": 2}},
+            {"review": {"adapter_contract_version": True}},
         )
         for value in invalid:
             with self.subTest(value=value), self.assertRaises(ValueError):
                 effective_inference_roles(value)
+
+    def test_boolean_contract_version_is_rejected_in_durable_settings(self):
+        with self.assertRaises(ValueError):
+            validate_inference_setting(
+                {
+                    "adapter_family": "pi",
+                    "adapter_contract_version": True,
+                    "model": "model",
+                    "thinking": "low",
+                }
+            )
 
     def test_exact_argv_environment_override_precedes_selected_values(self):
         with mock.patch.dict(
@@ -58,10 +77,19 @@ class InferenceRoleConfigurationTest(unittest.TestCase):
 
 class FrozenCoordinatorRoleTest(unittest.TestCase):
     def test_role_settings_flow_from_frozen_request_to_each_stage(self):
+        adapter = {"adapter_family": "pi", "adapter_contract_version": 1}
         roles = {
-            "review": {"model": "review-model", "thinking": "low"},
-            "finding_assessment": {"model": "assess-model", "thinking": "high"},
-            "feedback_response": {"model": "respond-model", "thinking": "minimal"},
+            "review": {**adapter, "model": "review-model", "thinking": "low"},
+            "finding_assessment": {
+                **adapter,
+                "model": "assess-model",
+                "thinking": "high",
+            },
+            "feedback_response": {
+                **adapter,
+                "model": "respond-model",
+                "thinking": "minimal",
+            },
         }
         request = {
             "schema_version": 1,

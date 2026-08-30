@@ -1,0 +1,9 @@
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"temporary","content":[]}}
+{"type":"agent_end","willRetry":true}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":100,"errorMessage":"temporary"}
+{"type":"agent_start"}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop","content":[{"type":"text","text":"final"}]}}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"agent_end","willRetry":false}
+{"type":"agent_settled"}

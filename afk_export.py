@@ -11,7 +11,11 @@ import tempfile
 from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
-from afk_config import INFERENCE_ROLE_DEFAULTS, effective_inference_roles
+from afk_config import (
+    INFERENCE_ROLE_DEFAULTS,
+    effective_inference_roles,
+    validate_inference_setting,
+)
 from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
@@ -748,9 +752,14 @@ def validate_prepared_inference_roles(value):
     roles = value["inference_roles"]
     try:
         effective = effective_inference_roles(roles)
-    except ValueError as error:
+        for setting in roles.values():
+            validate_inference_setting(setting)
+    except (AttributeError, ValueError) as error:
         raise ExportError("invalid prepared inference roles") from error
-    if set(roles) != set(INFERENCE_ROLE_DEFAULTS) or roles != effective:
+    legacy = all(set(setting) == {"model", "thinking"} for setting in roles.values())
+    if set(roles) != set(INFERENCE_ROLE_DEFAULTS) or (
+        not legacy and roles != effective
+    ):
         raise ExportError("invalid prepared inference roles")
 
 

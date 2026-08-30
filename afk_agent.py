@@ -86,6 +86,20 @@ def pi_command(
 
 
 def agent_response(events_path: Path) -> dict[str, object]:
+    return agent_response_bytes(events_path.read_bytes())
+
+
+def agent_response_bytes(data: bytes) -> dict[str, object]:
+    """Interpret Pi JSONL bytes using the stable public result shape."""
+    result = classified_agent_response_bytes(data)
+    agent = result["agent"]
+    if agent.get("status") == "error":
+        agent.pop("error_kind", None)
+    return result
+
+
+def classified_agent_response_bytes(data: bytes) -> dict[str, object]:
+    """Interpret Pi JSONL bytes and distinguish protocol and provider errors."""
     state = "segment"
     saw_final_end = False
     saw_settled = False
@@ -93,51 +107,51 @@ def agent_response(events_path: Path) -> dict[str, object]:
     retry_completed = False
     terminal_message = None
     try:
-        lines = events_path.read_bytes().decode("utf-8").splitlines()
+        lines = data.decode("utf-8").splitlines()
     except UnicodeDecodeError:
-        return error("invalid agent event encoding")
+        return protocol_error("invalid agent event encoding")
     for line in lines:
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
-            return error("invalid agent event JSON")
+            return protocol_error("invalid agent event JSON")
         if not isinstance(event, dict):
-            return error("invalid agent event JSON")
+            return protocol_error("invalid agent event JSON")
         event_type = event.get("type")
 
         if saw_final_end:
             if event_type != "agent_settled" or saw_settled:
-                return error("events follow agent_end")
+                return protocol_error("events follow agent_end")
             saw_settled = True
             continue
         if event_type == "agent_settled":
-            return error("agent_settled precedes agent_end")
+            return protocol_error("agent_settled precedes agent_end")
 
         if state == "retry_start":
             if event_type != "auto_retry_start" or not valid_retry_start(
                 event, retry_count
             ):
-                return error("invalid auto-retry event sequence")
+                return protocol_error("invalid auto-retry event sequence")
             state = "agent_start"
             continue
         if state == "agent_start":
             if event_type != "agent_start":
-                return error("invalid auto-retry event sequence")
+                return protocol_error("invalid auto-retry event sequence")
             state = "segment"
             continue
         if event_type == "auto_retry_start":
-            return error("invalid auto-retry event sequence")
+            return protocol_error("invalid auto-retry event sequence")
 
         if event_type == "message_end":
             message = event.get("message")
             if not valid_message(message):
-                return error("invalid agent event JSON")
+                return protocol_error("invalid agent event JSON")
             if message["role"] == "assistant":
                 if retry_completed:
-                    return error("conflicting terminal assistant messages")
+                    return protocol_error("conflicting terminal assistant messages")
                 if message["stopReason"] != "toolUse":
                     if terminal_message is not None:
-                        return error("conflicting terminal assistant messages")
+                        return protocol_error("conflicting terminal assistant messages")
                     terminal_message = message
             continue
 
@@ -150,13 +164,13 @@ def agent_response(events_path: Path) -> dict[str, object]:
                 or terminal_message is None
                 or terminal_message.get("stopReason") in {"error", "aborted"}
             ):
-                return error("invalid auto-retry event sequence")
+                return protocol_error("invalid auto-retry event sequence")
             retry_completed = True
             continue
 
         if event_type == "agent_end":
             if "willRetry" in event and not isinstance(event["willRetry"], bool):
-                return error("invalid agent event JSON")
+                return protocol_error("invalid agent event JSON")
             if event.get("willRetry") is True:
                 if (
                     retry_completed
@@ -164,7 +178,7 @@ def agent_response(events_path: Path) -> dict[str, object]:
                     or terminal_message.get("stopReason") != "error"
                     or retry_count >= MAX_AUTO_RETRIES
                 ):
-                    return error("invalid auto-retry event sequence")
+                    return protocol_error("invalid auto-retry event sequence")
                 retry_count += 1
                 terminal_message = None
                 state = "retry_start"
@@ -172,7 +186,7 @@ def agent_response(events_path: Path) -> dict[str, object]:
             if retry_count and (
                 event.get("willRetry") is not False or not retry_completed
             ):
-                return error("invalid auto-retry event sequence")
+                return protocol_error("invalid auto-retry event sequence")
             saw_final_end = True
 
     if (
@@ -181,9 +195,9 @@ def agent_response(events_path: Path) -> dict[str, object]:
         or state != "segment"
         or (retry_count > 0 and not saw_settled)
     ):
-        return error("agent event stream did not complete")
+        return protocol_error("agent event stream did not complete")
     if terminal_message.get("stopReason") == "error":
-        return error(terminal_message.get("errorMessage", "agent error"))
+        return provider_error(terminal_message.get("errorMessage", "agent error"))
     if terminal_message.get("stopReason") == "aborted":
         return {"agent": {"status": "aborted"}, "text": None}
     return {
@@ -239,5 +253,20 @@ def valid_retry_attempt(value: object, expected: int) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value == expected
 
 
-def error(message: str) -> dict[str, object]:
-    return {"agent": {"status": "error", "error": message}, "text": None}
+def protocol_error(message: str) -> dict[str, object]:
+    return _classified_error(message, "protocol")
+
+
+def provider_error(message: str) -> dict[str, object]:
+    return _classified_error(message, "provider")
+
+
+def _classified_error(message: str, error_kind: str) -> dict[str, object]:
+    return {
+        "agent": {
+            "status": "error",
+            "error": message,
+            "error_kind": error_kind,
+        },
+        "text": None,
+    }

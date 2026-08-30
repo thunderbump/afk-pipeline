@@ -6,10 +6,13 @@ adapter, not a sandbox, and the caller's validator is trusted pipeline code.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import math
 import os
+import signal
+import subprocess
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -18,6 +21,8 @@ from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any
+
+from afk_agent import classified_agent_response_bytes
 
 
 class Capability(str, Enum):
@@ -111,6 +116,208 @@ class ScriptedResult:
 class _AdapterOutcome:
     result: ScriptedResult
     timed_out: bool = False
+    interrupted: bool = False
+    protocol: Mapping[str, Any] | None = None
+    process: Mapping[str, Any] | None = None
+    raw_events: bytes | None = None
+    raw_stderr: bytes | None = None
+
+
+_PI_TOOLS = {
+    Capability.NO_TOOLS: None,
+    Capability.READ_ONLY: "read,grep,find,ls",
+    Capability.WRITE: "read,bash,edit,write,grep,find,ls",
+}
+_PI_CONTRACT_VERSION = 1
+
+
+@dataclass(frozen=True)
+class PiAdapter:
+    """Production Pi adapter with a closed, runtime-owned process contract."""
+
+    model: str
+    thinking: str
+    identity: str = "pi-v1"
+    capabilities: tuple[Capability, ...] = tuple(Capability)
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.model, str) or not self.model.strip():
+            raise ValueError("Pi model must not be empty")
+        if self.thinking not in {"off", "minimal", "low", "medium", "high", "xhigh"}:
+            raise ValueError("Pi thinking setting is unsupported")
+        # These are constants rather than caller-selectable enforcement claims.
+        if self.identity != "pi-v1" or self.capabilities != tuple(Capability):
+            raise ValueError("Pi adapter policy cannot be replaced")
+
+    @property
+    def max_attempts(self) -> int:
+        # Provider retries are represented inside Pi's one event stream.
+        return 1
+
+    def descriptor(self) -> dict[str, Any]:
+        return {
+            "kind": "pi",
+            "family": "pi",
+            "contract_version": _PI_CONTRACT_VERSION,
+            "identity": self.identity,
+            "model": self.model,
+            "thinking": self.thinking,
+            "capabilities": [item.value for item in self.capabilities],
+        }
+
+    def render(self, prompt: Mapping[str, Any]) -> dict[str, Any]:
+        trusted = prompt["trusted_task_instructions"]
+        serialized_data = json.dumps(
+            prompt["untrusted_task_data"], separators=(",", ":"), ensure_ascii=False
+        ).encode()
+        # Base64 prevents task data from forging the structural end marker.
+        data = base64.b64encode(serialized_data).decode("ascii")
+        task = (
+            "<AFK_TRUSTED_TASK_INSTRUCTIONS>\n"
+            f"{trusted}\n"
+            "</AFK_TRUSTED_TASK_INSTRUCTIONS>\n"
+            '<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n'
+            f"{data}\n"
+            "</AFK_UNTRUSTED_TASK_DATA>"
+        )
+        return {
+            **dict(prompt),
+            "provider_system_prompt": prompt["system"],
+            "task_prompt": task,
+        }
+
+    def attempt(
+        self, invocation: Mapping[str, Any], attempt_number: int, deadline: float
+    ) -> _AdapterOutcome:
+        if attempt_number != 1 or not isinstance(invocation, MappingProxyType):
+            raise ValueError("Pi adapter accepts exactly one immutable invocation")
+        capability = Capability(invocation["requested_capability"])
+        prompt = invocation["prompt"]
+        tools = _PI_TOOLS[capability]
+        argv = [
+            "/usr/bin/env",
+            "PI_TELEMETRY=0",
+            "PI_SKIP_VERSION_CHECK=1",
+            "pi",
+            "--provider",
+            "openai-codex",
+            "--model",
+            self.model,
+            "--thinking",
+            self.thinking,
+            "--mode",
+            "json",
+            "--print",
+            "--no-session",
+            *(["--no-tools"] if tools is None else ["--tools", tools]),
+            "--no-extensions",
+            "--no-skills",
+            "--no-prompt-templates",
+            "--no-themes",
+            "--no-context-files",
+            "--system-prompt",
+            prompt["provider_system_prompt"],
+            prompt["task_prompt"],
+        ]
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return _AdapterOutcome(ScriptedResult(omit_response=True), timed_out=True)
+        try:
+            process = subprocess.Popen(
+                argv,
+                cwd=invocation["execution_root"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                start_new_session=True,
+            )
+        except OSError as error:
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                protocol={
+                    "status": "adapter_failed",
+                    "error": f"{type(error).__name__}: {error}",
+                },
+                process={"exit_code": None, "error": str(error)},
+            )
+        # Process creation is part of the invocation-wide budget.  Recompute
+        # after Popen so a slow launch cannot extend Pi's execution deadline.
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            cleanup_succeeded = _terminate_pi_process(process)
+            stdout, stderr = _drain_pi_output(process)
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                timed_out=True,
+                raw_events=stdout,
+                raw_stderr=stderr,
+                process=_pi_terminated_process_record(process, cleanup_succeeded),
+            )
+        try:
+            stdout, stderr = process.communicate(timeout=remaining)
+        except subprocess.TimeoutExpired as error:
+            cleanup_succeeded = _terminate_pi_process(process)
+            stdout, stderr = _drain_pi_output(
+                process, error.output or b"", error.stderr or b""
+            )
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                timed_out=True,
+                raw_events=stdout,
+                raw_stderr=stderr,
+                process=_pi_terminated_process_record(process, cleanup_succeeded),
+            )
+        except KeyboardInterrupt:
+            cleanup_succeeded = _terminate_pi_process(process)
+            stdout, stderr = _drain_pi_output(process)
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                interrupted=True,
+                protocol={"status": "interrupted"},
+                raw_events=stdout,
+                raw_stderr=stderr,
+                process=_pi_terminated_process_record(process, cleanup_succeeded),
+            )
+
+        process_record = {"exit_code": process.returncode}
+        if process.returncode != 0:
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                protocol={"status": "adapter_failed", "exit_code": process.returncode},
+                raw_events=stdout,
+                raw_stderr=stderr,
+                process=process_record,
+            )
+        interpreted = classified_agent_response_bytes(stdout)
+        agent = interpreted["agent"]
+        if agent["status"] == "aborted":
+            protocol = {"status": "interrupted"}
+            interrupted = True
+        elif agent["status"] == "error":
+            protocol = {
+                "status": (
+                    "protocol_malformed"
+                    if agent["error_kind"] == "protocol"
+                    else "adapter_failed"
+                ),
+                "error": agent["error"],
+            }
+            interrupted = False
+        else:
+            protocol = {
+                "status": "accepted",
+                "provider_retry_count": _pi_retry_count(stdout),
+            }
+            interrupted = False
+        text = interpreted["text"]
+        return _AdapterOutcome(
+            ScriptedResult(response=text, omit_response=text is None),
+            interrupted=interrupted,
+            protocol=protocol,
+            raw_events=stdout,
+            raw_stderr=stderr,
+            process=process_record,
+        )
 
 
 @dataclass(frozen=True)
@@ -192,7 +399,7 @@ class InferenceRuntime:
         timeout_seconds: float,
         evidence_directory: Path | str,
         validator: Callable[[Any], Any],
-        adapter: FixtureAdapter,
+        adapter: FixtureAdapter | PiAdapter,
     ) -> InferenceResult:
         capability = Capability(requested_capability)
         root = Path(execution_root).resolve()
@@ -217,7 +424,11 @@ class InferenceRuntime:
         started = time.monotonic()
         deadline = started + timeout_seconds
 
-        script_path = evidence / "fixture-script.json"
+        script_path = evidence / (
+            "fixture-script.json"
+            if isinstance(adapter, FixtureAdapter)
+            else "adapter-contract.json"
+        )
         attempts_directory = evidence / "attempts"
         attempts: list[dict[str, Any]] = []
         validation: dict[str, Any] = {
@@ -238,6 +449,8 @@ class InferenceRuntime:
                 "trusted_task_instructions": trusted_task_instructions,
                 "untrusted_task_data": _thaw(_freeze(untrusted_task_data)),
             }
+            if isinstance(adapter, PiAdapter):
+                prompt = adapter.render(prompt)
             invocation_value = {
                 "schema_version": 1,
                 "purpose": purpose,
@@ -276,6 +489,7 @@ class InferenceRuntime:
             stderr_path = attempt_dir / "stderr.log"
             response_path = attempt_dir / "response.json"
             scripted: ScriptedResult | None = None
+            adapter_outcome: _AdapterOutcome | None = None
             protocol: dict[str, Any]
             interrupted = False
             try:
@@ -299,11 +513,20 @@ class InferenceRuntime:
                 # Defend at the runtime boundary as well as in the fixture so
                 # no terminal output is processed after the shared deadline.
                 if adapter_outcome.timed_out or time.monotonic() >= deadline:
-                    # The delayed result did not become observable by the hard
-                    # deadline, so do not publish its scripted terminal output.
-                    scripted = None
+                    # Pi's partial stream remains evidence, but no terminal
+                    # response becomes observable after the shared deadline.
+                    if adapter_outcome.raw_events is None:
+                        scripted = None
                     protocol = {"status": "timed_out"}
                     outcome = "timed_out"
+                elif adapter_outcome.interrupted:
+                    protocol = dict(
+                        adapter_outcome.protocol or {"status": "interrupted"}
+                    )
+                    outcome = "interrupted"
+                    interrupted = True
+                elif adapter_outcome.protocol is not None:
+                    protocol = dict(adapter_outcome.protocol)
                 elif scripted.exit_code != 0:
                     protocol = {
                         "status": "adapter_failed",
@@ -325,7 +548,12 @@ class InferenceRuntime:
 
             try:
                 _write_attempt_artifacts(
-                    events_path, stderr_path, response_path, scripted
+                    events_path,
+                    stderr_path,
+                    response_path,
+                    scripted,
+                    adapter_outcome.raw_events if adapter_outcome is not None else None,
+                    adapter_outcome.raw_stderr if adapter_outcome is not None else None,
                 )
                 artifacts = _artifacts(
                     evidence, events_path, stderr_path, response_path
@@ -346,6 +574,12 @@ class InferenceRuntime:
                 "duration_seconds": time.monotonic() - attempt_started,
                 "protocol": protocol,
                 "artifacts": artifacts,
+                **(
+                    {"process": dict(adapter_outcome.process)}
+                    if adapter_outcome is not None
+                    and adapter_outcome.process is not None
+                    else {}
+                ),
             }
             attempts.append(attempt)
             if interrupted or outcome in {"timed_out", "interrupted"}:
@@ -499,7 +733,7 @@ class InferenceRuntime:
             raise ValueError("timeout must be finite and positive")
         if not callable(validator):
             raise TypeError("validator must be callable")
-        if not isinstance(adapter, FixtureAdapter):
+        if not isinstance(adapter, (FixtureAdapter, PiAdapter)):
             raise TypeError("unsupported adapter")
 
 
@@ -512,13 +746,18 @@ def _prepare_evidence(
     invocation: dict[str, Any],
     prompt: dict[str, Any],
     script_path: Path,
-    adapter: FixtureAdapter,
+    adapter: FixtureAdapter | PiAdapter,
     attempts_directory: Path,
 ) -> None:
     evidence.mkdir()
     _write_json(evidence / "invocation.json", invocation)
     _write_json(evidence / "prompt.json", prompt)
-    _write_json(script_path, [item.json_value() for item in adapter.script])
+    _write_json(
+        script_path,
+        [item.json_value() for item in adapter.script]
+        if isinstance(adapter, FixtureAdapter)
+        else adapter.descriptor(),
+    )
     attempts_directory.mkdir()
 
 
@@ -531,15 +770,23 @@ def _write_attempt_artifacts(
     stderr_path: Path,
     response_path: Path,
     scripted: ScriptedResult | None,
+    raw_events: bytes | None = None,
+    raw_stderr: bytes | None = None,
 ) -> None:
     events = scripted.events if scripted is not None else ()
-    events_path.write_text(
-        "".join(
+    events_path.write_bytes(
+        raw_events
+        if raw_events is not None
+        else "".join(
             json.dumps(_thaw(event), separators=(",", ":"), ensure_ascii=False) + "\n"
             for event in events
-        )
+        ).encode()
     )
-    stderr_path.write_text(scripted.stderr if scripted is not None else "")
+    stderr_path.write_bytes(
+        raw_stderr
+        if raw_stderr is not None
+        else (scripted.stderr if scripted is not None else "").encode()
+    )
     if scripted is not None and not scripted.omit_response:
         _write_json(response_path, _thaw(scripted.response))
 
@@ -573,7 +820,7 @@ def _available_artifacts(
 
 def _receipt(
     *,
-    adapter: FixtureAdapter,
+    adapter: FixtureAdapter | PiAdapter,
     capability: Capability,
     evidence: Path,
     script_path: Path,
@@ -590,12 +837,29 @@ def _receipt(
     hashes = {
         "invocation_sha256": _sha256_if_file(evidence / "invocation.json"),
         "prompt_sha256": _sha256_if_file(evidence / "prompt.json"),
-        "adapter_script_sha256": _sha256_if_file(script_path),
+        (
+            "adapter_script_sha256"
+            if isinstance(adapter, FixtureAdapter)
+            else "adapter_contract_sha256"
+        ): _sha256_if_file(script_path),
     }
     ended = time.monotonic()
     return {
         "schema_version": 1,
-        "identity": {"runtime": "afk-inference-v1", "adapter": adapter.identity},
+        "identity": {
+            "runtime": "afk-inference-v1",
+            "adapter": adapter.identity,
+            **(
+                {
+                    "adapter_family": "pi",
+                    "adapter_contract_version": _PI_CONTRACT_VERSION,
+                    "model": adapter.model,
+                    "thinking": adapter.thinking,
+                }
+                if isinstance(adapter, PiAdapter)
+                else {}
+            ),
+        },
         "hashes": hashes,
         "policy": {
             "requested_capability": capability.value,
@@ -635,6 +899,110 @@ def _sha256(path: Path) -> str:
 
 def _sha256_if_file(path: Path) -> str | None:
     return _sha256(path) if path.is_file() else None
+
+
+def _pi_retry_count(events: bytes) -> int:
+    try:
+        return sum(
+            json.loads(line).get("type") == "auto_retry_start"
+            for line in events.decode("utf-8").splitlines()
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, AttributeError):
+        return 0
+
+
+def _drain_pi_output(
+    process: subprocess.Popen[bytes],
+    fallback_stdout: bytes = b"",
+    fallback_stderr: bytes = b"",
+) -> tuple[bytes, bytes]:
+    """Drain closed Pi pipes, retaining any output known from a failed drain."""
+    try:
+        return process.communicate(timeout=2)
+    except subprocess.TimeoutExpired as error:
+        return error.output or fallback_stdout, error.stderr or fallback_stderr
+    except KeyboardInterrupt:
+        # A repeated interrupt must not convert the already classified outcome.
+        return fallback_stdout, fallback_stderr
+
+
+def _signal_pi_process_group(process_group: int, signal_number: int) -> bool:
+    """Signal a process group despite repeated interrupts; report if it exists."""
+    while True:
+        try:
+            os.killpg(process_group, signal_number)
+            return True
+        except KeyboardInterrupt:
+            # In particular, a second Ctrl-C must not prevent the first SIGTERM.
+            continue
+        except ProcessLookupError:
+            return False
+
+
+def _pi_process_group_exists(process_group: int) -> bool:
+    """Check the whole Pi process group, not merely its original leader."""
+    return _signal_pi_process_group(process_group, 0)
+
+
+def _reap_pi_leader(process: subprocess.Popen[bytes]) -> None:
+    """Poll the leader without allowing another interrupt to escape cleanup."""
+    while True:
+        try:
+            process.poll()
+            return
+        except KeyboardInterrupt:
+            continue
+
+
+def _wait_for_pi_cleanup(process: subprocess.Popen[bytes], timeout: float) -> bool:
+    """Wait at most timeout seconds for Pi's entire process group to exit."""
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            # poll() also reaps the leader.  Descendants can retain the group
+            # after that point, so group existence ends cleanup.
+            _reap_pi_leader(process)
+            if not _pi_process_group_exists(process.pid):
+                return True
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(remaining, 0.05))
+        except KeyboardInterrupt:
+            # Cleanup must finish before the runtime seals an interrupted result.
+            continue
+
+
+def _pi_terminated_process_record(
+    process: subprocess.Popen[bytes], cleanup_succeeded: bool
+) -> dict[str, Any]:
+    """Describe both the leader and the result of process-group cleanup."""
+    cleanup = {"status": "succeeded" if cleanup_succeeded else "failed"}
+    if not cleanup_succeeded:
+        cleanup["error"] = "Pi process group still exists after SIGKILL cleanup timeout"
+    return {"exit_code": process.returncode, "cleanup": cleanup}
+
+
+def _terminate_pi_process(process: subprocess.Popen[bytes]) -> bool:
+    """Terminate Pi's isolated process group and report whether cleanup finished."""
+    process_group = process.pid
+    # The leader may already have exited while a tool descendant retains its
+    # pipes and capabilities, so always address the process group itself.
+    if not _signal_pi_process_group(process_group, signal.SIGTERM):
+        _reap_pi_leader(process)
+        return True
+    if _wait_for_pi_cleanup(process, 2):
+        return True
+
+    # SIGTERM-resistant descendants may retain WRITE capability.  Escalate even
+    # when the leader exited or another Ctrl-C arrives during cleanup.
+    if not _signal_pi_process_group(process_group, signal.SIGKILL):
+        _reap_pi_leader(process)
+        return True
+    # Give the kernel a bounded opportunity to reap the killed group.  A stuck
+    # task or externally retained zombie must not prevent receipt sealing, but
+    # its persistence must be visible in the normalized attempt evidence.
+    return _wait_for_pi_cleanup(process, 2)
 
 
 def _timestamp() -> str:
