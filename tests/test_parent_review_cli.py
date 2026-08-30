@@ -8,6 +8,7 @@ from pathlib import Path
 
 from afk_plan.contract import build_plan, validate_input
 from afk_plan_accept.contract import accept_plan
+from tests.inference_cli_fixture import install_pi
 from tests.test_completion_cli import acceptance_output
 from tests.test_plan_accept_contract import planner_input
 
@@ -55,10 +56,11 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         planner_input_path = self.root / "capability-planner.json"
         planner_result = self.root / "capability-planner"
         planner_input_path.write_text(json.dumps(self.request))
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        install_pi(bin_directory, fixture, "capability-fan-in")
         environment = os.environ.copy()
-        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(fixture), "capability-fan-in"]
-        )
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         planned = self.run_cli(
             "afk_plan", planner_input_path, planner_result, environment
         )
@@ -357,10 +359,13 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         self.assertIn("REVIEW_JSON RESULT_DIRECTORY", help_result.stdout)
         self.assertEqual(malformed.returncode, 2)
 
-    def test_invalid_agent_configuration_does_not_create_an_attempt(self):
+    def test_semantic_runtime_retains_receipt_and_terminal_response(self):
         self.input_path.write_text(json.dumps(self.input_value()))
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        install_pi(bin_directory, FIXTURE, "accepted")
         environment = os.environ.copy()
-        environment["AFK_PARENT_REVIEW_AGENT_COMMAND"] = "not JSON"
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
 
         completed = subprocess.run(
             [
@@ -377,15 +382,18 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
             check=False,
         )
 
-        self.assertEqual(completed.returncode, 2)
-        self.assertFalse(self.result.exists())
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        receipt = json.loads((self.result / "inference/receipt.json").read_text())
+        self.assertEqual(receipt["policy"]["requested_capability"], "NO_TOOLS")
+        self.assertIsNotNone(receipt["terminal_response"])
 
     def invoke(self, scenario, request=None, result=None):
         self.input_path.write_text(json.dumps(request or self.input_value()))
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir(exist_ok=True)
+        install_pi(bin_directory, FIXTURE, scenario)
         environment = os.environ.copy()
-        environment["AFK_PARENT_REVIEW_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(FIXTURE), scenario]
-        )
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         return subprocess.run(
             [
                 sys.executable,

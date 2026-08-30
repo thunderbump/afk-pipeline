@@ -129,6 +129,10 @@ _PI_TOOLS = {
     Capability.WRITE: "read,bash,edit,write,grep,find,ls",
 }
 _PI_CONTRACT_VERSION = 1
+_PRODUCTION_ROLE_POLICY = {
+    "acceptance_planning": {"model": "gpt-5.6-luna", "thinking": "low"},
+    "parent_acceptance_review": {"model": "gpt-5.6-luna", "thinking": "low"},
+}
 
 
 @dataclass(frozen=True)
@@ -738,33 +742,20 @@ class InferenceRuntime:
 
 
 def invoke(**arguments: Any) -> InferenceResult:
-    """Invoke semantically, selecting production policy when ``inference`` is given."""
-    if "inference" in arguments:
-        inference = arguments.pop("inference")
-        return invoke_role(inference=inference, **arguments)
-    return InferenceRuntime().invoke(**arguments)
+    """Invoke a production role through runtime-owned adapter policy."""
+    return invoke_role(**arguments)
 
 
-def invoke_role(*, inference: Mapping[str, Any], **arguments: Any) -> InferenceResult:
-    """Invoke the production adapter from frozen role policy.
-
-    Stage callers remain semantic: they provide role policy, task parts, and a
-    capability, while this runtime boundary owns adapter construction and all
-    process policy.  Importing configuration validation here would create a
-    dependency cycle, so the closed policy is checked directly.
-    """
-    if not isinstance(inference, Mapping) or set(inference) not in (
-        {"model", "thinking"},
-        {"adapter_family", "adapter_contract_version", "model", "thinking"},
-    ):
-        raise ValueError("inference role policy is malformed")
-    if (
-        inference.get("adapter_family", "pi") != "pi"
-        or type(inference.get("adapter_contract_version", 1)) is not int
-        or inference.get("adapter_contract_version", 1) != 1
-    ):
-        raise ValueError("inference adapter policy is unsupported")
-    adapter = PiAdapter(model=inference["model"], thinking=inference["thinking"])
+def invoke_role(**arguments: Any) -> InferenceResult:
+    """Select and construct the production adapter solely from semantic purpose."""
+    purpose = arguments.get("purpose")
+    try:
+        policy = _PRODUCTION_ROLE_POLICY[purpose]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            "inference purpose has no production adapter policy"
+        ) from error
+    adapter = PiAdapter(model=policy["model"], thinking=policy["thinking"])
     return InferenceRuntime().invoke(adapter=adapter, **arguments)
 
 

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from afk_plan.contract import validate_planner_output
+from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
@@ -68,9 +69,12 @@ class PlanCliTest(unittest.TestCase):
             json.loads((self.result / "input.json").read_text()), self.request
         )
         self.assertTrue((self.result / "events.jsonl").stat().st_size > 0)
+        receipt = json.loads((self.result / "inference/receipt.json").read_text())
+        self.assertEqual(receipt["policy"]["requested_capability"], "NO_TOOLS")
+        self.assertIsNotNone(receipt["terminal_response"])
         self.assertFalse((self.result / "output.json.tmp").exists())
 
-    def test_seals_and_validates_the_frozen_nondefault_planner_model(self):
+    def test_domain_inference_setting_does_not_select_the_runtime_adapter(self):
         self.request["inference"] = {
             "model": "gpt-5.6-terra",
             "thinking": "medium",
@@ -80,13 +84,10 @@ class PlanCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((self.result / "output.json").read_text())
-        self.assertEqual(output["planner"]["model"], "gpt-5.6-terra")
+        self.assertEqual(output["planner"]["model"], "gpt-5.6-luna")
         self.assertEqual(validate_planner_output(self.request, output), output)
-
-        mismatched_input = {**self.request, "inference": {**self.request["inference"]}}
-        mismatched_input["inference"]["model"] = "gpt-5.6-luna"
-        with self.assertRaises(ValueError):
-            validate_planner_output(mismatched_input, output)
+        receipt = json.loads((self.result / "inference/receipt.json").read_text())
+        self.assertEqual(receipt["identity"]["model"], "gpt-5.6-luna")
 
     def test_seals_capability_oriented_direct_routing(self):
         self.request["schema_version"] = 2
@@ -363,6 +364,9 @@ class PlanCliTest(unittest.TestCase):
         self.assertEqual(output["error_category"], "invalid_proposal")
         self.assertIsNone(output["routing"])
         self.assertIsNone(output["plan"])
+        receipt = json.loads((self.result / "inference/receipt.json").read_text())
+        self.assertEqual(receipt["outcome"], "response_rejected")
+        self.assertIsNotNone(receipt["terminal_response"])
 
     def test_process_failure_cannot_publish_a_plan(self):
         completed = self.invoke("process-failure")
@@ -410,10 +414,11 @@ class PlanCliTest(unittest.TestCase):
 
     def invoke(self, scenario):
         self.input_path.write_text(json.dumps(self.request))
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir(exist_ok=True)
+        install_pi(bin_directory, FIXTURE, scenario)
         environment = os.environ.copy()
-        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(FIXTURE), scenario]
-        )
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         return subprocess.run(
             [sys.executable, "-m", "afk_plan", self.input_path, self.result],
             cwd=ROOT,

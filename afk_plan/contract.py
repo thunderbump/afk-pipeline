@@ -683,9 +683,9 @@ def validate_planner_output(planner_input: object, value: object) -> dict[str, o
         },
         "Planner output",
     )
-    planner_model = request.get(
-        "inference", INFERENCE_ROLE_DEFAULTS["acceptance_planner"]
-    )["model"]
+    # Adapter selection is runtime-owned. The optional inference field remains
+    # readable for input/evidence compatibility but cannot choose role policy.
+    planner_model = INFERENCE_ROLE_DEFAULTS["acceptance_planner"]["model"]
     if (
         output["schema_version"] != 1
         or output["outcome"] != "completed"

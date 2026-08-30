@@ -1416,7 +1416,6 @@ def fail_preparation(preparation, category, message):
 def worker_environment():
     allowed = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TERM", "TZ"}
     exact = {
-        "AFK_PLAN_AGENT_COMMAND",
         "AFK_PREFLIGHT_AGENT_COMMAND",
         "AFK_REVIEW_AGENT_COMMAND",
         "AFK_ASSESS_AGENT_COMMAND",

@@ -1,20 +1,16 @@
 """Run one inference-assisted Acceptance Planner and seal its proposed plan."""
 
 import json
-import os
 import shutil
 import sys
 import time
 from pathlib import Path
 
-from afk_agent import agent_response, no_tool_pi_command
-from afk_config import INFERENCE_ROLE_DEFAULTS
 from afk_inference import Capability, ResponseRejected, invoke
 from afk_plan.contract import build_routing, validate_input
 from afk_runtime import (
     process_result,
     progress,
-    run_command,
     seal_json,
     timestamp,
     write_json,
@@ -58,11 +54,6 @@ def main() -> int:
     if len(sys.argv) != 3:
         print(USAGE, file=sys.stderr)
         return 2
-    # Preserve the historical fixture hook for old, independently executed
-    # contract tests. Production invocations never inspect or pass command
-    # configuration; they enter the semantic runtime below.
-    if "AFK_PLAN_AGENT_COMMAND" in os.environ:
-        return _legacy_main()
     return _runtime_main()
 
 
@@ -74,18 +65,13 @@ def _runtime_main() -> int:
     instructions = (
         SYSTEM_PROMPT if request["schema_version"] == 1 else CAPABILITY_SYSTEM_PROMPT
     )
-    inference = request.get("inference", INFERENCE_ROLE_DEFAULTS["acceptance_planner"])
     progress("Acceptance Planner input accepted")
 
     result_directory.mkdir()
     write_json(result_directory / "input.json", request)
     started_at = timestamp()
     started = time.monotonic()
-    progress(
-        "starting Acceptance Planner "
-        f"(model={inference['model']}; thinking={inference['thinking']}; "
-        f"timeout={request['timeout_seconds']}s)"
-    )
+    progress(f"starting Acceptance Planner (timeout={request['timeout_seconds']}s)")
 
     def validate_response(value: object):
         try:
@@ -96,7 +82,6 @@ def _runtime_main() -> int:
             raise ResponseRejected(str(error)) from error
 
     inference_result = invoke(
-        inference={"model": inference["model"], "thinking": inference["thinking"]},
         purpose="acceptance_planning",
         trusted_task_instructions=instructions,
         untrusted_task_data=request,
@@ -142,7 +127,7 @@ def _runtime_main() -> int:
         "planner": {
             "kind": "inference",
             "provider": "openai-codex",
-            "model": inference["model"],
+            "model": inference_result.receipt["identity"]["model"],
             "status": outcome,
         },
         "routing": routing,
@@ -180,103 +165,6 @@ def _runtime_error_category(receipt: object) -> str:
         if status in {"protocol_malformed", "response_missing"}
         else "agent_process"
     )
-
-
-def _legacy_main() -> int:
-    input_path = Path(sys.argv[1])
-    result_directory = Path(sys.argv[2])
-    progress("loading Acceptance Planner input")
-    request = validate_input(json.loads(input_path.read_text()))
-    system_prompt = (
-        SYSTEM_PROMPT if request["schema_version"] == 1 else CAPABILITY_SYSTEM_PROMPT
-    )
-    inference = request.get("inference", INFERENCE_ROLE_DEFAULTS["acceptance_planner"])
-    command = no_tool_pi_command(
-        "AFK_PLAN_AGENT_COMMAND",
-        system_prompt,
-        inference["model"],
-        inference["thinking"],
-    )
-    progress("Acceptance Planner input accepted")
-
-    result_directory.mkdir()
-    write_json(result_directory / "input.json", request)
-    events_path = result_directory / "events.jsonl"
-    stderr_path = result_directory / "stderr.log"
-    events_path.touch()
-    stderr_path.touch()
-    started_at = timestamp()
-    started = time.monotonic()
-    progress(
-        "starting Acceptance Planner "
-        f"(model={inference['model']}; thinking={inference['thinking']}; "
-        f"timeout={request['timeout_seconds']}s)"
-    )
-    execution = run_command(
-        [*command, prompt(request)],
-        input_path.parent,
-        request["timeout_seconds"],
-        events_path,
-        stderr_path,
-    )
-    progress("Acceptance Planner agent process stopped")
-
-    routing = None
-    plan = None
-    agent = None
-    error_category = None
-    if execution["interrupted"]:
-        outcome = "interrupted"
-        error_category = "agent_process"
-    elif execution["timed_out"]:
-        outcome = "timed_out"
-        error_category = "agent_process"
-    elif execution["error"] or execution["exit_code"] != 0:
-        outcome = "failed"
-        error_category = "agent_process"
-    else:
-        response = agent_response(events_path)
-        agent = response["agent"]
-        if agent["status"] != "completed" or response["text"] is None:
-            outcome = "failed"
-            error_category = "agent_protocol"
-        else:
-            try:
-                routing, plan = build_routing(request, json.loads(response["text"]))
-            except (json.JSONDecodeError, TypeError, ValueError):
-                outcome = "failed"
-                error_category = "invalid_proposal"
-            else:
-                outcome = "completed"
-
-    output = {
-        "schema_version": 1,
-        "outcome": outcome,
-        "source": {"kind": "bead", "id": request["parent"]["id"]},
-        "started_at": started_at,
-        "finished_at": timestamp(),
-        "duration_seconds": round(time.monotonic() - started, 3),
-        "process": process_result(execution["exit_code"], execution["error"]),
-        "agent": agent,
-        "planner": {
-            "kind": "inference",
-            "provider": "openai-codex",
-            "model": inference["model"],
-            "status": outcome,
-        },
-        "routing": routing,
-        "plan": plan,
-        "error_category": error_category,
-        "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
-    }
-    output_path = result_directory / "output.json"
-    seal_json(output_path, output)
-    progress(f"sealed {outcome} Acceptance Planner result at {output_path}")
-    return 0 if outcome == "completed" else 1
-
-
-def prompt(request: dict[str, object]) -> str:
-    return "Propose child work for this JSON input:\n" + json.dumps(request, indent=2)
 
 
 if __name__ == "__main__":

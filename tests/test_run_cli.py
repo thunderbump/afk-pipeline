@@ -12,6 +12,7 @@ from unittest import mock
 
 import afk_run
 from afk_review.contract import REVIEW_AUDIT
+from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
@@ -1163,11 +1164,9 @@ class RunPreparerCliTest(unittest.TestCase):
                 return subprocess.CompletedProcess(command, exit_code)
             return original_run(command, *args, **kwargs)
 
+        install_pi(self.bin, PLAN_FIXTURE, self.plan_scenario)
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
-        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(PLAN_FIXTURE), self.plan_scenario]
-        )
         stdout = io.StringIO()
         with (
             mock.patch.dict(os.environ, environment, clear=True),
@@ -1407,15 +1406,13 @@ class RunPreparerCliTest(unittest.TestCase):
         )
 
     def invocation_options(self):
+        install_pi(self.bin, PLAN_FIXTURE, self.plan_scenario)
         environment = os.environ.copy()
         environment["PATH"] = f"{self.bin}:{environment['PATH']}"
         environment["UNRELATED_CANARY"] = "TOP_SECRET-must-not-be-forwarded"
         environment["PI_DATABASE_URL"] = "TOP_SECRET-pi-database"
         environment["OPENAI_INTERNAL_PASSWORD"] = "TOP_SECRET-openai-password"
         environment["ANTHROPIC_INTERNAL_TOKEN"] = "TOP_SECRET-anthropic-token"
-        environment["AFK_PLAN_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(PLAN_FIXTURE), self.plan_scenario]
-        )
         return {
             "cwd": self.root,
             "env": environment,
