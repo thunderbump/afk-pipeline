@@ -3,6 +3,27 @@
 Small executable modules for running agent work, validating and reviewing its
 result, responding to feedback, and coordinating the accepted sequence.
 
+## Inference Runtime
+
+`afk_inference` exposes a semantic invocation API: callers provide a purpose,
+separate trusted instructions and untrusted data, one of `NO_TOOLS`,
+`READ_ONLY`, or `WRITE`, an execution root, timeout, evidence directory, and a
+trusted in-process response validator. The runtime supplies the fixed system
+instructions for the requested capability; callers do not provide executable
+paths, argument arrays, or system prompts.
+
+The deterministic `FixtureAdapter` is an immutable in-process test adapter. Its
+frozen script is indexed only by the one-based attempt number, and all attempts
+share the invocation deadline. It is not a sandbox. Validators likewise run
+directly as trusted pipeline code; their rejection, failure, and duration are
+recorded, but the runtime does not isolate or forcibly stop them.
+
+Each invocation retains the exact structured prompt and invocation, frozen
+fixture script, per-attempt event stream, stderr and response, and an atomically
+sealed `receipt.json`. The receipt is written last and binds identities,
+hashes, capability policy, timing, protocol, validation, terminal response,
+and outcome.
+
 ## Acceptance Planner
 
 Route one frozen Bead directly to the existing pipeline or propose a small
