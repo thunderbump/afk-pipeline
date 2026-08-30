@@ -738,7 +738,34 @@ class InferenceRuntime:
 
 
 def invoke(**arguments: Any) -> InferenceResult:
+    """Invoke semantically, selecting production policy when ``inference`` is given."""
+    if "inference" in arguments:
+        inference = arguments.pop("inference")
+        return invoke_role(inference=inference, **arguments)
     return InferenceRuntime().invoke(**arguments)
+
+
+def invoke_role(*, inference: Mapping[str, Any], **arguments: Any) -> InferenceResult:
+    """Invoke the production adapter from frozen role policy.
+
+    Stage callers remain semantic: they provide role policy, task parts, and a
+    capability, while this runtime boundary owns adapter construction and all
+    process policy.  Importing configuration validation here would create a
+    dependency cycle, so the closed policy is checked directly.
+    """
+    if not isinstance(inference, Mapping) or set(inference) not in (
+        {"model", "thinking"},
+        {"adapter_family", "adapter_contract_version", "model", "thinking"},
+    ):
+        raise ValueError("inference role policy is malformed")
+    if (
+        inference.get("adapter_family", "pi") != "pi"
+        or type(inference.get("adapter_contract_version", 1)) is not int
+        or inference.get("adapter_contract_version", 1) != 1
+    ):
+        raise ValueError("inference adapter policy is unsupported")
+    adapter = PiAdapter(model=inference["model"], thinking=inference["thinking"])
+    return InferenceRuntime().invoke(adapter=adapter, **arguments)
 
 
 def _prepare_evidence(
@@ -754,9 +781,11 @@ def _prepare_evidence(
     _write_json(evidence / "prompt.json", prompt)
     _write_json(
         script_path,
-        [item.json_value() for item in adapter.script]
-        if isinstance(adapter, FixtureAdapter)
-        else adapter.descriptor(),
+        (
+            [item.json_value() for item in adapter.script]
+            if isinstance(adapter, FixtureAdapter)
+            else adapter.descriptor()
+        ),
     )
     attempts_directory.mkdir()
 

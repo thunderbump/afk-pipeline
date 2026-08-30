@@ -1,11 +1,14 @@
 """Review verified child fan-in against one accepted parent intent."""
 
 import json
+import os
+import shutil
 import sys
 import time
 from pathlib import Path
 
 from afk_agent import agent_response, no_tool_pi_command
+from afk_inference import Capability, ResponseRejected, invoke
 from afk_parent_review.contract import (
     load_fan_in,
     load_request,
@@ -56,6 +59,128 @@ def main() -> int:
     if len(sys.argv) != 3:
         print(USAGE, file=sys.stderr)
         return 2
+    if "AFK_PARENT_REVIEW_AGENT_COMMAND" in os.environ:
+        return _legacy_main()
+    return _runtime_main()
+
+
+def _runtime_main() -> int:
+    input_path = Path(sys.argv[1])
+    result = Path(sys.argv[2])
+    progress("loading Parent Acceptance Review evidence")
+    request = load_request(json.loads(input_path.read_text()))
+    validate_result_location(result, request["protected_directories"])
+    fan_in = load_fan_in(request)
+    instructions = (
+        CAPABILITY_SYSTEM_PROMPT if fan_in["schema_version"] == 2 else SYSTEM_PROMPT
+    )
+    progress("Parent Acceptance Review evidence accepted")
+
+    result.mkdir()
+    write_json(result / "input.json", request_for_output(request))
+    write_json(result / "fan-in.json", fan_in)
+    started_at = timestamp()
+    started = time.monotonic()
+    progress(
+        f"starting Parent Acceptance Review (model={MODEL}; timeout={request['timeout_seconds']}s)"
+    )
+
+    def validate_response(value: object):
+        try:
+            if not isinstance(value, str):
+                raise TypeError("parent review response must be JSON text")
+            return validate_review(json.loads(value), fan_in)
+        except (json.JSONDecodeError, TypeError, ValueError) as error:
+            raise ResponseRejected(str(error)) from error
+
+    inference_result = invoke(
+        inference={"model": MODEL, "thinking": "low"},
+        purpose="parent_acceptance_review",
+        trusted_task_instructions=instructions,
+        untrusted_task_data=fan_in,
+        requested_capability=Capability.NO_TOOLS,
+        execution_root=input_path.parent,
+        timeout_seconds=request["timeout_seconds"],
+        evidence_directory=result / "inference",
+        validator=validate_response,
+    )
+    progress("Parent Acceptance Review inference stopped")
+    _publish_runtime_logs(result, inference_result.receipt)
+
+    review = inference_result.value if inference_result.outcome == "succeeded" else None
+    if inference_result.outcome == "succeeded":
+        outcome, decision, error_category = "completed", review["decision"], None
+    elif inference_result.outcome == "interrupted":
+        outcome, decision, error_category = "interrupted", "incomplete", "agent_process"
+    elif inference_result.outcome == "timed_out":
+        outcome, decision, error_category = "timed_out", "incomplete", "agent_process"
+    elif inference_result.outcome == "response_rejected":
+        outcome, decision, error_category = "failed", "incomplete", "invalid_review"
+    else:
+        status = inference_result.receipt["protocol"].get("status")
+        category = (
+            "agent_protocol"
+            if status in {"protocol_malformed", "response_missing"}
+            else "agent_process"
+        )
+        outcome, decision, error_category = "failed", "incomplete", category
+
+    terminal = inference_result.receipt["terminal_response"]
+    agent = (
+        {"status": "completed"}
+        if terminal is not None
+        and inference_result.receipt["protocol"].get("status") == "accepted"
+        else None
+    )
+    output = {
+        "schema_version": 1,
+        "outcome": outcome,
+        "decision": decision,
+        "source": {"kind": "bead", "id": fan_in["parent"]["id"]},
+        "started_at": started_at,
+        "finished_at": timestamp(),
+        "duration_seconds": round(time.monotonic() - started, 3),
+        "plan_sha256": fan_in["plan_sha256"],
+        "review": review,
+        "process": _runtime_process(inference_result.receipt),
+        "agent": agent,
+        "reviewer": {
+            "kind": "inference",
+            "provider": "openai-codex",
+            "model": MODEL,
+            "status": outcome,
+        },
+        "error_category": error_category,
+        "artifacts": {
+            "input": "input.json",
+            "fan_in": "fan-in.json",
+            "events": "events.jsonl",
+            "stderr": "stderr.log",
+        },
+    }
+    seal_json(result / "output.json", output)
+    progress(f"sealed {decision} Parent Acceptance Review at {result / 'output.json'}")
+    return 0 if decision == "accepted" else 1
+
+
+def _publish_runtime_logs(result: Path, receipt: object) -> None:
+    attempts = receipt["attempts"]
+    for name in ("events", "stderr"):
+        target = result / ("events.jsonl" if name == "events" else "stderr.log")
+        source = attempts[-1]["artifacts"].get(name) if attempts else None
+        if source:
+            shutil.copyfile(result / "inference" / source, target)
+        else:
+            target.touch()
+
+
+def _runtime_process(receipt: object) -> dict[str, object]:
+    attempts = receipt["attempts"]
+    process = attempts[-1].get("process", {}) if attempts else {}
+    return process_result(process.get("exit_code"), process.get("error"))
+
+
+def _legacy_main() -> int:
     input_path = Path(sys.argv[1])
     result = Path(sys.argv[2])
     progress("loading Parent Acceptance Review evidence")

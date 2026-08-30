@@ -87,11 +87,12 @@ slugs and their allowed combinations of `execution`, `evidence_route`, and
 }
 ```
 
-The default tool-free Pi adapter uses `gpt-5.6-luna` with low thinking. Tests or
-another caller may provide `AFK_PLAN_AGENT_COMMAND` as an exact JSON argv array;
-the structured planning prompt is appended as the final argument. Inference
-returns exactly one `direct` or `decompose` decision with ordered criterion
-coverage. It neither creates Beads nor authorizes publication.
+The planner requests `NO_TOOLS` from the Inference Runtime, using
+`gpt-5.6-luna` with low thinking by default. Trusted routing instructions and
+the untrusted frozen parent and catalog are passed as distinct task parts; the
+runtime owns adapter selection, process policy, and evidence. Inference returns
+exactly one `direct` or `decompose` decision with ordered criterion coverage. It
+neither creates Beads nor authorizes publication.
 
 A direct proposal assigns every criterion to the unchanged source Bead and
 contains no children. Its routes may use catalog-defined ownership and evidence
@@ -127,9 +128,10 @@ valid routing exits zero. Process, event-protocol, or invalid-proposal outcomes
 seal a failed, timed-out, or interrupted output with neither routing nor Plan
 and exit `1`. Invalid invocation or input and an existing destination exit `2`
 without replacing evidence. The new result directory contains accepted
-`input.json`, raw `events.jsonl`, raw `stderr.log`, and atomically sealed
-`output.json`. The Planner does not read or write Beads, prepare worktrees,
-publish children, or validate completion.
+`input.json`, compatibility copies of raw `events.jsonl` and `stderr.log`, the
+runtime-owned `inference/` receipt and terminal-response evidence, and an
+atomically sealed `output.json`. The Planner does not read or write Beads,
+prepare worktrees, publish children, or validate completion.
 
 ## Acceptance Routing Policy
 
@@ -1132,13 +1134,14 @@ typed as Completion Record evidence instead of being relabeled as deterministic
 verification. Completion timestamps cannot predate its terminal evidence.
 
 These deterministic checks finish before result creation or inference. The
-default adapter then invokes Pi with `gpt-5.6-luna`, low thinking, and no tools.
-`AFK_PARENT_REVIEW_AGENT_COMMAND` may contain a JSON argv override for testing
-or deployment. The model sees only the verified fan-in summary; it does not
-read repositories, retrieve evidence, mutate Beads, or run work.
+review requests `NO_TOOLS` from the Inference Runtime with `gpt-5.6-luna` and
+low thinking. Trusted review instructions remain separate from the untrusted
+verified fan-in; adapter and process policy belong to the runtime. The model
+does not read repositories, retrieve evidence, mutate Beads, or run work.
 
 The immutable result directory contains `input.json`, the deterministic
-`fan-in.json`, raw `events.jsonl`, raw `stderr.log`, and an atomically sealed
+`fan-in.json`, compatibility copies of raw `events.jsonl` and `stderr.log`, the
+runtime-owned `inference/` evidence and receipt, and an atomically sealed
 `output.json`. A completed result decides `accepted` or `incomplete`, gives one
 decision per canonical parent criterion, and lists exactly one gap per
 incomplete criterion. An incomplete result also proposes one advisory follow-up
