@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_related_work import build_snapshot, reference
+
 ROOT = Path(__file__).parents[1]
 ATTEMPT_FIXTURE = ROOT / "tests" / "fixture_agent.py"
 REVIEW_FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
@@ -248,6 +250,75 @@ class CoordinatorCliTest(unittest.TestCase):
             ],
             1,
         )
+
+    def test_continuation_reuses_and_enforces_frozen_related_work(self):
+        assignment_path, request_path = self.prepare_run(max_responses=0)
+        records = {
+            "task": {"id": "task", "title": "Current", "parent": "epic"},
+            "epic": {
+                "id": "epic",
+                "title": "Parent",
+                "children": ["task", "callers"],
+            },
+            "callers": {"id": "callers", "title": "Migrate callers"},
+        }
+        raw, facts = build_snapshot(records["task"], records.__getitem__)
+        snapshot = self.root / "related-work.jsonl"
+        snapshot.write_bytes(raw)
+        related = reference(snapshot, facts)
+        assignment = json.loads(assignment_path.read_text())
+        assignment.update(
+            {
+                "related_work": related,
+                "related_work_instructions": "Assignment is authoritative.",
+            }
+        )
+        self.write_json(assignment_path, assignment)
+        request = json.loads(request_path.read_text())
+        request["related_work"] = related
+        self.write_json(request_path, request)
+        run = self.root / "related-continuation"
+        exhausted = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+
+        changed_request = dict(request)
+        changed_request["related_work"] = {**related, "sha256": "0" * 64}
+        self.write_json(request_path, changed_request)
+        changed_reference = self.invoke(request_path, run, "--continue-exhausted", "1")
+        self.assertEqual(changed_reference.returncode, 2)
+        self.assertIn("reference disagrees", changed_reference.stderr)
+        self.assertFalse((run / "continuations").exists())
+
+        self.write_json(request_path, request)
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+            response_scenario="commit",
+        )
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+        output = json.loads((run / "continuations" / "01" / "output.json").read_text())
+        review_directory = next(
+            item["directory"]
+            for item in reversed(output["history"])
+            if item["component"] == "review"
+        )
+        review_input = json.loads((run / review_directory / "input.json").read_text())
+        self.assertEqual(review_input["related_work"], related)
+
+        snapshot.write_bytes(raw.replace(b"Migrate callers", b"Rewrite callers"))
+        changed_snapshot = self.invoke(request_path, run, "--continue-exhausted", "1")
+        self.assertEqual(changed_snapshot.returncode, 2)
+        self.assertIn("digest disagrees", changed_snapshot.stderr)
+        self.assertFalse((run / "continuations" / "02").exists())
 
     def test_export_selects_newest_terminal_and_preserves_continuation_lineage(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)

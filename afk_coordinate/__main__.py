@@ -16,6 +16,7 @@ from afk_coordinate.contract import (
     validation_repair_source,
 )
 from afk_iterate.__main__ import validate_sealed_result
+from afk_related_work import validate_snapshot
 from afk_runtime import progress, repository_state, seal_json, write_json
 from afk_validate.evidence import validate_repairable_failure
 
@@ -82,6 +83,10 @@ def main():
     else:
         assignment = validate_assignment(read_json(Path(request["assignment_path"])))
     validate_run_location(run_directory, Path(assignment["workspace"]))
+    if request.get("related_work") != assignment.get("related_work"):
+        raise ValueError("Coordinator related-work reference disagrees with Assignment")
+    if "related_work" in request:
+        validate_snapshot(request["related_work"]["path"], request["related_work"])
     state_path = run_directory / "state.json"
     terminal_output_path = run_directory / "output.json"
     if run_directory.exists():
@@ -472,6 +477,7 @@ def review_input(request, assignment, state, run_directory):
         assignment["workspace"],
         request["agent_timeout_seconds"],
         inference=role_inference(request, "review"),
+        related_work=request.get("related_work"),
         change_directory=str((run_directory / change).resolve()),
         validation_directory=str((run_directory / validation).resolve()),
     )
@@ -483,6 +489,7 @@ def assessment_input(request, assignment, state, run_directory):
         assignment["workspace"],
         request["agent_timeout_seconds"],
         inference=role_inference(request, "finding_assessment"),
+        related_work=request.get("related_work"),
         review_directory=str((run_directory / review).resolve()),
     )
 

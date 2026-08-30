@@ -59,11 +59,33 @@ elif scenario in ("mutate-workspace", "damage-git"):
         Path("reviewer-change.txt").write_text("reviewer changed the workspace\n")
     else:
         Path(".git").rename(".git-damaged")
-elif scenario in ("no-findings", "delayed-no-findings"):
+elif scenario in ("no-findings", "delayed-no-findings", "sibling-owned-migration"):
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
+    if scenario == "sibling-owned-migration":
+        prompt = sys.argv[-1]
+        if "Caller migration is owned by this sibling." in prompt:
+            raise SystemExit("snapshot content was injected into the prompt")
+        reference_line = next(
+            line
+            for line in prompt.splitlines()
+            if line.startswith("Frozen related-work context: ")
+        )
+        snapshot = Path(reference_line.split(": ", 1)[1].split(" (sha256 ", 1)[0])
+        related = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        if not any(
+            row.get("relationship") == "sibling"
+            and row.get("title") == "Migrate callers"
+            for row in related
+        ):
+            raise SystemExit("caller migration was not sibling-owned")
     review = {
-        "summary": "No actionable defects found.",
+        "summary": (
+            "Caller migration belongs to the related sibling; "
+            "current change is complete."
+            if scenario == "sibling-owned-migration"
+            else "No actionable defects found."
+        ),
         "findings": [],
         "audit": AUDIT,
     }

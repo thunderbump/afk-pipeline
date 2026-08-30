@@ -25,6 +25,7 @@ from afk_plan.contract import validate_planner_output
 from afk_plan_accept.contract import validate_policy_output
 from afk_preflight.contract import validate_input as validate_preflight_input
 from afk_preflight.contract import validate_output as validate_preflight_output
+from afk_related_work import SNAPSHOT_NAME, validate_reference, validate_snapshot
 from afk_review.contract import validate_audit
 
 SAFE_PROJECT = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
@@ -290,6 +291,8 @@ def load_source_v2(
     if not isinstance(preparation, dict) or set(preparation) not in (
         required,
         required | {"inference_roles"},
+        required | {"related_work"},
+        required | {"inference_roles", "related_work"},
     ):
         raise ExportError("invalid paused Run Preparer evidence")
     validate_prepared_inference_roles(preparation)
@@ -332,6 +335,7 @@ def load_source_v2(
         raise ExportError("paused Run has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
+    related_work = load_related_work(source, preparation, assignment, request)
     assignment_bead = (
         assignment.get("source", {}).get("id")
         if assignment.get("source", {}).get("kind") == "bead"
@@ -368,6 +372,7 @@ def load_source_v2(
         "run_root": source,
         "preflight": preflight,
         "preparation": preparation,
+        "related_work": related_work,
     }
 
 
@@ -394,7 +399,12 @@ def load_terminal_routing(
     }
     if (
         not isinstance(preparation, dict)
-        or set(preparation) not in (expected, expected | {"inference_roles"})
+        or set(preparation)
+        not in (
+            expected,
+            expected | {"inference_roles"},
+            expected | {"inference_roles", "related_work"},
+        )
         or preparation.get("schema_version") != 1
         or preparation.get("errors") != []
     ):
@@ -435,6 +445,7 @@ def load_terminal_routing(
         raise ExportError("terminal Acceptance Routing has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
+    related_work = load_related_work(source, preparation, assignment, request)
     if assignment.get("source") != {"kind": "bead", "id": bead["id"]}:
         raise ExportError("Acceptance Routing Bead identity disagrees")
     routing = validate_prepared_routing(
@@ -480,6 +491,7 @@ def load_terminal_routing(
         "preflight": None,
         "preparation": preparation,
         "acceptance_routing": routing,
+        "related_work": related_work,
     }
 
 
@@ -545,6 +557,9 @@ def load_source(
         coordinator = source / "coordinator"
         root_assignment = read_json(source / "assignment.json")
         root_request = read_json(source / "coordinator-request.json")
+        related_work = load_related_work(
+            source, preparation, root_assignment, root_request
+        )
         if "preflight" in preparation:
             preflight_input = validate_preflight_input(
                 read_json(source / "preflight-input.json")
@@ -576,6 +591,7 @@ def load_source(
         root_assignment = None
         root_request = None
         acceptance_routing = None
+        related_work = None
 
     require_directory(coordinator)
     assignment = validate_assignment(read_json(coordinator / "assignment.json"))
@@ -644,7 +660,29 @@ def load_source(
         },
         "acceptance_routing": acceptance_routing,
         "preparation": preparation,
+        "related_work": related_work,
     }
+
+
+def load_related_work(source, preparation, assignment, request):
+    """Validate one immutable snapshot binding across all prepared Run records."""
+    references = (
+        preparation.get("related_work"),
+        assignment.get("related_work"),
+        request.get("related_work"),
+    )
+    if references == (None, None, None):
+        return None
+    if any(item is None for item in references) or not (
+        references[0] == references[1] == references[2]
+    ):
+        raise ExportError("prepared related-work references disagree")
+    try:
+        validate_reference(references[0], expected_path=source / SNAPSHOT_NAME)
+        raw = validate_snapshot(source / SNAPSHOT_NAME, references[0])
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ExportError("invalid prepared related-work snapshot") from error
+    return {"reference": references[0], "raw": raw}
 
 
 def load_continuation_lineage(
@@ -738,6 +776,8 @@ def validate_preparation(source, value):
             frozenset(expected | {"inference_roles"}),
             frozenset(expected | {"preflight", "inference_roles"}),
             frozenset(expected | {"routing", "inference_roles"}),
+            frozenset(expected | {"routing", "inference_roles", "related_work"}),
+            frozenset(expected | {"inference_roles", "related_work"}),
         }
         or value.get("schema_version") != 1
     ):
@@ -1035,6 +1075,13 @@ def public_artifacts(observed):
         if data is not None and (
             used + len(data) > budget or len(payloads) >= MAX_BUNDLE_FILES - 1
         ):
+            # Optional evidence may degrade to a descriptor, but the frozen
+            # related-work bytes are required publication evidence.  Do not
+            # silently omit them when earlier artifacts exhaust either budget.
+            if candidate.get("kind") == "related_work":
+                raise ExportError(
+                    "validated related-work snapshot cannot be published: bundle_limit"
+                )
             descriptor.update(
                 state="oversized",
                 public_bytes=0,
@@ -1116,6 +1163,15 @@ def artifact_candidates(observed):
             "preparation.json",
         ):
             add(name, "run", "json", "application/json", 0)
+        if observed.get("related_work"):
+            add(
+                SNAPSHOT_NAME,
+                "run",
+                "related_work",
+                observed["related_work"]["reference"]["media_type"],
+                0,
+                validated_raw=observed["related_work"]["raw"],
+            )
     if observed.get("preflight"):
         add("preflight-input.json", "preflight", "json", "application/json", 0)
         add("preflight/input.json", "preflight", "json", "application/json", 0)
@@ -1261,28 +1317,38 @@ def derive_public_artifact(candidate, redactions):
         "kind": candidate["kind"],
         "media_type": candidate["media_type"],
     }
+
+    def unavailable(state, reason):
+        # Unlike ordinary evidence, the frozen related-work snapshot is a
+        # required, already-validated Run artifact.  Publication must fail
+        # closed if a race prevents emitting those exact bytes.
+        if candidate["kind"] == "related_work":
+            raise ExportError(
+                f"validated related-work snapshot cannot be published: {reason}"
+            )
+        return nondownloadable_descriptor(base, state, reason), None
+
     if candidate.get("unsafe_path"):
-        return nondownloadable_descriptor(base, "unsafe", "unsafe_path"), None
+        return unavailable("unsafe", "unsafe_path")
     path = candidate["root"] / source
     try:
         facts = path.lstat()
     except FileNotFoundError:
-        return nondownloadable_descriptor(base, "unavailable", "missing"), None
+        return unavailable("unavailable", "missing")
     except (OSError, ValueError):
-        return nondownloadable_descriptor(base, "unavailable", "unavailable"), None
+        return unavailable("unavailable", "unavailable")
     if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
-        return nondownloadable_descriptor(base, "unsafe", "unsafe_file"), None
+        return unavailable("unsafe", "unsafe_file")
     if facts.st_size == 0:
-        return nondownloadable_descriptor(base, "empty", "empty"), None
+        return unavailable("empty", "empty")
     if facts.st_size > V2_MAX_ARTIFACT_BYTES:
-        return nondownloadable_descriptor(base, "oversized", "artifact_limit"), None
+        return unavailable("oversized", "artifact_limit")
     try:
         raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES, expected_facts=facts)
     except (ExportError, OSError):
-        # Optional publication evidence may disappear, become unreadable, or
-        # be replaced after lstat.  Seal that observation without rejecting a
-        # valid terminal Run and without publishing bytes from the race.
-        return nondownloadable_descriptor(base, "unavailable", "unavailable"), None
+        # Optional evidence remains describable, but required frozen context
+        # cannot degrade into a nondownloadable artifact after source loading.
+        return unavailable("unavailable", "unavailable")
     try:
         validated_preflight_output_raw = candidate.get("validated_preflight_output_raw")
         if (
@@ -1294,9 +1360,16 @@ def derive_public_artifact(candidate, redactions):
             candidate.get("validated_raw") is not None
             and raw != candidate["validated_raw"]
         ):
+            if candidate["kind"] == "related_work":
+                raise ExportError("validated related-work snapshot changed")
             raise ExportError("validated Acceptance Routing output changed")
         text = decode_text(raw)
-        if candidate["kind"] in {"json", "planner", "policy"}:
+        if candidate["kind"] == "related_work":
+            if candidate.get("validated_raw") != raw:
+                raise ExportError("validated related-work snapshot changed")
+            public = raw
+            changed = False
+        elif candidate["kind"] in {"json", "planner", "policy"}:
             value = json.loads(text)
             changed = sanitize_validated_preflight_classifier_key(
                 value, candidate.get("validated_preflight_classifier_key")
@@ -1321,16 +1394,14 @@ def derive_public_artifact(candidate, redactions):
             sanitized = sanitize_public_artifact_text(text, redactions)
             changed = sanitized != text
             public = sanitized.encode()
-    except (
-        ExportError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        TypeError,
-        ValueError,
-    ):
+    except ExportError:
+        if candidate["kind"] == "related_work":
+            raise
         return nondownloadable_descriptor(base, "unsafe", "unsafe_or_invalid"), None
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return unavailable("unsafe", "unsafe_or_invalid")
     if len(public) > V2_MAX_ARTIFACT_BYTES:
-        return nondownloadable_descriptor(base, "oversized", "artifact_limit"), None
+        return unavailable("oversized", "artifact_limit")
     destination = candidate.get("destination", "artifacts/" + source)
     descriptor = {
         **base,

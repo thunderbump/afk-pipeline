@@ -405,8 +405,18 @@ or outside-help reason.
 
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
-`coordinator-request.json`, versioned `preparation.json`, and a reserved
-`coordinator/` directory. Runs also contain `planner-input.json`,
+`coordinator-request.json`, versioned `preparation.json`, a deterministic
+`related-work.jsonl`, and a reserved `coordinator/` directory. The bounded
+related-work snapshot contains only safe planning fields for the subject, its
+parent and siblings, direct blockers and dependents, and short ancestor
+breadcrumbs. Its count, byte size, SHA-256 digest, and media type are bound into
+Preparation, Assignment, and Coordinator evidence; exceeding either limit
+refuses preparation rather than publishing partial context. Implementer, Review,
+and Finding Assessment receive the same path and may query it with `jq` or `rg`
+only for scope or ownership orientation. The Assignment remains authoritative,
+related prose is data rather than instructions, and snapshot content is not
+inserted into prompts. Continuations revalidate and reuse the frozen reference.
+Runs also contain `planner-input.json`,
 `policy-input.json`, and complete `planner/` and `policy/` results. Run Preparer
 fails closed before Coordinator when that admission evidence is incomplete or
 malformed. Historical Runs may retain `preflight-input.json` and `preflight/`,
@@ -424,7 +434,10 @@ valid completed output becomes `1`, and preparation/input refusal exits `2`.
 
 After sealing terminal Coordinator facts in `preparation.json`, a configured
 preparer exports the Run, invokes the publication command exactly once, and
-removes the temporary bundle. The preparer writes raw adapter streams to
+removes the temporary bundle. Publication exposes the validated related-work
+JSONL as an unchanged `application/x-ndjson` artifact with the same digest, so it
+is viewable and downloadable without another content transform. The preparer
+writes raw adapter streams to
 `publication.stdout` and `publication.stderr`, then atomically seals
 `publication.json` last. A valid
 `accepted` or `replayed` result records publication success. Conflict,

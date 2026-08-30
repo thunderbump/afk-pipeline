@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_related_work import build_snapshot, reference
+
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
 
@@ -320,6 +322,35 @@ class ReviewCliTest(unittest.TestCase):
         descendant = int(marker.read_text())
         with self.assertRaises(ProcessLookupError):
             os.kill(descendant, 0)
+
+    def test_review_queries_sibling_ownership_without_prompt_injection(self):
+        records = {
+            "task": {"id": "task", "title": "Change the API", "parent": "epic"},
+            "epic": {
+                "id": "epic",
+                "title": "API epic",
+                "children": ["task", "callers"],
+            },
+            "callers": {
+                "id": "callers",
+                "title": "Migrate callers",
+                "description": "Caller migration is owned by this sibling.",
+            },
+        }
+        raw, facts = build_snapshot(records["task"], records.__getitem__)
+        snapshot = self.root / "related-work.jsonl"
+        snapshot.write_bytes(raw)
+        input_path, result, environment = self.prepare_review("sibling-owned-migration")
+        review_input = json.loads(input_path.read_text())
+        review_input["related_work"] = reference(snapshot, facts)
+        self.write_json(input_path, review_input)
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["review"]["findings"], [])
+        self.assertIn("related sibling", output["review"]["summary"])
 
     def test_agent_launch_failure_is_sealed(self):
         result, completed = self.run_review(

@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from afk_related_work import validate_reference
+
 
 def validate_assignment(assignment: object) -> dict[str, object]:
     if not isinstance(assignment, dict) or assignment.get("schema_version") != 1:
@@ -24,4 +26,11 @@ def validate_assignment(assignment: object) -> dict[str, object]:
     timeout = assignment.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("assignment timeout_seconds must be a positive integer")
+    if "related_work" in assignment:
+        validate_reference(assignment["related_work"])
+        instructions = assignment.get("related_work_instructions")
+        if not isinstance(instructions, str) or not instructions.strip():
+            raise ValueError("assignment related-work instructions are required")
+    elif "related_work_instructions" in assignment:
+        raise ValueError("assignment related-work instructions lack a reference")
     return assignment

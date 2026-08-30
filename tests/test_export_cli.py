@@ -884,6 +884,62 @@ class ExportCliTests(unittest.TestCase):
         self.assertEqual(result[1]["unavailable_reason"], "bundle_limit")
         self.assertEqual(set(payloads), {"artifacts/first.json"})
 
+    def test_v2_fails_closed_when_bundle_limits_exclude_related_work(self):
+        candidates = [
+            {"priority": 0, "source": "first.json", "kind": "json"},
+            {
+                "priority": 0,
+                "source": "related-work.jsonl",
+                "kind": "related_work",
+            },
+        ]
+        descriptors = [
+            {
+                "source": {"path": candidate["source"]},
+                "state": "downloadable",
+                "path": f"artifacts/{candidate['source']}",
+            }
+            for candidate in candidates
+        ]
+
+        cases = (
+            {
+                "name": "byte budget",
+                "first": b"x" * 50,
+                "related": b"y" * 10,
+                "bundle_bytes": 55,
+                "bundle_files": afk_export.MAX_BUNDLE_FILES,
+            },
+            {
+                "name": "file budget",
+                "first": b"x",
+                "related": b"y",
+                "bundle_bytes": 100,
+                "bundle_files": 2,
+            },
+        )
+        for case in cases:
+            with (
+                self.subTest(case["name"]),
+                mock.patch("afk_export.artifact_candidates", return_value=candidates),
+                mock.patch(
+                    "afk_export.derive_public_artifact",
+                    side_effect=[
+                        (descriptors[0].copy(), case["first"]),
+                        (descriptors[1].copy(), case["related"]),
+                    ],
+                ),
+                mock.patch("afk_export.V2_MAX_BUNDLE_BYTES", case["bundle_bytes"]),
+                mock.patch("afk_export.MAX_BUNDLE_FILES", case["bundle_files"]),
+                mock.patch("afk_export.MAX_MANIFEST_BYTES", 0),
+                mock.patch("afk_export.MAX_INCLUDED_BYTES", 0),
+                self.assertRaisesRegex(
+                    afk_export.ExportError,
+                    "related-work snapshot cannot be published: bundle_limit",
+                ),
+            ):
+                afk_export.public_artifacts({"redactions": set()})
+
     def test_v2_malformed_preparation_is_a_normal_invalid_run_rejection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -957,6 +1013,31 @@ class ExportCliTests(unittest.TestCase):
             preparation["coordinator"].update(
                 status="not_started", exit_code=None, outcome=None, decision=None
             )
+            related_raw = (
+                b'{"description":"Document token=ghp_example_value literally.",'
+                b'"id":"central-example","relationship":"subject"}\n'
+            )
+            related_path = source / "related-work.jsonl"
+            related_path.write_bytes(related_raw)
+            related = {
+                "path": str(related_path),
+                "sha256": hashlib.sha256(related_raw).hexdigest(),
+                "media_type": "application/x-ndjson",
+                "record_count": 1,
+                "bytes": len(related_raw),
+            }
+            preparation["related_work"] = related
+            assignment_path = source / "assignment.json"
+            assignment = json.loads(assignment_path.read_text())
+            assignment.update(
+                related_work=related,
+                related_work_instructions="Assignment is authoritative.",
+            )
+            assignment_path.write_text(json.dumps(assignment))
+            request_path = source / "coordinator-request.json"
+            coordinator_request = json.loads(request_path.read_text())
+            coordinator_request["related_work"] = related
+            request_path.write_text(json.dumps(coordinator_request))
             preparation_path.write_text(json.dumps(preparation))
             (source / "preflight-input.json").write_text(json.dumps(preflight_input))
             preflight = source / "preflight"
@@ -984,6 +1065,17 @@ class ExportCliTests(unittest.TestCase):
                 record["terminal"], {"stage": "preflight", "decision": "pause"}
             )
             self.assertEqual(record["preflight"]["requests"], [request])
+            descriptor = next(
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(descriptor["media_type"], "application/x-ndjson")
+            self.assertEqual(descriptor["public_sha256"], related["sha256"])
+            self.assertEqual(descriptor["sanitization_status"], "unchanged")
+            self.assertEqual(
+                (destination / descriptor["path"]).read_bytes(), related_raw
+            )
 
             invocation_input = {**preflight_input, "title": "Fabricated invocation"}
             (preflight / "input.json").write_text(json.dumps(invocation_input))

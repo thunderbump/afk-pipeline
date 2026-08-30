@@ -1,3 +1,4 @@
+import hashlib
 import io
 import json
 import os
@@ -308,11 +309,28 @@ class RunPreparerCliTest(unittest.TestCase):
             "description": "Do the requested work.",
             "design": "Keep it small.",
             "acceptance_criteria": "Commit the result.",
+            "parent": "central-epic",
             "labels": [
                 "project:fixture",
                 "priority:normal",
                 "ready-for-agent",
             ],
+        }
+        self.related_beads = {
+            "central-epic": {
+                "id": "central-epic",
+                "title": "Fixture epic",
+                "children": ["central-123", "central-callers"],
+                "labels": [],
+                "notes": "private epic note",
+            },
+            "central-callers": {
+                "id": "central-callers",
+                "title": "Migrate callers",
+                "description": "Caller migration is owned by this sibling.",
+                "labels": [],
+                "credentials": "TOP_SECRET-related-work",
+            },
         }
         self.plan_scenario = "capability-run-direct"
         self.write_bd()
@@ -372,6 +390,33 @@ class RunPreparerCliTest(unittest.TestCase):
             },
         )
         self.assertEqual(request["assignment_path"], str(artifact / "assignment.json"))
+        snapshot = artifact / "related-work.jsonl"
+        related_rows = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        self.assertEqual(
+            [(row["id"], row["relationship"]) for row in related_rows],
+            [
+                ("central-123", "subject"),
+                ("central-epic", "parent"),
+                ("central-callers", "sibling"),
+            ],
+        )
+        self.assertEqual(
+            assignment["related_work"],
+            request["related_work"],
+        )
+        self.assertEqual(
+            assignment["related_work"],
+            preparation["related_work"],
+        )
+        self.assertEqual(
+            len(snapshot.read_bytes()), assignment["related_work"]["bytes"]
+        )
+        self.assertEqual(
+            hashlib.sha256(snapshot.read_bytes()).hexdigest(),
+            assignment["related_work"]["sha256"],
+        )
+        self.assertNotIn("private epic note", snapshot.read_text())
+        self.assertNotIn("TOP_SECRET", snapshot.read_text())
         self.assertEqual(
             json.loads(
                 (Path(assignment["workspace"]) / "worker-objective.json").read_text()
@@ -1338,12 +1383,18 @@ class RunPreparerCliTest(unittest.TestCase):
 
     def write_bd(self, exit_code=0, stderr=""):
         path = self.bin / "bd"
+        related = {
+            identifier: dict(record)
+            for identifier, record in self.related_beads.items()
+        }
+        related["central-epic"]["children"] = [self.bead["id"], "central-callers"]
+        records = {self.bead["id"]: self.bead, **related}
         path.write_text(
             "#!/usr/bin/env python3\nimport json,sys\n"
             + (
                 f"print({stderr!r}, file=sys.stderr)\nraise SystemExit({exit_code})\n"
                 if exit_code
-                else f"print(json.dumps([{self.bead!r}]))\n"
+                else f"records={records!r}\nprint(json.dumps([records[sys.argv[2]]]))\n"
             )
         )
         path.chmod(0o755)

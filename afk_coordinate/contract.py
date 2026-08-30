@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from afk_config import validate_inference_setting
+from afk_related_work import validate_reference
 
 # These are the topology facts needed to prove that terminal history could have
 # been produced by the Coordinator. Runtime module selection and input building
@@ -57,6 +58,8 @@ def validate_request(value):
     }
     if isinstance(value, dict) and "inference_roles" in value:
         expected.add("inference_roles")
+    if isinstance(value, dict) and "related_work" in value:
+        expected.add("related_work")
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("coordinator input must use schema_version 1")
     if set(value) != expected:
@@ -79,6 +82,8 @@ def validate_request(value):
         raise ValueError("validation command must be a nonempty argv array")
     positive_integer(value["validation"]["timeout_seconds"], "validation timeout")
     positive_integer(value["agent_timeout_seconds"], "agent timeout")
+    if "related_work" in value:
+        validate_reference(value["related_work"])
     roles = value.get("inference_roles")
     if roles is not None:
         expected_roles = {"review", "finding_assessment", "feedback_response"}
