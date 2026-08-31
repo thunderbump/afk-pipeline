@@ -1041,10 +1041,14 @@ class ExportCliTests(unittest.TestCase):
                 "accessToken": "ordinary-access-value",
                 "clientSecret": "ordinary-client-value",
                 "secretKey": "ordinary-secret-key-value",
+                "secretAccessKey": "ordinary-secret-access-key-value",
+                "accessKey": "ordinary-access-key-value",
                 "clientSecretKey": "ordinary-client-secret-key-value",
                 "clientApiKey": "ordinary-client-api-key-value",
                 "unix": "/data/private/file",
+                "spacedUnix": "/home/Jane Doe/private/repo",
                 "windows": r"C:\Users\operator\private.txt",
+                "spacedWindows": r"C:\Users\Jane Doe\private\repo",
             }
             prompt_path.write_text(json.dumps(prompt) + "\n")
             invocation_path = inference / "invocation.json"
@@ -1091,6 +1095,8 @@ class ExportCliTests(unittest.TestCase):
                 "ordinary-access-value",
                 "ordinary-client-value",
                 "ordinary-secret-key-value",
+                "ordinary-secret-access-key-value",
+                "ordinary-access-key-value",
                 "ordinary-client-secret-key-value",
                 "ordinary-client-api-key-value",
                 "ordinary-api-value",
@@ -1098,11 +1104,15 @@ class ExportCliTests(unittest.TestCase):
                 "ordinary-session-value",
                 "small",
                 "/data/private/file",
+                "/home/Jane Doe/private/repo",
+                "Jane Doe/private/repo",
                 "/workspace/other-run",
                 r"C:\Users\operator\private.txt",
+                r"C:\Users\Jane Doe\private\repo",
+                r"Jane Doe\private\repo",
             ):
                 self.assertNotIn(private, rendered)
-            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 11)
+            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 13)
             self.assertIn("[redacted-path]", rendered)
 
     def test_v2_uses_validation_attempt_identity_for_duplicate_responses(self):

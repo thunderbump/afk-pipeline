@@ -89,15 +89,19 @@ REDACTABLE_CREDENTIAL_TEXT = (
 SENSITIVE_TEXT = (*REDACTABLE_CREDENTIAL_TEXT, PRIVATE_KEY_TEXT)
 HOST_PATH = re.compile(
     r"(?:"
-    r"(?<![A-Za-z0-9./])/(?!/)[^\s/'\"`]+(?:/[^\s/'\"`]+)*"
-    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:[^\s\\/'\"`]+[\\/])*"
+    # Intermediate components may contain spaces.  Keep the final component
+    # whitespace-free so ordinary prose following an unquoted path is not
+    # consumed along with the path.
+    r"(?<![A-Za-z0-9./])/(?!/)(?:[^\r\n/'\"`]+/)*[^\s/'\"`]+"
+    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:[^\r\n\\/'\"`]+[\\/])*"
     r"[^\s\\/'\"`]+)"
-    r"|(?<![\\])\\\\[^\s\\/'\"`]+[\\/][^\s'\"`]+"
+    r"|(?<![\\])\\\\[^\r\n\\/'\"`]+[\\/]"
+    r"(?:[^\r\n\\/'\"`]+[\\/])*[^\s\\/'\"`]+"
     r")"
 )
 SENSITIVE_JSON_KEY = re.compile(
     r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)"
-    r"(?:[_-]?key)?|(?:[a-z0-9]+[_-])*(?:api|private|ssh|encryption|signing)"
+    r"(?:[_-]?key)?|(?:[a-z0-9]+[_-])*(?:access|api|private|ssh|encryption|signing)"
     r"[_-]?key|auth(?:orization)?|credentials?|cookie|session[_-]?id|"
     r"aws[_-]?secret[_-]?access[_-]?key)$"
 )
