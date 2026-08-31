@@ -1079,6 +1079,47 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_v2_rejects_receipt_identity_that_disagrees_with_frozen_role(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preparation["inference_roles"] = afk_export.INFERENCE_ROLE_DEFAULTS
+            preparation_path.write_text(json.dumps(preparation))
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+
+            # Receipt, invocation, and contract consistently claim gpt-test, but
+            # that is not the private source frozen for the review role.
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_hashed_contract_for_a_different_adapter_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            contract_path = inference / "adapter-contract.json"
+            contract = json.loads(contract_path.read_text())
+            contract["model"] = "different-model"
+            contract["capabilities"] = ["NO_TOOLS"]
+            contract_path.write_text(json.dumps(contract))
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["adapter_contract_sha256"] = hashlib.sha256(
+                contract_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt))
+
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_v2_malformed_preparation_is_a_normal_invalid_run_rejection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

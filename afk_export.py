@@ -1123,6 +1123,28 @@ def artifact_candidates(observed):
     result = []
     seen = set()
 
+    def frozen_inference_setting(role):
+        """Return the validated role policy sealed into this Run, when present."""
+        preparation = observed.get("preparation")
+        roles = (
+            preparation.get("inference_roles")
+            if isinstance(preparation, dict)
+            else None
+        )
+        if roles is None:
+            request = observed.get("request")
+            roles = (
+                request.get("inference_roles") if isinstance(request, dict) else None
+            )
+        if roles is None:
+            # Older readable Runs predate frozen inference policy. Their receipts
+            # still receive intrinsic identity and contract validation below.
+            return None
+        try:
+            return effective_inference_roles(roles)[role]
+        except (KeyError, ValueError) as error:
+            raise ExportError("invalid prepared inference roles") from error
+
     def add(
         relative,
         scope,
@@ -1232,7 +1254,10 @@ def artifact_candidates(observed):
             root / inference_relative
         ).is_symlink():
             for item in receipt_bound_inference_artifacts(
-                root, inference_relative, "acceptance_planning"
+                root,
+                inference_relative,
+                "acceptance_planning",
+                frozen_inference_setting("acceptance_planner"),
             ):
                 add(**item)
     if observed["state"] is not None:
@@ -1276,7 +1301,10 @@ def artifact_candidates(observed):
                     "response": "feedback_response",
                 }.get(entry["component"], entry["component"])
                 for item in receipt_bound_inference_artifacts(
-                    root, inference_relative, inference_purpose
+                    root,
+                    inference_relative,
+                    inference_purpose,
+                    frozen_inference_setting(inference_purpose),
                 ):
                     add(**item)
             for kind, filename in sorted(output.get("artifacts", {}).items()):
@@ -1349,7 +1377,7 @@ def artifact_candidates(observed):
     return result
 
 
-def receipt_bound_inference_artifacts(root, relative, purpose):
+def receipt_bound_inference_artifacts(root, relative, purpose, expected_setting=None):
     """Authenticate one runtime evidence directory and return its closed catalog."""
     try:
         directory_descriptor = open_directory_beneath(root, relative)
@@ -1357,13 +1385,15 @@ def receipt_bound_inference_artifacts(root, relative, purpose):
         raise ExportError("invalid Inference Receipt evidence") from error
     try:
         return _receipt_bound_inference_artifacts(
-            root, relative, purpose, directory_descriptor
+            root, relative, purpose, expected_setting, directory_descriptor
         )
     finally:
         os.close(directory_descriptor)
 
 
-def _receipt_bound_inference_artifacts(root, relative, purpose, directory_descriptor):
+def _receipt_bound_inference_artifacts(
+    root, relative, purpose, expected_setting, directory_descriptor
+):
     try:
         receipt_raw = read_bytes_at(
             directory_descriptor, "receipt.json", MAX_JSON_BYTES
@@ -1393,20 +1423,42 @@ def _receipt_bound_inference_artifacts(root, relative, purpose, directory_descri
         or identity.get("runtime") != "afk-inference-v1"
         or identity.get("adapter") != "pi-v1"
         or identity.get("adapter_family") != "pi"
+        or type(identity.get("adapter_contract_version")) is not int
         or identity.get("adapter_contract_version") != 1
         or not isinstance(adapter, dict)
+        or set(adapter)
+        != {
+            "kind",
+            "family",
+            "contract_version",
+            "identity",
+            "model",
+            "thinking",
+            "capabilities",
+        }
         or adapter.get("kind") != "pi"
         or adapter.get("family") != "pi"
+        or type(adapter.get("contract_version")) is not int
         or adapter.get("contract_version") != 1
         or adapter.get("identity") != identity.get("adapter")
         or adapter.get("model") != identity.get("model")
         or adapter.get("thinking") != identity.get("thinking")
+        or adapter.get("capabilities") != ["NO_TOOLS", "READ_ONLY", "WRITE"]
         or invocation.get("schema_version") != 1
         or invocation.get("purpose") != purpose
         or invocation.get("evidence_directory") != str(root.resolve() / relative)
         or not isinstance(hashes, dict)
     ):
         raise ExportError("Inference Receipt private source identity disagrees")
+
+    if expected_setting is not None and (
+        identity.get("adapter_family") != expected_setting["adapter_family"]
+        or identity.get("adapter_contract_version")
+        != expected_setting["adapter_contract_version"]
+        or model != expected_setting["model"]
+        or thinking != expected_setting["thinking"]
+    ):
+        raise ExportError("Inference Receipt disagrees with frozen role policy")
 
     allowed_hashes = {
         "invocation_sha256",
@@ -1449,6 +1501,7 @@ def _receipt_bound_inference_artifacts(root, relative, purpose, directory_descri
                 "expected_sha256": claimed_hash,
             }
         )
+        return raw
 
     bind(
         f"{relative}/invocation.json",
@@ -1468,13 +1521,24 @@ def _receipt_bound_inference_artifacts(root, relative, purpose, directory_descri
     contract_hash = hashes.get("adapter_contract_sha256")
     if "adapter_script_sha256" in hashes:
         raise ExportError("Inference Receipt names a non-production adapter")
-    bind(
+    if contract_hash is None:
+        raise ExportError("Inference Receipt omits its adapter contract hash")
+    contract_raw = bind(
         f"{relative}/{contract_name}",
         contract_hash,
         "inference_contract",
         "application/json",
         0,
     )
+    try:
+        contract = json.loads(decode_text(contract_raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ExportError("invalid Inference Receipt adapter contract") from error
+    # The runtime writes the same closed descriptor into invocation.json and the
+    # separately hashed contract. Equality binds family, version, identity,
+    # model, thinking, and the complete capability set to one source identity.
+    if not isinstance(contract, dict) or contract != adapter:
+        raise ExportError("Inference Receipt adapter contract identity disagrees")
     if hashes.get("task_prompt_sha256") is not None:
         bind(
             f"{relative}/task-prompt.txt",
