@@ -31,7 +31,7 @@ Arguments:
   RESULT_DIRECTORY New directory where assessment input, output, and logs are written.
 """
 
-ASSESSMENT_INSTRUCTIONS = """Act as a read-only finding assessor. Decide whether each supplied Review finding is worth addressing. Inspect the reviewed repository and supplied evidence. Mark worth_addressing true only for a concrete, reachable problem relevant to the implementation objective. Do not modify files or prescribe a repair. Use each finding's immutable zero-based array position as finding_index.
+ASSESSMENT_INSTRUCTIONS = """Act as a read-only finding assessor. Decide whether each supplied Review finding is worth addressing. Inspect the reviewed repository and supplied evidence. Mark worth_addressing true only for a concrete, reachable problem relevant to the implementation objective. The current implementation objective is authoritative. Treat related-work records only as ownership context, and do not mark a finding worth addressing when it merely asks this objective to include work owned by a sibling task. Do not modify files or prescribe a repair. Use each finding's immutable zero-based array position as finding_index.
 
 Return only one JSON object with this exact shape:
 {"summary":"concise assessment conclusion","decisions":[{"finding_index":0,"worth_addressing":true,"rationale":"why the finding is or is not worth addressing"}]}
@@ -262,18 +262,6 @@ def assessment_task(
         "reviewed_diff": (review_directory / "diff.patch").read_text(),
         "related_work": related_records,
     }
-
-
-def related_work_guidance(assessment_input: dict[str, object]) -> str:
-    """Describe the frozen reference without exposing its records as instructions."""
-    related = assessment_input.get("related_work")
-    if related is None:
-        return ""
-    return (
-        f"Frozen related-work context: {related['path']} (sha256 {related['sha256']}).\n"
-        "The current implementation objective is authoritative. Query that JSONL "
-        "with jq or rg only if ownership or scope is unclear."
-    )
 
 
 def publish_runtime_logs(result: Path, receipt: object) -> None:

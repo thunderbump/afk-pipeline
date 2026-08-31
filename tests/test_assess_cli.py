@@ -9,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_related_work import build_snapshot, reference
 from afk_review.contract import REVIEW_AUDIT
 from tests.inference_cli_fixture import install_pi
 
@@ -245,6 +246,38 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
         self.assertIn("invalid Review evidence", completed.stderr)
+
+    def test_sibling_owned_finding_is_out_of_scope_under_trusted_policy(self):
+        records = {
+            "task": {"id": "task", "title": "Change the API", "parent": "epic"},
+            "epic": {
+                "id": "epic",
+                "title": "API epic",
+                "children": ["task", "callers"],
+            },
+            "callers": {
+                "id": "callers",
+                "title": "Migrate callers",
+                "description": "Caller migration is owned by this sibling.",
+            },
+        }
+        raw, facts = build_snapshot(records["task"], records.__getitem__)
+        snapshot = self.root / "related-work.jsonl"
+        snapshot.write_bytes(raw)
+        input_path, result, environment = self.prepare_assessment(
+            "sibling-owned-finding"
+        )
+        value = json.loads(input_path.read_text())
+        value["related_work"] = reference(snapshot, facts)
+        self.write_json(input_path, value)
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        decision = json.loads((result / "output.json").read_text())["assessment"][
+            "decisions"
+        ][0]
+        self.assertFalse(decision["worth_addressing"])
 
     def test_change_objective_is_required_and_given_to_the_assessor(self):
         marker = self.root / "prompt.txt"

@@ -102,13 +102,25 @@ class ReviewCliTest(unittest.TestCase):
         self.validation = self.root / "validation"
         self.validation.mkdir()
         self.write_json(
+            self.validation / "input.json",
+            {
+                "schema_version": 1,
+                "workspace": str(self.workspace),
+                "command": ["python3", "-m", "unittest"],
+                "timeout_seconds": 30,
+            },
+        )
+        self.write_json(
             self.validation / "output.json",
             {
                 "schema_version": 1,
                 "outcome": "passed",
                 "repository": {"before": self.after, "after": self.after},
+                "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
             },
         )
+        (self.validation / "stdout.log").write_text("Ran 12 tests - OK\n")
+        (self.validation / "stderr.log").write_text("validation warning\n")
 
     def test_completed_review_seals_structured_output_and_raw_artifacts(self):
         result, completed = self.run_review("no-findings")
@@ -170,6 +182,14 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(receipt["policy"]["requested_capability"], "READ_ONLY")
         self.assertEqual(invocation["execution_root"], str(self.workspace))
         self.assertFalse((result / "output.json.tmp").exists())
+
+    def test_complete_validation_evidence_is_embedded_for_read_only_review(self):
+        result, completed = self.run_review("validation-evidence")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads((result / "output.json").read_text())["outcome"], "completed"
+        )
 
     def test_feedback_response_change_uses_the_same_review_interface(self):
         change = json.loads((self.change / "output.json").read_text())

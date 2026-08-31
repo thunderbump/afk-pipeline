@@ -31,7 +31,7 @@ Arguments:
   RESULT_DIRECTORY  New directory where review input, output, and logs are written.
 """
 
-REVIEW_INSTRUCTIONS = """Act as a read-only implementation reviewer. Audit the complete objective and acceptance criteria, reviewed diff, supplied Committed Change and Validation evidence, and relevant repository files. Look for concrete correctness defects, regressions, missing necessary tests, and violations of the objective. Validation passing is evidence, not proof. Do not modify files, propose repairs, or stop after the first defect.
+REVIEW_INSTRUCTIONS = """Act as a read-only implementation reviewer. Audit the complete objective and acceptance criteria, reviewed diff, supplied Committed Change and Validation evidence, and relevant repository files. Look for concrete correctness defects, regressions, missing necessary tests, and violations of the objective. Validation passing is evidence, not proof. The current objective is authoritative. Treat related-work records only as ownership context, and do not report work owned by a sibling task as missing from the current objective. Do not modify files, propose repairs, or stop after the first defect.
 
 Return only one JSON object with this exact shape and field order:
 {"summary":"concise scope and conclusion","findings":[{"severity":"high|medium|low","title":"concise problem","details":"why it matters and when it occurs","locations":[{"path":"relative/file.py","line":1}]}],"audit":{"completed":true,"scopes":["objective","acceptance_criteria","reviewed_diff","supplied_evidence"]}}
@@ -186,6 +186,9 @@ def load_evidence(review_input: dict[str, object]) -> dict[str, object]:
         "workspace": review_input["workspace"],
         "change_output": read_json(change / "output.json"),
         "validation": read_json(validation / "output.json"),
+        "validation_input": read_json(validation / "input.json"),
+        "validation_stdout": (validation / "stdout.log").read_text(),
+        "validation_stderr": (validation / "stderr.log").read_text(),
     }
 
 
@@ -270,21 +273,14 @@ def review_task(
         },
         "reviewed_diff": diff_path.read_text(),
         "committed_change": evidence["change_output"],
-        "validation": evidence["validation"],
+        "validation": {
+            "input": evidence["validation_input"],
+            "output": evidence["validation"],
+            "stdout": evidence["validation_stdout"],
+            "stderr": evidence["validation_stderr"],
+        },
         "related_work": related_records,
     }
-
-
-def related_work_guidance(review_input: dict[str, object]) -> str:
-    """Describe the frozen reference without exposing its records as instructions."""
-    related = review_input.get("related_work")
-    if related is None:
-        return ""
-    return (
-        f"Frozen related-work context: {related['path']} (sha256 {related['sha256']}).\n"
-        "The current objective is authoritative. Query that JSONL with jq or rg "
-        "only if task ownership or scope is unclear."
-    )
 
 
 def publish_runtime_logs(result: Path, receipt: object) -> None:

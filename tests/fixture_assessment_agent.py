@@ -55,14 +55,32 @@ elif scenario in ("address", "capture-prompt", "delayed-address"):
     }
 elif scenario == "no-findings":
     assessment = {"summary": "Nothing to assess.", "decisions": []}
-elif scenario == "dismiss":
+elif scenario in ("dismiss", "sibling-owned-finding"):
+    rationale = "The claimed behavior is not reachable."
+    if scenario == "sibling-owned-finding":
+        prompt = sys.argv[-1]
+        encoded = prompt.split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[
+            1
+        ].splitlines()[0]
+        task = json.loads(base64.b64decode(encoded))
+        if not any(
+            row.get("relationship") == "sibling"
+            and row.get("title") == "Migrate callers"
+            for row in task["related_work"]
+        ):
+            raise SystemExit("caller migration was not sibling-owned")
+        if "current implementation objective is authoritative" not in prompt or (
+            "work owned by a sibling task" not in prompt
+        ):
+            raise SystemExit("trusted sibling-ownership policy was omitted")
+        rationale = "The requested caller migration is owned by a sibling task."
     assessment = {
         "summary": "The finding should not be addressed.",
         "decisions": [
             {
                 "finding_index": 0,
                 "worth_addressing": False,
-                "rationale": "The claimed behavior is not reachable.",
+                "rationale": rationale,
             }
         ],
     }

@@ -60,22 +60,51 @@ elif scenario in ("mutate-workspace", "damage-git"):
         Path("reviewer-change.txt").write_text("reviewer changed the workspace\n")
     else:
         Path(".git").rename(".git-damaged")
-elif scenario in ("no-findings", "delayed-no-findings", "sibling-owned-migration"):
+elif scenario in (
+    "no-findings",
+    "delayed-no-findings",
+    "sibling-owned-migration",
+    "validation-evidence",
+):
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
-    if scenario == "sibling-owned-migration":
-        encoded = (
-            sys.argv[-1]
-            .split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[1]
-            .splitlines()[0]
-        )
+    if scenario in ("sibling-owned-migration", "validation-evidence"):
+        prompt = sys.argv[-1]
+        encoded = prompt.split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[
+            1
+        ].splitlines()[0]
         task = json.loads(base64.b64decode(encoded))
-        if not any(
-            row.get("relationship") == "sibling"
-            and row.get("title") == "Migrate callers"
-            for row in task["related_work"]
-        ):
-            raise SystemExit("caller migration was not sibling-owned")
+        if scenario == "sibling-owned-migration":
+            if not any(
+                row.get("relationship") == "sibling"
+                and row.get("title") == "Migrate callers"
+                for row in task["related_work"]
+            ):
+                raise SystemExit("caller migration was not sibling-owned")
+            if "current objective is authoritative" not in prompt or (
+                "do not report work owned by a sibling task" not in prompt
+            ):
+                raise SystemExit("trusted sibling-ownership policy was omitted")
+        elif task["validation"] != {
+            "input": {
+                "schema_version": 1,
+                "workspace": task["committed_change"]["change"]["workspace"],
+                "command": ["python3", "-m", "unittest"],
+                "timeout_seconds": 30,
+            },
+            "output": {
+                "schema_version": 1,
+                "outcome": "passed",
+                "repository": {
+                    "before": task["committed_change"]["change"]["repository"]["after"],
+                    "after": task["committed_change"]["change"]["repository"]["after"],
+                },
+                "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+            },
+            "stdout": "Ran 12 tests - OK\n",
+            "stderr": "validation warning\n",
+        }:
+            raise SystemExit("complete validation evidence was not supplied")
     review = {
         "summary": (
             "Caller migration belongs to the related sibling; "
