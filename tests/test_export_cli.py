@@ -979,6 +979,84 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_v2_rejects_symlinked_inference_artifact_directories(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            outside = root / "outside-attempts"
+            shutil.move(inference / "attempts", outside)
+            os.symlink(outside, inference / "attempts", target_is_directory=True)
+
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_unknown_non_null_receipt_hash_claims(self):
+        cases = (("hashes", "output_sha256"), ("attempt", "trace_sha256"))
+        for location, name in cases:
+            with (
+                self.subTest(location=location),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                inference = source / "coordinator/04-review/inference"
+                self.add_inference_receipt(inference)
+                receipt_path = inference / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                target = (
+                    receipt["hashes"]
+                    if location == "hashes"
+                    else receipt["attempts"][0]["artifacts"]
+                )
+                target[name] = "0" * 64
+                receipt_path.write_text(json.dumps(receipt))
+
+                result = self.export_v2(source, root / "bundle")
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_missing_or_malformed_inference_model_identity(self):
+        cases = (
+            ("missing_model", None),
+            ("non_string_model", 7),
+            ("bad_thinking", "deep"),
+        )
+        for case, value in cases:
+            with (
+                self.subTest(case=case),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                inference = source / "coordinator/04-review/inference"
+                self.add_inference_receipt(inference)
+                receipt_path = inference / "receipt.json"
+                invocation_path = inference / "invocation.json"
+                receipt = json.loads(receipt_path.read_text())
+                invocation = json.loads(invocation_path.read_text())
+                field = "thinking" if case == "bad_thinking" else "model"
+                if case == "missing_model":
+                    receipt["identity"].pop(field)
+                    invocation["adapter"].pop(field)
+                else:
+                    receipt["identity"][field] = value
+                    invocation["adapter"][field] = value
+                invocation_path.write_text(json.dumps(invocation))
+                receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                    invocation_path.read_bytes()
+                ).hexdigest()
+                receipt_path.write_text(json.dumps(receipt))
+
+                result = self.export_v2(source, root / "bundle")
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_v2_rejects_inference_receipt_for_another_private_source(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

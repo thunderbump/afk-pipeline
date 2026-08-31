@@ -13,6 +13,7 @@ from pathlib import Path
 from afk_attempt.contract import validate_assignment
 from afk_config import (
     INFERENCE_ROLE_DEFAULTS,
+    SUPPORTED_THINKING,
     effective_inference_roles,
     validate_inference_setting,
 )
@@ -1350,12 +1351,27 @@ def artifact_candidates(observed):
 
 def receipt_bound_inference_artifacts(root, relative, purpose):
     """Authenticate one runtime evidence directory and return its closed catalog."""
-    directory = root / relative
     try:
-        require_directory(directory)
-        receipt_raw = read_bytes(directory / "receipt.json", MAX_JSON_BYTES)
+        directory_descriptor = open_directory_beneath(root, relative)
+    except OSError as error:
+        raise ExportError("invalid Inference Receipt evidence") from error
+    try:
+        return _receipt_bound_inference_artifacts(
+            root, relative, purpose, directory_descriptor
+        )
+    finally:
+        os.close(directory_descriptor)
+
+
+def _receipt_bound_inference_artifacts(root, relative, purpose, directory_descriptor):
+    try:
+        receipt_raw = read_bytes_at(
+            directory_descriptor, "receipt.json", MAX_JSON_BYTES
+        )
         receipt = json.loads(decode_text(receipt_raw))
-        invocation_raw = read_bytes(directory / "invocation.json", MAX_JSON_BYTES)
+        invocation_raw = read_bytes_at(
+            directory_descriptor, "invocation.json", MAX_JSON_BYTES
+        )
         invocation = json.loads(decode_text(invocation_raw))
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ExportError("invalid Inference Receipt evidence") from error
@@ -1365,9 +1381,15 @@ def receipt_bound_inference_artifacts(root, relative, purpose):
     identity = receipt.get("identity")
     hashes = receipt.get("hashes")
     adapter = invocation.get("adapter")
+    model = identity.get("model") if isinstance(identity, dict) else None
+    thinking = identity.get("thinking") if isinstance(identity, dict) else None
     if (
         receipt.get("schema_version") != 1
         or not isinstance(identity, dict)
+        or not isinstance(model, str)
+        or not model.strip()
+        or not isinstance(thinking, str)
+        or thinking not in SUPPORTED_THINKING
         or identity.get("runtime") != "afk-inference-v1"
         or identity.get("adapter") != "pi-v1"
         or identity.get("adapter_family") != "pi"
@@ -1381,10 +1403,22 @@ def receipt_bound_inference_artifacts(root, relative, purpose):
         or adapter.get("thinking") != identity.get("thinking")
         or invocation.get("schema_version") != 1
         or invocation.get("purpose") != purpose
-        or invocation.get("evidence_directory") != str(directory.resolve())
+        or invocation.get("evidence_directory") != str(root.resolve() / relative)
         or not isinstance(hashes, dict)
     ):
         raise ExportError("Inference Receipt private source identity disagrees")
+
+    allowed_hashes = {
+        "invocation_sha256",
+        "prompt_sha256",
+        "task_prompt_sha256",
+        "adapter_contract_sha256",
+    }
+    if any(
+        name.endswith("_sha256") and name not in allowed_hashes and value is not None
+        for name, value in hashes.items()
+    ):
+        raise ExportError("Inference Receipt names an unknown artifact hash")
 
     catalog = []
 
@@ -1395,8 +1429,11 @@ def receipt_bound_inference_artifacts(root, relative, purpose):
             raise ExportError("invalid Inference Receipt artifact hash")
         if not safe_relative(path) or not path.startswith(relative + "/"):
             raise ExportError("invalid Inference Receipt artifact identity")
+        local_path = path[len(relative) + 1 :]
         try:
-            raw = read_bytes(root / path, V2_MAX_ARTIFACT_BYTES)
+            raw = read_bytes_beneath(
+                directory_descriptor, local_path, V2_MAX_ARTIFACT_BYTES
+            )
         except (OSError, ExportError) as error:
             raise ExportError("Inference Receipt artifact is unavailable") from error
         if digest(raw) != claimed_hash:
@@ -1476,6 +1513,14 @@ def receipt_bound_inference_artifacts(root, relative, purpose):
                 0,
             ),
         }
+        allowed_attempt_hashes = {f"{name}_sha256" for name in expected}
+        if any(
+            name.endswith("_sha256")
+            and name not in allowed_attempt_hashes
+            and value is not None
+            for name, value in artifacts.items()
+        ):
+            raise ExportError("Inference Receipt names an unknown attempt hash")
         for name, (expected_path, kind, media, priority) in expected.items():
             path = artifacts.get(name)
             claimed = artifacts.get(f"{name}_sha256")
@@ -2083,6 +2128,38 @@ def read_bytes(path, limit, expected_facts=None):
 def read_bytes_at(directory_descriptor, name, limit, expected_facts=None):
     descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_descriptor)
     return read_open_descriptor(descriptor, limit, expected_facts)
+
+
+def open_directory_beneath(root, relative):
+    """Open a relative directory without following any path-component symlink."""
+    if not safe_relative(relative):
+        raise ExportError("Run path is not a safe relative directory")
+    descriptor = os.open(root, DIRECTORY_FLAGS)
+    try:
+        for component in relative.split("/"):
+            child = os.open(component, DIRECTORY_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def read_bytes_beneath(directory_descriptor, name, limit, expected_facts=None):
+    """Read a nested regular file without following intermediate symlinks."""
+    if not safe_relative(name):
+        raise ExportError("artifact path is not safe relative evidence")
+    descriptor = os.dup(directory_descriptor)
+    try:
+        components = name.split("/")
+        for component in components[:-1]:
+            child = os.open(component, DIRECTORY_FLAGS, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+        return read_bytes_at(descriptor, components[-1], limit, expected_facts)
+    finally:
+        os.close(descriptor)
 
 
 def read_open_descriptor(descriptor, limit, expected_facts=None):
