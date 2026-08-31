@@ -88,8 +88,17 @@ REDACTABLE_CREDENTIAL_TEXT = (
 )
 SENSITIVE_TEXT = (*REDACTABLE_CREDENTIAL_TEXT, PRIVATE_KEY_TEXT)
 HOST_PATH = re.compile(
-    r"(?<![A-Za-z0-9.])/(?:home|tmp|var|etc|opt|root|srv|mnt|usr|run|"
-    r"Users|private|Library|Volumes|Applications|System)/[^\s'\"`]+"
+    r"(?:"
+    r"(?<![A-Za-z0-9./])/(?!/)[^\s/'\"`]+(?:/[^\s/'\"`]+)*"
+    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:[^\s\\/'\"`]+[\\/])*"
+    r"[^\s\\/'\"`]+)"
+    r"|(?<![\\])\\\\[^\s\\/'\"`]+[\\/][^\s'\"`]+"
+    r")"
+)
+SENSITIVE_JSON_KEY = re.compile(
+    r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)|"
+    r"(?:api|private|ssh|encryption|signing)[_-]?key|auth(?:orization)?|"
+    r"credentials?|cookie|session[_-]?id|aws[_-]?secret[_-]?access[_-]?key)$"
 )
 CREDENTIAL_OPTION = re.compile(
     r"(?i)^--(?:access[-_]?token|api[-_]?key|client[-_]?secret|password|secret|token)$"
@@ -1730,19 +1739,40 @@ def _receipt_bound_inference_artifacts(
         )
 
     terminal_value = receipt.get("terminal_response")
-    terminal_record = next(
-        (
-            item
-            for item in reversed(response_records)
-            if item["available"] and item["response"] == terminal_value
-        ),
-        None,
+    terminal_record = None
+    # The runtime identifies the response it processed through validation's
+    # attempt number. Value equality is only an integrity check: it cannot
+    # identify a terminal attempt when two attempts emitted equal JSON, and a
+    # valid JSON null response cannot be distinguished by value from no response.
+    validation = receipt.get("validation")
+    terminal_attempt = (
+        validation.get("attempt_number") if isinstance(validation, dict) else None
     )
-    available_responses = [item for item in response_records if item["available"]]
-    if (available_responses and terminal_record is None) or (
-        not available_responses and terminal_value is not None
-    ):
-        raise ExportError("Inference Receipt terminal response is not attempt-bound")
+    if terminal_attempt is not None:
+        if (
+            not isinstance(terminal_attempt, int)
+            or isinstance(terminal_attempt, bool)
+            or terminal_attempt < 1
+            or terminal_attempt > len(response_records)
+        ):
+            raise ExportError(
+                "Inference Receipt terminal response lacks attempt identity"
+            )
+        terminal_record = response_records[terminal_attempt - 1]
+        attempt = attempts[terminal_attempt - 1]
+        attempt_protocol = attempt.get("protocol")
+        if (
+            not terminal_record["available"]
+            or terminal_record["response"] != terminal_value
+            or attempt.get("validation") != validation
+            or not isinstance(attempt_protocol, dict)
+            or attempt_protocol.get("status") != "accepted"
+        ):
+            raise ExportError(
+                "Inference Receipt terminal response is not attempt-bound"
+            )
+    elif terminal_value is not None:
+        raise ExportError("Inference Receipt terminal response lacks attempt identity")
 
     for item in response_records:
         view = encode_json(
@@ -1998,7 +2028,11 @@ def sanitize_json_value(value, redactions):
             if not isinstance(key, str):
                 raise ExportError("JSON object key is not text")
             public_key = sanitize_public_text(key, redactions)
-            public, item_changed = sanitize_json_value(value[key], redactions)
+            if SENSITIVE_JSON_KEY.fullmatch(key) and value[key] is not None:
+                public = REDACTED_SECRET
+                item_changed = value[key] != REDACTED_SECRET
+            else:
+                public, item_changed = sanitize_json_value(value[key], redactions)
             if public_key in result:
                 raise ExportError("sanitized JSON keys collide")
             result[public_key] = public

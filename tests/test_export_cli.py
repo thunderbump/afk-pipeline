@@ -1026,6 +1026,150 @@ class ExportCliTests(unittest.TestCase):
             )
             self.assertTrue(all("path" not in item for item in private))
 
+    def test_v2_redacts_structured_credentials_and_general_host_paths_in_views(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["untrusted_task_data"] = {
+                "password": "hunter2",
+                "token": "opaque-value",
+                "unix": "/data/private/file",
+                "windows": r"C:\Users\operator\private.txt",
+            }
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+
+            response_path = inference / "attempts/1/response.json"
+            response = {
+                "api_key": "ordinary-looking-value",
+                "nested": {"client_secret": "small", "path": "/workspace/other-run"},
+            }
+            response_path.write_text(json.dumps(response) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response_path.read_bytes()
+            ).hexdigest()
+            receipt["terminal_response"] = response
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            destination = root / "bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            views = [
+                json.loads((destination / item["path"]).read_text())
+                for item in record["artifacts"]
+                if item["kind"] in {"inference_prompt_view", "inference_response_view"}
+            ]
+            rendered = json.dumps(views)
+            for private in (
+                "hunter2",
+                "opaque-value",
+                "ordinary-looking-value",
+                "small",
+                "/data/private/file",
+                "/workspace/other-run",
+                r"C:\Users\operator\private.txt",
+            ):
+                self.assertNotIn(private, rendered)
+            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 4)
+            self.assertIn("[redacted-path]", rendered)
+
+    def test_v2_uses_validation_attempt_identity_for_duplicate_responses(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            second = inference / "attempts/2"
+            second.mkdir()
+            for name in ("events.jsonl", "stderr.log", "response.json"):
+                shutil.copy2(inference / "attempts/1" / name, second / name)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            second_attempt = {
+                "attempt_number": 2,
+                "duration_seconds": 1,
+                "protocol": {"status": "adapter_failed"},
+                "artifacts": {
+                    name: f"attempts/2/{filename}"
+                    for name, filename in {
+                        "events": "events.jsonl",
+                        "stderr": "stderr.log",
+                        "response": "response.json",
+                    }.items()
+                },
+            }
+            for name in ("events", "stderr", "response"):
+                path = inference / second_attempt["artifacts"][name]
+                second_attempt["artifacts"][f"{name}_sha256"] = hashlib.sha256(
+                    path.read_bytes()
+                ).hexdigest()
+            receipt["attempts"].append(second_attempt)
+            receipt["attempt_count"] = 2
+            receipt["protocol"] = second_attempt["protocol"]
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            destination = root / "bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            responses = [
+                json.loads((destination / item["path"]).read_text())
+                for item in record["artifacts"]
+                if item["kind"] == "inference_response_view"
+            ]
+            self.assertEqual(
+                [item["attempt_number"] for item in responses if item["terminal"]], [1]
+            )
+
+    def test_v2_allows_response_artifact_when_receipt_has_no_terminal_response(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["attempts"][0].pop("validation")
+            receipt["attempts"][0]["protocol"] = {"status": "malformed"}
+            receipt["protocol"] = {"status": "malformed"}
+            receipt["validation"] = {"status": "not_started"}
+            receipt["terminal_response"] = None
+            receipt["outcome"] = "adapter_failed"
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            destination = root / "bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            response = next(
+                item
+                for item in record["artifacts"]
+                if item["kind"] == "inference_response_view"
+            )
+            view = json.loads((destination / response["path"]).read_text())
+            self.assertTrue(view["available"])
+            self.assertFalse(view["terminal"])
+
     def test_v2_derives_rejected_attempt_and_redacts_unsafe_public_view_content(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1056,9 +1200,13 @@ class ExportCliTests(unittest.TestCase):
             receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
                 response_path.read_bytes()
             ).hexdigest()
-            receipt["attempts"][0]["protocol"] = {"status": "rejected"}
-            receipt["protocol"] = {"status": "rejected"}
-            receipt["validation"] = {"status": "rejected"}
+            receipt["attempts"][0]["protocol"] = {"status": "accepted"}
+            receipt["protocol"] = {"status": "accepted"}
+            receipt["validation"] = {
+                "status": "response_rejected",
+                "attempt_number": 1,
+            }
+            receipt["attempts"][0]["validation"] = receipt["validation"].copy()
             receipt["terminal_response"] = json.loads(response_path.read_text())
             receipt["outcome"] = "response_rejected"
             receipt_path.write_text(json.dumps(receipt) + "\n")
@@ -1082,7 +1230,7 @@ class ExportCliTests(unittest.TestCase):
             response = json.loads(
                 (destination / response_descriptor["path"]).read_text()
             )
-            self.assertEqual(response["protocol"], {"status": "rejected"})
+            self.assertEqual(response["protocol"], {"status": "accepted"})
             self.assertTrue(response["terminal"])
             self.assertEqual(response_descriptor["sanitization_status"], "sanitized")
 
@@ -2118,6 +2266,7 @@ class ExportCliTests(unittest.TestCase):
                     "attempt_number": 1,
                     "duration_seconds": 1,
                     "protocol": {"status": "accepted"},
+                    "validation": {"status": "accepted", "attempt_number": 1},
                     "artifacts": {
                         "events": "attempts/1/events.jsonl",
                         "events_sha256": sha("attempts/1/events.jsonl"),
@@ -2129,7 +2278,7 @@ class ExportCliTests(unittest.TestCase):
                 }
             ],
             "protocol": {"status": "accepted"},
-            "validation": {"status": "accepted"},
+            "validation": {"status": "accepted", "attempt_number": 1},
             "terminal_response": {"answer": "ok"},
             "outcome": "succeeded",
         }
