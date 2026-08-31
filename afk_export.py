@@ -1058,6 +1058,15 @@ def normalize_acceptance_routing(value, redactions=frozenset()):
             "outcome": policy["outcome"],
             "decision": policy["decision"],
         },
+        "criteria": [
+            {
+                "id": criterion["id"],
+                "statement": sanitize_public_text(criterion["statement"], redactions)[
+                    :2048
+                ],
+            }
+            for criterion in routing["criteria"]
+        ],
     }
     if policy["error_category"] is not None:
         # This contract enum is the exact trusted outside-help/clarification
@@ -1097,6 +1106,7 @@ def normalize_route(route):
 def normalize_child(child):
     fields = (
         "local_id",
+        "criteria",
         "project",
         "owner",
         "phase",

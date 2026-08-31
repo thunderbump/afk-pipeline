@@ -1703,6 +1703,10 @@ class ExportCliTests(unittest.TestCase):
                 self.assertEqual(normalized["planner"]["outcome"], "completed")
                 self.assertEqual(normalized["policy"]["decision"], decision)
                 self.assertEqual(normalized["route"]["kind"], route_kind)
+                self.assertEqual(
+                    normalized["criteria"],
+                    [{"id": "criterion-1", "statement": "The export is safe."}],
+                )
                 if decision == "direct":
                     self.assertEqual(
                         normalized["route"]["routes"][0]["executor"], "afk_run"
@@ -1719,6 +1723,7 @@ class ExportCliTests(unittest.TestCase):
                 if decision == "accepted":
                     child = normalized["route"]["children"][0]
                     self.assertEqual(child["executor"], "caller_agent")
+                    self.assertEqual(child["criteria"], ["criterion-1"])
                     self.assertNotIn("objective", child)
                 artifacts = {
                     item["source"]["path"]: item for item in record["artifacts"]
