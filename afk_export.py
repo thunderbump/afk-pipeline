@@ -2508,7 +2508,15 @@ def normalize_evidence(entry, directory, output, redactions):
 
 
 def sanitize_public_text(text, redactions):
-    text = redact_public_paths(text, redactions)
+    try:
+        text = redact_public_paths(text, redactions)
+    except ExportError as error:
+        if str(error) != "text contains an ambiguously bounded host path":
+            raise
+        # Normalized Run prose is metadata, not a required downloadable
+        # artifact. Preserve the Run while withholding a string whose path
+        # boundary cannot be identified safely.
+        text = "[redacted-unsafe-text]"
     if any(pattern.search(text) for pattern in SENSITIVE_TEXT):
         raise ExportError("included Evidence contains sensitive text")
     return text

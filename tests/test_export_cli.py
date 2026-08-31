@@ -1075,6 +1075,14 @@ class ExportCliTests(unittest.TestCase):
             ):
                 afk_export.redact_public_paths(private, [])
 
+    def test_public_run_text_with_ambiguous_host_path_is_withheld(self):
+        self.assertEqual(
+            afk_export.sanitize_public_text(
+                "Review /home/operator/private report before publishing", []
+            ),
+            "[redacted-unsafe-text]",
+        )
+
     def test_v2_redacts_structured_credentials_in_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
