@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import tempfile
 import time
@@ -91,13 +92,102 @@ class PiInferenceAdapterTest(unittest.TestCase):
                     self.assertIn(expected[0], argv)
                 else:
                     self.assertEqual(argv[argv.index(expected[0]) + 1], expected[1])
-                task = argv[-1]
-                self.assertEqual(argv.count(task), 1)
+                task_input = argv[-1]
+                self.assertEqual(argv.count(task_input), 1)
+                self.assertRegex(task_input, r"^@/proc/self/fd/\d+$")
+                self.assertNotIn("<AFK_TRUSTED_TASK_INSTRUCTIONS>", "\0".join(argv))
+                prompt = json.loads((root / "evidence/prompt.json").read_text())
+                task = prompt["task_prompt"]
                 self.assertIn("<AFK_TRUSTED_TASK_INSTRUCTIONS>", task)
                 self.assertIn('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">', task)
                 self.assertEqual(task.count("</AFK_UNTRUSTED_TASK_DATA>"), 1)
-                prompt = json.loads((root / "evidence/prompt.json").read_text())
-                self.assertEqual(prompt["task_prompt"], task)
+                artifact = root / "evidence/task-prompt.txt"
+                self.assertEqual(artifact.read_text(), task)
+                self.assertEqual(
+                    prompt["task_prompt_artifact"]["path"], "task-prompt.txt"
+                )
+                self.assertEqual(
+                    result.receipt["hashes"]["task_prompt_sha256"],
+                    prompt["task_prompt_artifact"]["sha256"],
+                )
+                self.assertEqual(artifact.stat().st_mode & 0o222, 0)
+                self.assertEqual(
+                    popen.call_args.kwargs["pass_fds"],
+                    (int(task_input.rsplit("/", 1)[1]),),
+                )
+
+    def test_large_task_reaches_real_pi_protocol_fixture_without_e2big(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pi = root / "pi"
+            pi.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json, pathlib, sys\n"
+                "value = pathlib.Path(sys.argv[-1][1:]).read_text()\n"
+                "assert len(value) > 200000\n"
+                "events = [\n"
+                " {'type': 'agent_start'},\n"
+                " {'type': 'message_end', 'message': {'role': 'assistant', "
+                "'stopReason': 'stop', 'content': [{'type': 'text', "
+                "'text': '{\\\"answer\\\":\\\"ok\\\"}'}]}},\n"
+                " {'type': 'agent_end'},\n"
+                "]\n"
+                "for event in events: print(json.dumps(event))\n"
+            )
+            pi.chmod(0o755)
+            with mock.patch.dict(os.environ, {"PATH": f"{root}:{os.environ['PATH']}"}):
+                result = InferenceRuntime().invoke(
+                    purpose="classify",
+                    trusted_task_instructions="Return one JSON object.",
+                    untrusted_task_data={"text": "x" * 200000},
+                    requested_capability=Capability.NO_TOOLS,
+                    execution_root=root,
+                    timeout_seconds=5,
+                    evidence_directory=root / "evidence",
+                    validator=lambda text: json.loads(text),
+                    adapter=PiAdapter(model="model-frozen", thinking="high"),
+                )
+
+            self.assertEqual(result.outcome, "succeeded")
+            self.assertEqual(result.value, {"answer": "ok"})
+
+    def test_missing_replaced_and_unreadable_prompt_artifacts_fail_closed(self):
+        mutations = {
+            "missing": lambda path: path.unlink(),
+            "replaced": lambda path: (
+                path.unlink(),
+                path.write_text("replacement"),
+                path.chmod(0o400),
+            ),
+            "unreadable": lambda path: path.chmod(0),
+        }
+        real_make_attempt_directory = runtime_module._make_attempt_directory
+        for name, mutate in mutations.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+
+                artifact = root / "evidence/task-prompt.txt"
+
+                def mutate_before_attempt(path, mutation=mutate, target=artifact):
+                    mutation(target)
+                    real_make_attempt_directory(path)
+
+                with (
+                    mock.patch(
+                        "afk_inference.runtime._make_attempt_directory",
+                        side_effect=mutate_before_attempt,
+                    ),
+                    mock.patch("afk_inference.runtime.subprocess.Popen") as popen,
+                ):
+                    result = self.invoke(root)
+
+                self.assertEqual(result.outcome, "adapter_failed")
+                self.assertEqual(result.receipt["protocol"]["status"], "adapter_failed")
+                self.assertIn(
+                    "task prompt artifact", result.receipt["protocol"]["error"]
+                )
+                self.assertTrue((root / "evidence/receipt.json").is_file())
+                popen.assert_not_called()
 
     def test_captured_success_retry_malformed_interrupted_and_failed_protocols(self):
         cases = (

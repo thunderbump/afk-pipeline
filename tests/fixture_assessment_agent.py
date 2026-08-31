@@ -8,6 +8,12 @@ from pathlib import Path
 
 scenario = sys.argv[1]
 
+
+def task_prompt():
+    argument = sys.argv[-1]
+    return Path(argument[1:]).read_text() if argument.startswith("@") else argument
+
+
 if scenario == "hang":
     marker = Path(sys.argv[2])
     child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
@@ -38,7 +44,7 @@ elif scenario in ("address", "capture-prompt", "delayed-address"):
         time.sleep(0.2)
     elif scenario == "capture-prompt":
         encoded = (
-            sys.argv[-1]
+            task_prompt()
             .split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[1]
             .splitlines()[0]
         )
@@ -58,7 +64,7 @@ elif scenario == "no-findings":
 elif scenario in ("dismiss", "sibling-owned-finding"):
     rationale = "The claimed behavior is not reachable."
     if scenario == "sibling-owned-finding":
-        prompt = sys.argv[-1]
+        prompt = task_prompt()
         encoded = prompt.split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[
             1
         ].splitlines()[0]

@@ -12,6 +12,7 @@ import json
 import math
 import os
 import signal
+import stat
 import subprocess
 import time
 from collections.abc import Callable, Mapping
@@ -199,6 +200,15 @@ class PiAdapter:
         capability = Capability(invocation["requested_capability"])
         prompt = invocation["prompt"]
         tools = _PI_TOOLS[capability]
+        try:
+            prompt_fd = _open_pi_task_prompt(invocation)
+        except (OSError, ValueError) as error:
+            message = f"task prompt artifact validation failed: {error}"
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                protocol={"status": "adapter_failed", "error": message},
+                process={"exit_code": None, "error": message},
+            )
         argv = [
             "/usr/bin/env",
             "PI_TELEMETRY=0",
@@ -222,10 +232,14 @@ class PiAdapter:
             "--no-context-files",
             "--system-prompt",
             prompt["provider_system_prompt"],
-            prompt["task_prompt"],
+            # The inherited descriptor is stable even if the retained pathname
+            # is replaced after validation, and remains addressable when a
+            # future launcher isolates host filesystem paths.
+            f"@/proc/self/fd/{prompt_fd}",
         ]
         remaining = deadline - time.monotonic()
         if remaining <= 0:
+            os.close(prompt_fd)
             return _AdapterOutcome(ScriptedResult(omit_response=True), timed_out=True)
         try:
             process = subprocess.Popen(
@@ -235,6 +249,7 @@ class PiAdapter:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 start_new_session=True,
+                pass_fds=(prompt_fd,),
             )
         except OSError as error:
             return _AdapterOutcome(
@@ -245,6 +260,8 @@ class PiAdapter:
                 },
                 process={"exit_code": None, "error": str(error)},
             )
+        finally:
+            os.close(prompt_fd)
         # Process creation is part of the invocation-wide budget.  Recompute
         # after Popen so a slow launch cannot extend Pi's execution deadline.
         remaining = deadline - time.monotonic()
@@ -285,6 +302,19 @@ class PiAdapter:
             )
 
         process_record = {"exit_code": process.returncode}
+        try:
+            verified_fd = _open_pi_task_prompt(invocation)
+        except (OSError, ValueError) as error:
+            message = f"task prompt artifact validation failed after launch: {error}"
+            return _AdapterOutcome(
+                ScriptedResult(omit_response=True),
+                protocol={"status": "adapter_failed", "error": message},
+                raw_events=stdout,
+                raw_stderr=stderr,
+                process={**process_record, "error": message},
+            )
+        else:
+            os.close(verified_fd)
         if process.returncode != 0:
             return _AdapterOutcome(
                 ScriptedResult(omit_response=True),
@@ -462,10 +492,10 @@ class InferenceRuntime:
                 "prompt": prompt,
                 "requested_capability": capability.value,
                 "execution_root": str(root),
+                "evidence_directory": str(evidence),
                 "timeout_seconds": timeout_seconds,
                 "adapter": adapter.descriptor(),
             }
-            invocation = _freeze(invocation_value)
             _prepare_evidence(
                 evidence,
                 invocation_value,
@@ -474,6 +504,9 @@ class InferenceRuntime:
                 adapter,
                 attempts_directory,
             )
+            # Evidence preparation adds the runtime-owned Pi artifact identity;
+            # freeze only after that durable launch contract is complete.
+            invocation = _freeze(invocation_value)
         except KeyboardInterrupt:
             # Construction or setup may have published no evidence, or only a
             # prefix. Ensure there is a sealing location, retain that prefix,
@@ -794,6 +827,61 @@ def invoke_role(
     return InferenceRuntime().invoke(adapter=adapter, **arguments)
 
 
+def _write_immutable_bytes(path: Path, value: bytes) -> os.stat_result:
+    """Create one non-writable retained artifact without following a pathname."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o400)
+    try:
+        view = memoryview(value)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise OSError("task prompt artifact write made no progress")
+            view = view[written:]
+        os.fsync(descriptor)
+        return os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _open_pi_task_prompt(invocation: Mapping[str, Any]) -> int:
+    """Open and authenticate Pi's retained prompt, returning a stable fd."""
+    artifact = invocation["task_prompt_artifact"]
+    if artifact["path"] != "task-prompt.txt":
+        raise ValueError("task prompt artifact path is not runtime-owned")
+    path = Path(invocation["evidence_directory"]) / artifact["path"]
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        observed = os.fstat(descriptor)
+        if not stat.S_ISREG(observed.st_mode):
+            raise ValueError("task prompt artifact is not a regular file")
+        if observed.st_mode & 0o222:
+            raise ValueError("task prompt artifact is writable")
+        if (observed.st_dev, observed.st_ino) != (
+            artifact["device"],
+            artifact["inode"],
+        ):
+            raise ValueError("task prompt artifact was replaced")
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        value = b"".join(chunks)
+        expected = invocation["prompt"]["task_prompt"].encode()
+        if len(value) != artifact["bytes"] or value != expected:
+            raise ValueError("task prompt artifact content changed")
+        if hashlib.sha256(value).hexdigest() != artifact["sha256"]:
+            raise ValueError("task prompt artifact hash changed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def _prepare_evidence(
     evidence: Path,
     invocation: dict[str, Any],
@@ -803,6 +891,21 @@ def _prepare_evidence(
     attempts_directory: Path,
 ) -> None:
     evidence.mkdir()
+    if isinstance(adapter, PiAdapter):
+        artifact_path = evidence / "task-prompt.txt"
+        task_bytes = prompt["task_prompt"].encode()
+        artifact_stat = _write_immutable_bytes(artifact_path, task_bytes)
+        public_artifact = {
+            "path": artifact_path.name,
+            "bytes": len(task_bytes),
+            "sha256": hashlib.sha256(task_bytes).hexdigest(),
+        }
+        prompt["task_prompt_artifact"] = public_artifact
+        invocation["task_prompt_artifact"] = {
+            **public_artifact,
+            "device": artifact_stat.st_dev,
+            "inode": artifact_stat.st_ino,
+        }
     _write_json(evidence / "invocation.json", invocation)
     _write_json(evidence / "prompt.json", prompt)
     _write_json(
@@ -892,6 +995,15 @@ def _receipt(
     hashes = {
         "invocation_sha256": _sha256_if_file(evidence / "invocation.json"),
         "prompt_sha256": _sha256_if_file(evidence / "prompt.json"),
+        **(
+            {
+                "task_prompt_sha256": _sha256_regular_file_if_readable(
+                    evidence / "task-prompt.txt"
+                )
+            }
+            if isinstance(adapter, PiAdapter)
+            else {}
+        ),
         (
             "adapter_script_sha256"
             if isinstance(adapter, FixtureAdapter)
@@ -954,6 +1066,24 @@ def _sha256(path: Path) -> str:
 
 def _sha256_if_file(path: Path) -> str | None:
     return _sha256(path) if path.is_file() else None
+
+
+def _sha256_regular_file_if_readable(path: Path) -> str | None:
+    try:
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                return None
+            digest = hashlib.sha256()
+            while True:
+                chunk = os.read(descriptor, 1024 * 1024)
+                if not chunk:
+                    return digest.hexdigest()
+                digest.update(chunk)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        return None
 
 
 def _pi_retry_count(events: bytes) -> int:

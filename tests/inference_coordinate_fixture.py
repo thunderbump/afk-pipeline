@@ -7,7 +7,13 @@ from pathlib import Path
 root = Path(__file__).parent
 review_scenario, assessment_scenario = sys.argv[1:3]
 arguments = sys.argv[3:]
-rendered = " ".join(arguments)
+prompt_argument = arguments[-1]
+prompt = (
+    Path(prompt_argument[1:]).read_text()
+    if prompt_argument.startswith("@")
+    else prompt_argument
+)
+rendered = " ".join([*arguments[:-1], prompt])
 if "implementation reviewer" in rendered:
     fixture, scenario = root / "fixture_review_agent.py", review_scenario
 elif "finding assessor" in rendered:

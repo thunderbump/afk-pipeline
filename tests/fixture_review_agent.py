@@ -8,6 +8,12 @@ from pathlib import Path
 
 scenario = sys.argv[1]
 
+
+def task_prompt():
+    argument = sys.argv[-1]
+    return Path(argument[1:]).read_text() if argument.startswith("@") else argument
+
+
 AUDIT = {
     "completed": True,
     "scopes": [
@@ -69,7 +75,7 @@ elif scenario in (
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
     if scenario in ("sibling-owned-migration", "validation-evidence"):
-        prompt = sys.argv[-1]
+        prompt = task_prompt()
         encoded = prompt.split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[
             1
         ].splitlines()[0]

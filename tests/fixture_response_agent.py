@@ -8,6 +8,11 @@ from pathlib import Path
 scenario = sys.argv[1]
 
 
+def task_prompt():
+    argument = sys.argv[-1]
+    return Path(argument[1:]).read_text() if argument.startswith("@") else argument
+
+
 def valid_response():
     return {
         "summary": "Addressed the actionable finding.",
@@ -52,11 +57,11 @@ elif scenario in {"commit", "delayed-commit", "validation-repair"}:
         else valid_response()
     )
 elif scenario == "capture-prompt":
-    Path(sys.argv[2]).write_text(sys.argv[-1])
+    Path(sys.argv[2]).write_text(task_prompt())
     commit_response()
     response = valid_response()
 elif scenario == "capture-validation-prompt":
-    Path(sys.argv[2]).write_text(sys.argv[-1])
+    Path(sys.argv[2]).write_text(task_prompt())
     commit_response()
     response = {
         "summary": "Repaired repository validation.",

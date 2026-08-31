@@ -13,10 +13,15 @@ instructions for the requested capability; callers do not provide executable
 paths, argument arrays, or system prompts.
 
 The production `PiAdapter` maps those instructions to Pi's provider system
-prompt and sends one task prompt containing separate trusted instructions and
-base64-encoded JSON task data. Its argv, provider, JSON protocol, session and
-retry behavior, working directory handling, and disabling flags are closed
-runtime policy. `NO_TOOLS` uses `--no-tools`, `READ_ONLY` allows
+prompt and renders one task prompt containing separate trusted instructions and
+base64-encoded JSON task data. The runtime retains that prompt as a non-writable
+`task-prompt.txt`, authenticates its content and file identity, and gives Pi an
+`@/proc/self/fd/N` input backed by an inherited descriptor. Unbounded task data
+therefore never enters argv, pathname replacement cannot change Pi's input, and
+missing, replaced, writable, or unreadable prompt artifacts fail closed. Its
+argv, provider, JSON protocol, session and retry behavior, working directory
+handling, and disabling flags are closed runtime policy. `NO_TOOLS` uses
+`--no-tools`, `READ_ONLY` allows
 `read,grep,find,ls`, and `WRITE` allows `read,bash,edit,write,grep,find,ls`.
 Pi's provider-managed retries remain in one process event stream and share the
 invocation deadline; malformed streams fail closed and there is no adapter
@@ -28,9 +33,10 @@ is not a sandbox. Validators likewise run directly as trusted pipeline code;
 their rejection, failure, and duration are recorded, but the runtime does not
 isolate or forcibly stop them.
 
-Each invocation retains the exact structured and rendered private prompt,
-adapter contract or fixture script, per-attempt event stream, stderr and
-response, and an atomically sealed `receipt.json`. The receipt is written last
+Each invocation retains the exact structured and rendered private prompt, the
+Pi task-prompt artifact (when applicable), adapter contract or fixture script,
+per-attempt event stream, stderr and response, and an atomically sealed
+`receipt.json`. The receipt is written last
 and binds identities, hashes, frozen adapter/model/thinking policy, timing,
 process, protocol, validation, terminal response, and outcome. Run preparation
 freezes Pi adapter family `pi` and contract version `1` in every inference role
