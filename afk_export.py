@@ -106,6 +106,9 @@ INFERENCE_JSON_KINDS = {
     "inference_prompt",
     "inference_contract",
     "inference_response",
+    "inference_prompt_view",
+    "inference_response_view",
+    "inference_terminal_response_view",
 }
 SHA256_TEXT = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -1191,6 +1194,9 @@ def artifact_candidates(observed):
         validated_preflight_output_raw=None,
         validated_raw=None,
         expected_sha256=None,
+        private_source=False,
+        generated_raw=None,
+        destination=None,
     ):
         if not unsafe_path and not safe_relative(relative):
             return
@@ -1226,6 +1232,9 @@ def artifact_candidates(observed):
                 "validated_preflight_output_raw": validated_preflight_output_raw,
                 "validated_raw": validated_raw,
                 "expected_sha256": expected_sha256,
+                "private_source": private_source,
+                "generated_raw": generated_raw,
+                **({"destination": destination} if destination is not None else {}),
             }
         )
 
@@ -1388,7 +1397,11 @@ def artifact_candidates(observed):
                 source_counts.get(candidate["source"], 0) + 1
             )
     for candidate in result:
-        if not candidate["unsafe_path"] and source_counts[candidate["source"]] > 1:
+        if (
+            not candidate["unsafe_path"]
+            and source_counts[candidate["source"]] > 1
+            and "destination" not in candidate
+        ):
             suffix = candidate.get("declaration") or candidate["kind"]
             candidate["destination"] = f"artifacts/{candidate['source']}.{suffix}"
 
@@ -1548,6 +1561,7 @@ def _receipt_bound_inference_artifacts(
                 "priority": priority,
                 "validated_raw": raw,
                 "expected_sha256": claimed_hash,
+                "private_source": True,
             }
         )
         return raw
@@ -1559,12 +1573,56 @@ def _receipt_bound_inference_artifacts(
         "application/json",
         0,
     )
-    bind(
+    prompt_raw = bind(
         f"{relative}/prompt.json",
         hashes.get("prompt_sha256"),
         "inference_prompt",
         "application/json",
         0,
+    )
+    if prompt_raw is None:
+        raise ExportError("Inference Receipt omits its prompt hash")
+    try:
+        prompt = json.loads(decode_text(prompt_raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ExportError("invalid Inference Receipt prompt") from error
+    if not isinstance(prompt, dict):
+        raise ExportError("invalid Inference Receipt prompt")
+    system_instructions = prompt.get("system")
+    task_instructions = prompt.get("trusted_task_instructions", prompt.get("task"))
+    if not isinstance(system_instructions, str) or not isinstance(
+        task_instructions, str
+    ):
+        raise ExportError("invalid Inference Receipt prompt sections")
+    policy = receipt.get("policy")
+    if (
+        invocation.get("prompt") != prompt
+        or not isinstance(policy, dict)
+        or policy.get("system_instructions") != system_instructions
+        or policy.get("requested_capability") != invocation.get("requested_capability")
+    ):
+        raise ExportError("Inference Receipt prompt identity disagrees")
+    prompt_view = encode_json(
+        {
+            "schema_version": 1,
+            "kind": "inference_prompt_view",
+            "system_instructions": system_instructions,
+            "task_instructions": task_instructions,
+            "task_data": prompt.get("untrusted_task_data"),
+        }
+    )
+    catalog.append(
+        {
+            "relative": f"{relative}/prompt.json",
+            "scope": f"inference:{purpose}",
+            "kind": "inference_prompt_view",
+            "media_type": "application/json",
+            "priority": 0,
+            "validated_raw": prompt_raw,
+            "expected_sha256": hashes["prompt_sha256"],
+            "generated_raw": prompt_view,
+            "destination": f"artifacts/{relative}/views/prompt.json",
+        }
     )
     contract_name = "adapter-contract.json"
     contract_hash = hashes.get("adapter_contract_sha256")
@@ -1589,17 +1647,21 @@ def _receipt_bound_inference_artifacts(
     if not isinstance(contract, dict) or contract != adapter:
         raise ExportError("Inference Receipt adapter contract identity disagrees")
     if hashes.get("task_prompt_sha256") is not None:
-        bind(
+        task_prompt_raw = bind(
             f"{relative}/task-prompt.txt",
             hashes["task_prompt_sha256"],
             "inference_prompt_text",
             "text/plain; charset=utf-8",
             0,
         )
+        task_prompt = prompt.get("task_prompt")
+        if not isinstance(task_prompt, str) or task_prompt_raw != task_prompt.encode():
+            raise ExportError("Inference Receipt task prompt identity disagrees")
 
     attempts = receipt.get("attempts")
     if not isinstance(attempts, list) or receipt.get("attempt_count") != len(attempts):
         raise ExportError("invalid Inference Receipt attempt catalog")
+    response_records = []
     for index, attempt in enumerate(attempts, 1):
         if not isinstance(attempt, dict):
             raise ExportError("invalid Inference Receipt attempt identity")
@@ -1634,6 +1696,8 @@ def _receipt_bound_inference_artifacts(
             for name, value in artifacts.items()
         ):
             raise ExportError("Inference Receipt names an unknown attempt hash")
+        response_raw = None
+        response_hash = None
         for name, (expected_path, kind, media, priority) in expected.items():
             path = artifacts.get(name)
             claimed = artifacts.get(f"{name}_sha256")
@@ -1643,7 +1707,107 @@ def _receipt_bound_inference_artifacts(
                 raise ExportError(
                     "Inference Receipt attempt artifact identity disagrees"
                 )
-            bind(f"{relative}/{path}", claimed, kind, media, priority)
+            bound_raw = bind(f"{relative}/{path}", claimed, kind, media, priority)
+            if name == "response":
+                response_raw, response_hash = bound_raw, claimed
+        response_value = None
+        response_available = response_raw is not None
+        if response_available:
+            try:
+                response_value = json.loads(decode_text(response_raw))
+            except (TypeError, ValueError, json.JSONDecodeError) as error:
+                raise ExportError("invalid Inference Receipt response") from error
+        response_records.append(
+            {
+                "attempt_number": index,
+                "protocol": attempt.get("protocol"),
+                "response": response_value,
+                "available": response_available,
+                "raw": response_raw,
+                "hash": response_hash,
+                "source": f"{relative}/attempts/{index}/response.json",
+            }
+        )
+
+    terminal_value = receipt.get("terminal_response")
+    terminal_record = next(
+        (
+            item
+            for item in reversed(response_records)
+            if item["available"] and item["response"] == terminal_value
+        ),
+        None,
+    )
+    available_responses = [item for item in response_records if item["available"]]
+    if (available_responses and terminal_record is None) or (
+        not available_responses and terminal_value is not None
+    ):
+        raise ExportError("Inference Receipt terminal response is not attempt-bound")
+
+    for item in response_records:
+        view = encode_json(
+            {
+                "schema_version": 1,
+                "kind": "inference_response_view",
+                "attempt_number": item["attempt_number"],
+                "protocol": item["protocol"],
+                "available": item["available"],
+                "terminal": item is terminal_record,
+                "response": item["response"],
+            }
+        )
+        catalog.append(
+            {
+                "relative": item["source"],
+                "scope": f"inference:{purpose}",
+                "kind": "inference_response_view",
+                "media_type": "application/json",
+                "priority": 0,
+                "validated_raw": item["raw"],
+                "expected_sha256": item["hash"],
+                "generated_raw": view,
+                "destination": (
+                    f"artifacts/{relative}/views/responses/"
+                    f"{item['attempt_number']}.json"
+                ),
+            }
+        )
+
+    terminal_view = encode_json(
+        {
+            "schema_version": 1,
+            "kind": "inference_terminal_response_view",
+            "attempt_number": (
+                terminal_record["attempt_number"] if terminal_record else None
+            ),
+            "available": terminal_record is not None,
+            "response": terminal_record["response"] if terminal_record else None,
+        }
+    )
+    terminal_source = (
+        terminal_record["source"]
+        if terminal_record is not None
+        else f"{relative}/receipt.json"
+    )
+    catalog.append(
+        {
+            "relative": terminal_source,
+            "scope": f"inference:{purpose}",
+            "kind": "inference_terminal_response_view",
+            "media_type": "application/json",
+            "priority": 0,
+            "validated_raw": (
+                terminal_record["raw"] if terminal_record is not None else receipt_raw
+            ),
+            "expected_sha256": (
+                terminal_record["hash"]
+                if terminal_record is not None
+                else digest(receipt_raw)
+            ),
+            "generated_raw": terminal_view,
+            "destination": f"artifacts/{relative}/views/terminal-response.json",
+        }
+    )
 
     # The receipt is the authority for the other entries. Retain its exact
     # private identity even though a receipt cannot recursively hash itself.
@@ -1656,6 +1820,7 @@ def _receipt_bound_inference_artifacts(
             "priority": 0,
             "validated_raw": receipt_raw,
             "expected_sha256": digest(receipt_raw),
+            "private_source": True,
         }
     )
     return catalog
@@ -1688,25 +1853,31 @@ def derive_public_artifact(candidate, redactions):
 
     if candidate.get("unsafe_path"):
         return unavailable("unsafe", "unsafe_path")
-    path = candidate["root"] / source
-    try:
-        facts = path.lstat()
-    except FileNotFoundError:
-        return unavailable("unavailable", "missing")
-    except (OSError, ValueError):
-        return unavailable("unavailable", "unavailable")
-    if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
-        return unavailable("unsafe", "unsafe_file")
-    if facts.st_size == 0:
-        return unavailable("empty", "empty")
-    if facts.st_size > V2_MAX_ARTIFACT_BYTES:
-        return unavailable("oversized", "artifact_limit")
-    try:
-        raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES, expected_facts=facts)
-    except (ExportError, OSError):
-        # Optional evidence remains describable, but required frozen context
-        # cannot degrade into a nondownloadable artifact after source loading.
-        return unavailable("unavailable", "unavailable")
+    if candidate.get("private_source"):
+        return nondownloadable_descriptor(base, "unavailable", "private_source"), None
+    generated = candidate.get("generated_raw")
+    if generated is not None:
+        raw = generated
+    else:
+        path = candidate["root"] / source
+        try:
+            facts = path.lstat()
+        except FileNotFoundError:
+            return unavailable("unavailable", "missing")
+        except (OSError, ValueError):
+            return unavailable("unavailable", "unavailable")
+        if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
+            return unavailable("unsafe", "unsafe_file")
+        if facts.st_size == 0:
+            return unavailable("empty", "empty")
+        if facts.st_size > V2_MAX_ARTIFACT_BYTES:
+            return unavailable("oversized", "artifact_limit")
+        try:
+            raw = read_bytes(path, V2_MAX_ARTIFACT_BYTES, expected_facts=facts)
+        except (ExportError, OSError):
+            # Optional evidence remains describable, but required frozen context
+            # cannot degrade into a nondownloadable artifact after source loading.
+            return unavailable("unavailable", "unavailable")
     try:
         validated_preflight_output_raw = candidate.get("validated_preflight_output_raw")
         if (
@@ -1715,7 +1886,8 @@ def derive_public_artifact(candidate, redactions):
         ):
             raise ExportError("validated Preflight output changed")
         if (
-            candidate.get("validated_raw") is not None
+            generated is None
+            and candidate.get("validated_raw") is not None
             and raw != candidate["validated_raw"]
         ):
             if candidate["kind"] == "related_work":
