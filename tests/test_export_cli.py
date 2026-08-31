@@ -1056,7 +1056,7 @@ class ExportCliTests(unittest.TestCase):
             ):
                 afk_export.redact_public_paths(private, [])
 
-    def test_v2_redacts_structured_credentials_and_general_host_paths_in_views(self):
+    def test_v2_redacts_structured_credentials_in_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -1075,12 +1075,6 @@ class ExportCliTests(unittest.TestCase):
                 "accessKey": "ordinary-access-key-value",
                 "clientSecretKey": "ordinary-client-secret-key-value",
                 "clientApiKey": "ordinary-client-api-key-value",
-                "unix": "/data/private/file",
-                "spacedUnix": "/home/Jane Doe/private/repo",
-                "spacedUnixFilename": "/home/operator/private report.txt",
-                "windows": r"C:\Users\operator\private.txt",
-                "spacedWindows": r"C:\Users\Jane Doe\private\repo",
-                "spacedWindowsFilename": r"C:\Users\operator\private report.txt",
             }
             prompt_path.write_text(json.dumps(prompt) + "\n")
             invocation_path = inference / "invocation.json"
@@ -1093,7 +1087,7 @@ class ExportCliTests(unittest.TestCase):
                 "apiKey": "ordinary-api-value",
                 "privateKey": "ordinary-private-value",
                 "sessionId": "ordinary-session-value",
-                "nested": {"clientSecret": "small", "path": "/workspace/other-run"},
+                "nested": {"clientSecret": "small"},
             }
             response_path.write_text(json.dumps(response) + "\n")
             receipt_path = inference / "receipt.json"
@@ -1135,20 +1129,48 @@ class ExportCliTests(unittest.TestCase):
                 "ordinary-private-value",
                 "ordinary-session-value",
                 "small",
-                "/data/private/file",
-                "/home/Jane Doe/private/repo",
-                "Jane Doe/private/repo",
-                "/home/operator/private report.txt",
-                "report.txt",
-                "/workspace/other-run",
-                r"C:\Users\operator\private.txt",
-                r"C:\Users\Jane Doe\private\repo",
-                r"Jane Doe\private\repo",
-                r"C:\Users\operator\private report.txt",
             ):
                 self.assertNotIn(private, rendered)
             self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 13)
-            self.assertIn("[redacted-path]", rendered)
+
+    def test_v2_omits_complete_views_containing_unknown_host_paths(self):
+        for private in (
+            "/home/operator/private report before publishing",
+            "file://server/share/private report.txt",
+            r"C:\Users\operator\private report before publishing",
+        ):
+            with (
+                self.subTest(private=private),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                inference = source / "coordinator/04-review/inference"
+                self.add_inference_receipt(inference)
+                response_path = inference / "attempts/1/response.json"
+                response = {"answer": private}
+                response_path.write_text(json.dumps(response) + "\n")
+                receipt_path = inference / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                    response_path.read_bytes()
+                ).hexdigest()
+                receipt["terminal_response"] = response
+                receipt_path.write_text(json.dumps(receipt) + "\n")
+
+                destination = root / "bundle"
+                result = self.export_v2(source, destination)
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                record = json.loads((destination / "workflow-run.json").read_text())
+                views = [
+                    item
+                    for item in record["artifacts"]
+                    if item["kind"]
+                    in {"inference_response_view", "inference_terminal_response_view"}
+                ]
+                self.assertTrue(all(item["state"] == "unsafe" for item in views))
+                self.assertTrue(all("path" not in item for item in views))
 
     def test_v2_uses_validation_attempt_identity_for_duplicate_responses(self):
         with tempfile.TemporaryDirectory() as temporary:

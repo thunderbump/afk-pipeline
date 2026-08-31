@@ -145,6 +145,10 @@ AMBIGUOUS_SPACED_FINAL_PATH = re.compile(
     r")",
     re.IGNORECASE,
 )
+ABSOLUTE_HOST_REFERENCE = re.compile(
+    r"(?:\bfile://|(?<![A-Za-z0-9./])/(?!/)|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/]|\\\\))",
+    re.IGNORECASE,
+)
 SENSITIVE_JSON_KEY = re.compile(
     r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)"
     r"(?:[_-]?key)?|(?:[a-z0-9]+[_-])*(?:access|api|private|ssh|encryption|signing)"
@@ -1255,6 +1259,7 @@ def artifact_candidates(observed):
         validated_preflight_output_raw=None,
         validated_raw=None,
         expected_sha256=None,
+        inference_view=False,
         private_source=False,
         generated_raw=None,
         destination=None,
@@ -1273,6 +1278,7 @@ def artifact_candidates(observed):
             priority,
             unsafe_path,
             declaration,
+            inference_view,
         )
         if identity in seen:
             return
@@ -1293,6 +1299,7 @@ def artifact_candidates(observed):
                 "validated_preflight_output_raw": validated_preflight_output_raw,
                 "validated_raw": validated_raw,
                 "expected_sha256": expected_sha256,
+                "inference_view": inference_view,
                 "private_source": private_source,
                 "generated_raw": generated_raw,
                 **({"destination": destination} if destination is not None else {}),
@@ -1682,6 +1689,7 @@ def _receipt_bound_inference_artifacts(
             "validated_raw": prompt_raw,
             "expected_sha256": hashes["prompt_sha256"],
             "generated_raw": prompt_view,
+            "inference_view": True,
             "destination": f"artifacts/{relative}/views/prompt.json",
         }
     )
@@ -1865,6 +1873,7 @@ def _receipt_bound_inference_artifacts(
                 "validated_raw": item["raw"],
                 "expected_sha256": item["hash"],
                 "generated_raw": view,
+                "inference_view": True,
                 "destination": (
                     f"artifacts/{relative}/views/responses/"
                     f"{item['attempt_number']}.json"
@@ -1904,6 +1913,7 @@ def _receipt_bound_inference_artifacts(
                 else digest(receipt_raw)
             ),
             "generated_raw": terminal_view,
+            "inference_view": True,
             "destination": f"artifacts/{relative}/views/terminal-response.json",
         }
     )
@@ -1993,6 +2003,10 @@ def derive_public_artifact(candidate, redactions):
                 raise ExportError("validated related-work snapshot changed")
             raise ExportError("validated Acceptance Routing output changed")
         text = decode_text(raw)
+        if candidate.get("inference_view"):
+            view = json.loads(text)
+            if inference_view_contains_host_reference(view, redactions):
+                raise ExportError("inference view contains an unknown host path")
         if candidate["kind"] == "related_work":
             if candidate.get("validated_raw") != raw:
                 raise ExportError("validated related-work snapshot changed")
@@ -2120,6 +2134,25 @@ def sanitize_json_value(value, redactions):
             raise ExportError("non-finite JSON number")
         return value, False
     raise ExportError("unsupported JSON value")
+
+
+def inference_view_contains_host_reference(value, redactions):
+    """Reject a complete derived view when arbitrary prose contains a host path."""
+    if isinstance(value, str):
+        for prefix in sorted(redactions, key=len, reverse=True):
+            value = value.replace(prefix, "[redacted-path]")
+        return bool(ABSOLUTE_HOST_REFERENCE.search(value))
+    if isinstance(value, list):
+        return any(
+            inference_view_contains_host_reference(item, redactions) for item in value
+        )
+    if isinstance(value, dict):
+        return any(
+            inference_view_contains_host_reference(key, redactions)
+            or inference_view_contains_host_reference(item, redactions)
+            for key, item in value.items()
+        )
+    return False
 
 
 def normalize_run(observed, include_evidence=True):
