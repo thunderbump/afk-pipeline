@@ -121,6 +121,30 @@ HOST_PATH = re.compile(
     r"(?:" + WINDOWS_PATH_COMPONENT + r"[\\/])*[^\s\\/'\"`]+"
     r")"
 )
+# Embedded paths whose final component may contain spaces but has no
+# recognizable prose boundary cannot be safely separated from following text.
+# Reject them rather than publishing a suffix after HOST_PATH redacts only the
+# first word. Paths matched above *with* whitespace are unambiguous (an
+# extension, an intermediate spaced component, or a whole-string path).
+PATH_PROSE_BOUNDARY = (
+    r"(?:and|or|but|before|after|then|while|when|where|which|that|to|for|from|"
+    r"with|without|is|was|must|should|can)\b"
+)
+AMBIGUOUS_SPACED_FINAL_PATH = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9./])/(?!/)(?:" + POSIX_PATH_COMPONENT + r"/)*"
+    r"[^\s/'\"`]+[ \t]+(?!" + PATH_PROSE_BOUNDARY + r")[^\r\n/'\"`]+"
+    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:"
+    + WINDOWS_PATH_COMPONENT
+    + r"[\\/])*[^\s\\/'\"`]+[ \t]+(?!"
+    + PATH_PROSE_BOUNDARY
+    + r")[^\r\n\\/'\"`]+)"
+    r"|(?<![\\])\\\\" + WINDOWS_PATH_COMPONENT + r"[\\/]"
+    r"(?:" + WINDOWS_PATH_COMPONENT + r"[\\/])*"
+    r"[^\s\\/'\"`]+[ \t]+(?!" + PATH_PROSE_BOUNDARY + r")[^\r\n\\/'\"`]+"
+    r")",
+    re.IGNORECASE,
+)
 SENSITIVE_JSON_KEY = re.compile(
     r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)"
     r"(?:[_-]?key)?|(?:[a-z0-9]+[_-])*(?:access|api|private|ssh|encryption|signing)"
@@ -2401,6 +2425,17 @@ def sanitize_public_artifact_text(text, redactions):
 def redact_public_paths(text, redactions):
     for prefix in sorted(redactions, key=len, reverse=True):
         text = text.replace(prefix, "[redacted-path]")
+
+    # Ignore complete, safely bounded spaced paths while looking for the
+    # ambiguous case. A whitespace-free HOST_PATH match is deliberately left
+    # visible: it may be merely the leaked prefix of a spaced final component.
+    ambiguity_input = list(text)
+    for match in HOST_PATH.finditer(text):
+        if re.search(r"[ \t]", match.group()):
+            ambiguity_input[match.start() : match.end()] = " " * len(match.group())
+    if AMBIGUOUS_SPACED_FINAL_PATH.search("".join(ambiguity_input)):
+        raise ExportError("text contains an ambiguously bounded host path")
+
     text = HOST_PATH.sub("[redacted-path]", text)
     return text
 

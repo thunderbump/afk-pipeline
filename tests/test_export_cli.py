@@ -1042,6 +1042,20 @@ class ExportCliTests(unittest.TestCase):
                     afk_export.redact_public_paths(private, redactions), expected
                 )
 
+    def test_host_path_redaction_rejects_ambiguous_spaced_final_components(self):
+        cases = (
+            "Open /home/operator/private report before publishing",
+            r"Open C:\Users\operator\private report before publishing",
+        )
+        for private in cases:
+            with (
+                self.subTest(private=private),
+                self.assertRaisesRegex(
+                    afk_export.ExportError, "ambiguously bounded host path"
+                ),
+            ):
+                afk_export.redact_public_paths(private, [])
+
     def test_v2_redacts_structured_credentials_and_general_host_paths_in_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
