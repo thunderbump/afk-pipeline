@@ -437,7 +437,14 @@ class InferenceRuntime:
         evidence_directory: Path | str,
         validator: Callable[[Any], Any],
         adapter: FixtureAdapter | PiAdapter,
+        task_contract_version: int = 1,
     ) -> InferenceResult:
+        if (
+            not isinstance(task_contract_version, int)
+            or isinstance(task_contract_version, bool)
+            or task_contract_version <= 0
+        ):
+            raise ValueError("task contract version must be a positive integer")
         capability = Capability(requested_capability)
         root = Path(execution_root).resolve()
         evidence = Path(evidence_directory).resolve()
@@ -483,6 +490,7 @@ class InferenceRuntime:
             prompt = {
                 "system": _SYSTEM_INSTRUCTIONS[capability],
                 "purpose": purpose,
+                "task_contract_version": task_contract_version,
                 "trusted_task_instructions": trusted_task_instructions,
                 "untrusted_task_data": _thaw(_freeze(untrusted_task_data)),
             }
@@ -491,6 +499,7 @@ class InferenceRuntime:
             invocation_value = {
                 "schema_version": 1,
                 "purpose": purpose,
+                "task_contract_version": task_contract_version,
                 "prompt": prompt,
                 "requested_capability": capability.value,
                 "execution_root": str(root),

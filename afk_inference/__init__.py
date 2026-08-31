@@ -10,6 +10,7 @@ from .runtime import (
     ScriptedResult,
     invoke,
 )
+from .task import TaskContract
 
 __all__ = [
     "Capability",
@@ -19,5 +20,6 @@ __all__ = [
     "PiAdapter",
     "ResponseRejected",
     "ScriptedResult",
+    "TaskContract",
     "invoke",
 ]

@@ -8,8 +8,9 @@ from pathlib import Path
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
-from afk_inference import Capability, ResponseRejected, invoke
-from afk_respond.contract import actionable_findings, validate_input, validate_response
+from afk_inference import invoke
+from afk_respond.contract import actionable_findings, validate_input
+from afk_respond.task import build_task
 from afk_review.contract import validate_review
 from afk_runtime import (
     commits_between_heads,
@@ -32,18 +33,6 @@ Arguments:
   RESPONSE_JSON     Path to the feedback-response JSON file.
   RESULT_DIRECTORY New directory where response input, output, and logs are written.
 """
-
-RESPONSE_INSTRUCTIONS = """Act as an implementation feedback responder. Modify only the prepared workspace to address every supplied actionable assessed finding, create a clean Git commit, and return the required JSON response. Do not address dismissed findings, run external orchestration, or publish feedback.
-
-Return only one JSON object with this exact shape:
-{"summary":"concise description of the completed response","finding_responses":[{"finding_index":0,"response":"what changed for this finding"}]}
-Return exactly one response for every supplied finding_index, with no duplicate or omitted indices. Do not wrap the JSON in Markdown."""
-
-REPAIR_INSTRUCTIONS = """Act as a repository validation repair worker. Modify only the prepared workspace to repair the supplied ordinary failed Validation, create a clean Git commit, and return the required JSON response. This is failed Validation evidence, not an accepted Review finding. Do not invent a Review finding, run external orchestration, or publish feedback.
-
-Return only one JSON object with this exact shape:
-{"summary":"concise description of the validation repair","finding_responses":[]}
-Do not wrap the JSON in Markdown."""
 
 
 def main() -> int:
@@ -76,8 +65,6 @@ def main() -> int:
         review, assessment, objective = verify_subject(response_input, before, evidence)
         selected = actionable_findings(review, assessment)
     requires_agent = repair or bool(selected)
-    if requires_agent:
-        task = response_task(response_input, selected, objective)
 
     progress("preparing feedback-response result directory")
     result_directory.mkdir()
@@ -135,25 +122,18 @@ def main() -> int:
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
 
-    def validate_terminal_response(value: object):
-        try:
-            if not isinstance(value, str):
-                raise TypeError("feedback response must be JSON text")
-            return validate_response(selected, json.loads(value))
-        except (TypeError, ValueError, json.JSONDecodeError) as error:
-            raise ResponseRejected(str(error)) from error
+    task = build_task(response_input, selected, objective)
 
     inference_result = invoke(
-        purpose="feedback_response",
-        trusted_task_instructions=(
-            REPAIR_INSTRUCTIONS if repair else RESPONSE_INSTRUCTIONS
-        ),
-        untrusted_task_data=task,
-        requested_capability=Capability.WRITE,
+        purpose=task.purpose,
+        task_contract_version=task.contract_version,
+        trusted_task_instructions=task.trusted_instructions,
+        untrusted_task_data=task.untrusted_data,
+        requested_capability=task.capability,
         execution_root=workspace,
         timeout_seconds=response_input["timeout_seconds"],
         evidence_directory=result_directory / "inference",
-        validator=validate_terminal_response,
+        validator=task.validator,
     )
     publish_runtime_logs(result_directory, inference_result.receipt)
     progress("feedback-response agent completed")
@@ -349,27 +329,6 @@ def observe_repository_transition(workspace, before):
         except (OSError, subprocess.SubprocessError) as error:
             observation_error = str(error)
     return after, commits, descends_from_before, observation_error
-
-
-def response_task(response_input, selected, objective):
-    """Build provider-neutral task data from role-verified evidence."""
-    task = {
-        "objective": objective,
-        "actionable_findings": selected,
-    }
-    if "validation_directory" not in response_input:
-        return task
-    validation_directory = Path(response_input["validation_directory"])
-    return {
-        **task,
-        "failed_validation": {
-            "directory": str(validation_directory),
-            "input": read_json(validation_directory / "input.json"),
-            "output": read_json(validation_directory / "output.json"),
-            "stdout": (validation_directory / "stdout.log").read_text(),
-            "stderr": (validation_directory / "stderr.log").read_text(),
-        },
-    }
 
 
 def publish_runtime_logs(result: Path, receipt: object) -> None:

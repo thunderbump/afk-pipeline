@@ -1,8 +1,8 @@
 import copy
 import unittest
 
-from afk_plan.__main__ import CAPABILITY_SYSTEM_PROMPT
 from afk_plan.contract import build_plan, validate_input, validate_plan
+from afk_plan.task import CAPABILITY_SYSTEM_PROMPT
 
 
 def planner_input():

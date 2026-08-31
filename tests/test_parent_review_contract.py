@@ -1,7 +1,7 @@
 import unittest
 
-from afk_parent_review.__main__ import CAPABILITY_SYSTEM_PROMPT
 from afk_parent_review.contract import validate_follow_up
+from afk_parent_review.task import CAPABILITY_SYSTEM_PROMPT
 
 
 class ParentReviewCapabilityContractTest(unittest.TestCase):

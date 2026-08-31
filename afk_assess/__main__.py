@@ -5,9 +5,10 @@ import sys
 import time
 from pathlib import Path
 
-from afk_assess.contract import subject_state, validate_assessment
+from afk_assess.contract import subject_state
+from afk_assess.task import build_task
 from afk_change.contract import validate_change_output
-from afk_inference import Capability, ResponseRejected, invoke
+from afk_inference import invoke
 from afk_related_work import validate_reference, validate_snapshot
 from afk_review.contract import validate_review
 from afk_runtime import (
@@ -29,12 +30,6 @@ Arguments:
   ASSESSMENT_JSON  Path to the finding-assessment JSON file.
   RESULT_DIRECTORY New directory where assessment input, output, and logs are written.
 """
-
-ASSESSMENT_INSTRUCTIONS = """Act as a read-only finding assessor. Decide whether each supplied Review finding is worth addressing. Inspect the reviewed repository and supplied evidence. Mark worth_addressing true only for a concrete, reachable problem relevant to the implementation objective. The current implementation objective is authoritative. Treat related-work records only as ownership context, and do not mark a finding worth addressing when it merely asks this objective to include work owned by a sibling task. Do not modify files or prescribe a repair. Use each finding's immutable zero-based array position as finding_index.
-
-Return only one JSON object with this exact shape:
-{"summary":"concise assessment conclusion","decisions":[{"finding_index":0,"worth_addressing":true,"rationale":"why the finding is or is not worth addressing"}]}
-Return exactly one decision for every finding with no duplicates or omissions, or an empty decisions array when there are no findings. Do not wrap the JSON in Markdown."""
 
 
 def main() -> int:
@@ -58,7 +53,7 @@ def main() -> int:
     progress("observing reviewed repository")
     before = repository_state(workspace)
     review, objective = verify_subject(assessment_input, before, evidence)
-    task = assessment_task(assessment_input, review, objective)
+    task = build_task(assessment_input, review, objective, workspace)
 
     progress("preparing finding-assessment result directory")
     result_directory.mkdir()
@@ -73,23 +68,16 @@ def main() -> int:
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
 
-    def validate_response(value: object):
-        try:
-            if not isinstance(value, str):
-                raise TypeError("finding assessment response must be JSON text")
-            return validate_assessment(review, json.loads(value))
-        except (TypeError, ValueError, json.JSONDecodeError) as error:
-            raise ResponseRejected(str(error)) from error
-
     inference_result = invoke(
-        purpose="finding_assessment",
-        trusted_task_instructions=ASSESSMENT_INSTRUCTIONS,
-        untrusted_task_data=task,
-        requested_capability=Capability.READ_ONLY,
+        purpose=task.purpose,
+        task_contract_version=task.contract_version,
+        trusted_task_instructions=task.trusted_instructions,
+        untrusted_task_data=task.untrusted_data,
+        requested_capability=task.capability,
         execution_root=workspace,
         timeout_seconds=assessment_input["timeout_seconds"],
         evidence_directory=result_directory / "inference",
-        validator=validate_response,
+        validator=task.validator,
     )
     publish_runtime_logs(result_directory, inference_result.receipt)
     progress("finding-assessment agent completed")
@@ -238,26 +226,6 @@ def verify_subject(
         validate_review(review, Path(assessment_input["workspace"]), reviewed_head),
         objective,
     )
-
-
-def assessment_task(
-    assessment_input: dict[str, object], review: dict[str, object], objective: str
-) -> dict[str, object]:
-    """Build provider-neutral, untrusted task data from verified evidence."""
-    review_directory = Path(assessment_input["review_directory"])
-    related = assessment_input.get("related_work")
-    related_records = (
-        [json.loads(line) for line in Path(related["path"]).read_text().splitlines()]
-        if related is not None
-        else []
-    )
-    return {
-        "objective": objective,
-        "findings": review["findings"],
-        "review": review,
-        "reviewed_diff": (review_directory / "diff.patch").read_text(),
-        "related_work": related_records,
-    }
 
 
 def related_work_guidance(assessment_input: dict[str, object]) -> str:
