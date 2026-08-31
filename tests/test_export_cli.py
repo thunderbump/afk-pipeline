@@ -985,6 +985,25 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(len(by_kind["inference_prompt_view"]), 1)
             self.assertEqual(len(by_kind["inference_response_view"]), 1)
             self.assertEqual(len(by_kind["inference_terminal_response_view"]), 1)
+            self.assertEqual(len(by_kind["inference_receipt_view"]), 1)
+            receipt_view = json.loads(
+                (destination / by_kind["inference_receipt_view"][0]["path"]).read_text()
+            )
+            self.assertEqual(receipt_view["requested_capability"], "READ_ONLY")
+            self.assertEqual(receipt_view["attempt_count"], 1)
+            self.assertEqual(receipt_view["validation_status"], "accepted")
+            self.assertEqual(
+                receipt_view["attempts"],
+                [
+                    {
+                        "attempt_number": 1,
+                        "protocol_status": "accepted",
+                        "validation_status": "accepted",
+                    }
+                ],
+            )
+            self.assertNotIn("hashes", receipt_view)
+            self.assertNotIn("terminal_response", receipt_view)
             prompt = json.loads(
                 (destination / by_kind["inference_prompt_view"][0]["path"]).read_text()
             )

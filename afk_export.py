@@ -167,6 +167,7 @@ REDACTED_SECRET = "[redacted-secret]"
 PUBLIC_PREFLIGHT_CLASSIFIER_KEY = "[sanitized-preflight-classifier-key]"
 INFERENCE_JSON_KINDS = {
     "inference_receipt",
+    "inference_receipt_view",
     "inference_invocation",
     "inference_prompt",
     "inference_contract",
@@ -1915,6 +1916,74 @@ def _receipt_bound_inference_artifacts(
             "generated_raw": terminal_view,
             "inference_view": True,
             "destination": f"artifacts/{relative}/views/terminal-response.json",
+        }
+    )
+
+    validation_status = (
+        validation.get("status") if isinstance(validation, dict) else None
+    )
+    if not isinstance(validation_status, str):
+        raise ExportError("Inference Receipt validation status is invalid")
+    public_attempts = []
+    for attempt in attempts:
+        attempt_protocol = attempt.get("protocol")
+        attempt_validation = attempt.get("validation")
+        protocol_status = (
+            attempt_protocol.get("status")
+            if isinstance(attempt_protocol, dict)
+            else None
+        )
+        attempt_validation_status = (
+            attempt_validation.get("status")
+            if isinstance(attempt_validation, dict)
+            else None
+        )
+        if not isinstance(protocol_status, str) or (
+            attempt_validation_status is not None
+            and not isinstance(attempt_validation_status, str)
+        ):
+            raise ExportError("Inference Receipt attempt status is invalid")
+        public_attempts.append(
+            {
+                "attempt_number": attempt["attempt_number"],
+                "protocol_status": protocol_status,
+                "validation_status": attempt_validation_status,
+            }
+        )
+    receipt_view = encode_json(
+        {
+            "schema_version": 1,
+            "kind": "inference_receipt_view",
+            "identity": {
+                name: identity[name]
+                for name in (
+                    "runtime",
+                    "adapter",
+                    "adapter_family",
+                    "adapter_contract_version",
+                    "model",
+                    "thinking",
+                )
+            },
+            "requested_capability": policy["requested_capability"],
+            "duration_seconds": receipt["timing"]["duration_seconds"],
+            "attempt_count": receipt["attempt_count"],
+            "attempts": public_attempts,
+            "validation_status": validation_status,
+        }
+    )
+    catalog.append(
+        {
+            "relative": f"{relative}/receipt.json",
+            "scope": f"inference:{purpose}",
+            "kind": "inference_receipt_view",
+            "media_type": "application/json",
+            "priority": 0,
+            "validated_raw": receipt_raw,
+            "expected_sha256": digest(receipt_raw),
+            "generated_raw": receipt_view,
+            "inference_view": True,
+            "destination": f"artifacts/{relative}/views/receipt.json",
         }
     )
 
