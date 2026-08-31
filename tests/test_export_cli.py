@@ -1097,6 +1097,40 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_v2_rejects_preparation_policy_conflicting_with_coordinator_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            coordinator_roles = {
+                role: dict(afk_export.INFERENCE_ROLE_DEFAULTS[role])
+                for role in ("review", "finding_assessment", "feedback_response")
+            }
+            for request_path in (
+                source / "coordinator-request.json",
+                source / "coordinator/input.json",
+            ):
+                request = json.loads(request_path.read_text())
+                request["inference_roles"] = coordinator_roles
+                request_path.write_text(json.dumps(request))
+
+            # The receipt consistently matches this later preparation edit, but
+            # not the review policy in the input Coordinator actually consumed.
+            prepared_roles = {
+                role: dict(setting)
+                for role, setting in afk_export.INFERENCE_ROLE_DEFAULTS.items()
+            }
+            prepared_roles["review"]["model"] = "gpt-test"
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preparation["inference_roles"] = prepared_roles
+            preparation_path.write_text(json.dumps(preparation))
+            self.add_inference_receipt(source / "coordinator/04-review/inference")
+
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_v2_rejects_hashed_contract_for_a_different_adapter_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

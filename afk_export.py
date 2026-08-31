@@ -348,6 +348,7 @@ def load_source_v2(
         raise ExportError("paused Run has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
+    validate_prepared_request_inference_roles(preparation, request)
     related_work = load_related_work(source, preparation, assignment, request)
     assignment_bead = (
         assignment.get("source", {}).get("id")
@@ -458,6 +459,7 @@ def load_terminal_routing(
         raise ExportError("terminal Acceptance Routing has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
+    validate_prepared_request_inference_roles(preparation, request)
     related_work = load_related_work(source, preparation, assignment, request)
     if assignment.get("source") != {"kind": "bead", "id": bead["id"]}:
         raise ExportError("Acceptance Routing Bead identity disagrees")
@@ -609,6 +611,8 @@ def load_source(
     require_directory(coordinator)
     assignment = validate_assignment(read_json(coordinator / "assignment.json"))
     request = validate_request(read_json(coordinator / "input.json"))
+    if preparation is not None:
+        validate_prepared_request_inference_roles(preparation, request)
     if root_assignment is not None and root_assignment != assignment:
         raise ExportError("Run Preparer Assignment disagrees with Coordinator")
     if root_request is not None and root_request != request:
@@ -770,6 +774,23 @@ def validate_prepared_inference_roles(value):
         not legacy and roles != effective
     ):
         raise ExportError("invalid prepared inference roles")
+
+
+def validate_prepared_request_inference_roles(preparation, request):
+    """Bind shared prepared policy to the request Coordinator consumed."""
+    prepared_roles = preparation.get("inference_roles")
+    request_roles = request.get("inference_roles")
+    if prepared_roles is None or request_roles is None:
+        # Legacy Runs may predate either durable policy record, so there is no
+        # pair of frozen records whose shared roles can be compared.
+        return
+    try:
+        prepared = effective_inference_roles(prepared_roles)
+        requested = effective_inference_roles(request_roles)
+    except ValueError as error:
+        raise ExportError("invalid prepared inference roles") from error
+    if any(prepared[role] != requested[role] for role in request_roles):
+        raise ExportError("prepared inference roles disagree with Coordinator request")
 
 
 def validate_preparation(source, value):
@@ -1124,17 +1145,30 @@ def artifact_candidates(observed):
     seen = set()
 
     def frozen_inference_setting(role):
-        """Return the validated role policy sealed into this Run, when present."""
-        preparation = observed.get("preparation")
-        roles = (
-            preparation.get("inference_roles")
-            if isinstance(preparation, dict)
-            else None
+        """Return the policy from the record that actually drove this role."""
+        request = observed.get("request")
+        request_roles = (
+            request.get("inference_roles") if isinstance(request, dict) else None
         )
-        if roles is None:
-            request = observed.get("request")
+        # Coordinator input is authoritative for its review, assessment, and
+        # response stages. Preparation carries the acceptance planner role,
+        # which is consumed before Coordinator starts.
+        if isinstance(request_roles, dict) and role in request_roles:
+            roles = request_roles
+        else:
+            preparation = observed.get("preparation")
+            prepared_roles = (
+                preparation.get("inference_roles")
+                if isinstance(preparation, dict)
+                else None
+            )
+            # Acceptance planning is always preparation-driven. Prepared policy
+            # also remains the receipt authority for readable legacy Runs whose
+            # Coordinator input predates its own inference_roles field.
             roles = (
-                request.get("inference_roles") if isinstance(request, dict) else None
+                prepared_roles
+                if isinstance(prepared_roles, dict) and role in prepared_roles
+                else None
             )
         if roles is None:
             # Older readable Runs predate frozen inference policy. Their receipts
