@@ -247,6 +247,15 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertFalse(result.exists())
         self.assertIn("invalid Review evidence", completed.stderr)
 
+    def test_missing_review_diff_is_refused_before_result_creation(self):
+        (self.review / "diff.patch").unlink()
+
+        result, completed = self.run_assessment("address")
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("diff.patch", completed.stderr)
+
     def test_sibling_owned_finding_is_out_of_scope_under_trusted_policy(self):
         records = {
             "task": {"id": "task", "title": "Change the API", "parent": "epic"},

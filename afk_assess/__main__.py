@@ -62,6 +62,7 @@ def main() -> int:
     progress("observing reviewed repository")
     before = repository_state(workspace)
     review, objective = verify_subject(assessment_input, before, evidence)
+    task = assessment_task(assessment_input, review, objective)
 
     progress("preparing finding-assessment result directory")
     result_directory.mkdir()
@@ -88,7 +89,7 @@ def main() -> int:
         inference=inference,
         purpose="finding_assessment",
         trusted_task_instructions=ASSESSMENT_INSTRUCTIONS,
-        untrusted_task_data=assessment_task(assessment_input, review, objective),
+        untrusted_task_data=task,
         requested_capability=Capability.READ_ONLY,
         execution_root=workspace,
         timeout_seconds=assessment_input["timeout_seconds"],
