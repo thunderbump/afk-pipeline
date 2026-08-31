@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -150,6 +151,9 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "completed")
+        receipt = json.loads((result / "inference/receipt.json").read_text())
+        self.assertEqual(receipt["policy"]["requested_capability"], "WRITE")
+        self.assertEqual(json.loads(receipt["terminal_response"]), output["response"])
         self.assertEqual(output["agent"], {"status": "completed"})
         self.assertEqual(
             output["response"]["finding_responses"],
@@ -189,6 +193,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(output["repository"]["after"], before)
         self.assertEqual((result / "events.jsonl").read_text(), "")
         self.assertEqual((result / "stderr.log").read_text(), "")
+        self.assertFalse((result / "inference").exists())
 
     def test_no_action_reobserves_the_workspace_before_sealing(self):
         self.make_no_action()
@@ -254,10 +259,13 @@ class ResponseCliTest(unittest.TestCase):
             [item["finding_index"] for item in output["response"]["finding_responses"]],
             [0],
         )
-        prompt = marker.read_text()
-        self.assertIn("Make the reviewed implementation correct.", prompt)
-        self.assertIn("Actionable finding", prompt)
-        self.assertNotIn("Dismissed finding", prompt)
+        prompt = json.loads((result / "inference/prompt.json").read_text())
+        task = prompt["untrusted_task_data"]
+        self.assertEqual(task["objective"], "Make the reviewed implementation correct.")
+        self.assertEqual(
+            [item["finding"]["title"] for item in task["actionable_findings"]],
+            ["Actionable finding"],
+        )
 
     def test_validation_repair_identifies_failure_artifacts_and_is_not_review_feedback(
         self,
@@ -334,13 +342,14 @@ class ResponseCliTest(unittest.TestCase):
         result = self.root / "validation-response"
         marker_path = self.root / "validation-prompt.txt"
         environment = os.environ.copy()
-        environment["AFK_RESPOND_AGENT_COMMAND"] = json.dumps(
+        self.install_pi_fixture(
+            environment,
             [
                 sys.executable,
                 str(FIXTURE),
                 "capture-validation-prompt",
                 str(marker_path),
-            ]
+            ],
         )
 
         completed = self.invoke(input_path, result, environment)
@@ -348,10 +357,14 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["response"]["finding_responses"], [])
-        prompt = marker_path.read_text()
-        for name in ("input.json", "output.json", "stdout.log", "stderr.log"):
-            self.assertIn(str(validation / name), prompt)
-        self.assertIn("not an accepted Review finding", prompt)
+        prompt = json.loads((result / "inference/prompt.json").read_text())
+        failure = prompt["untrusted_task_data"]["failed_validation"]
+        self.assertEqual(failure["directory"], str(validation))
+        self.assertEqual(failure["stdout"], "failing test output\n")
+        self.assertEqual(failure["stderr"], "failure detail\n")
+        self.assertIn(
+            "not an accepted Review finding", prompt["trusted_task_instructions"]
+        )
 
     def test_validation_repair_refuses_launch_error_and_repository_drift_evidence(self):
         from afk_validate.evidence import validate_repairable_failure
@@ -491,8 +504,7 @@ class ResponseCliTest(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((result / "output.json").read_text())
-        self.assertIsNone(output["process"]["exit_code"])
-        self.assertIn("missing-agent", output["process"]["error"])
+        self.assertNotEqual(output["process"]["exit_code"], 0)
         self.assertIsNone(output["agent"])
 
         for scenario in ("dirty", "unchanged"):
@@ -658,10 +670,19 @@ exec /usr/bin/git "$@"
         self.write_json(input_path, response_input)
         result = self.root / result_name
         environment = os.environ.copy()
-        environment["AFK_RESPOND_AGENT_COMMAND"] = json.dumps(
-            command or [sys.executable, str(FIXTURE), scenario]
+        self.install_pi_fixture(
+            environment, command or [sys.executable, str(FIXTURE), scenario]
         )
         return input_path, result, environment
+
+    def install_pi_fixture(self, environment, command):
+        bin_directory = self.root / "inference-bin"
+        bin_directory.mkdir(exist_ok=True)
+        rendered = " ".join(shlex.quote(item) for item in command)
+        pi = bin_directory / "pi"
+        pi.write_text(f'#!/bin/sh\nexec {rendered} "$@"\n')
+        pi.chmod(0o755)
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
 
     def invoke(self, input_path, result, environment):
         return subprocess.run(

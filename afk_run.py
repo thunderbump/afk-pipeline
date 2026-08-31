@@ -1419,7 +1419,6 @@ def worker_environment():
         "AFK_PREFLIGHT_AGENT_COMMAND",
         "AFK_REVIEW_AGENT_COMMAND",
         "AFK_ASSESS_AGENT_COMMAND",
-        "AFK_RESPOND_AGENT_COMMAND",
     }
     return {
         name: value

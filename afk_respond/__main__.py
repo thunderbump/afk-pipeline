@@ -1,14 +1,15 @@
 import json
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from afk_agent import agent_response, write_pi_command
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
 from afk_config import INFERENCE_ROLE_DEFAULTS
+from afk_inference import Capability, ResponseRejected, invoke
 from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
 from afk_runtime import (
@@ -16,7 +17,6 @@ from afk_runtime import (
     process_result,
     progress,
     repository_state,
-    run_command,
     seal_json,
     timestamp,
     write_json,
@@ -33,6 +33,18 @@ Arguments:
   RESPONSE_JSON     Path to the feedback-response JSON file.
   RESULT_DIRECTORY New directory where response input, output, and logs are written.
 """
+
+RESPONSE_INSTRUCTIONS = """Act as an implementation feedback responder. Modify only the prepared workspace to address every supplied actionable assessed finding, create a clean Git commit, and return the required JSON response. Do not address dismissed findings, run external orchestration, or publish feedback.
+
+Return only one JSON object with this exact shape:
+{"summary":"concise description of the completed response","finding_responses":[{"finding_index":0,"response":"what changed for this finding"}]}
+Return exactly one response for every supplied finding_index, with no duplicate or omitted indices. Do not wrap the JSON in Markdown."""
+
+REPAIR_INSTRUCTIONS = """Act as a repository validation repair worker. Modify only the prepared workspace to repair the supplied ordinary failed Validation, create a clean Git commit, and return the required JSON response. This is failed Validation evidence, not an accepted Review finding. Do not invent a Review finding, run external orchestration, or publish feedback.
+
+Return only one JSON object with this exact shape:
+{"summary":"concise description of the validation repair","finding_responses":[]}
+Do not wrap the JSON in Markdown."""
 
 
 def main() -> int:
@@ -65,30 +77,11 @@ def main() -> int:
         review, assessment, objective = verify_subject(response_input, before, evidence)
         selected = actionable_findings(review, assessment)
     requires_agent = repair or bool(selected)
-    command_prefix = None
     if requires_agent:
         inference = response_input.get(
             "inference", INFERENCE_ROLE_DEFAULTS["feedback_response"]
         )
-        system_prompt = (
-            "You are a repository validation repair worker. Modify only the "
-            "prepared workspace to repair the ordinary failed Validation in the "
-            "user prompt, create a clean Git commit, and return the required JSON "
-            "response. Do not treat the failure as an accepted Review finding, "
-            "run external orchestration, or publish feedback."
-            if repair
-            else "You are an implementation feedback responder. Modify only the "
-            "prepared workspace to address the actionable assessed findings in "
-            "the user prompt, create a clean Git commit, and return the required "
-            "JSON response. Do not address dismissed findings, run external "
-            "orchestration, or publish feedback."
-        )
-        command_prefix = write_pi_command(
-            "AFK_RESPOND_AGENT_COMMAND",
-            system_prompt,
-            inference["model"],
-            inference["thinking"],
-        )
+        task = response_task(response_input, selected, objective)
 
     progress("preparing feedback-response result directory")
     result_directory.mkdir()
@@ -145,13 +138,29 @@ def main() -> int:
         f"(timeout={response_input['timeout_seconds']}s; "
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
-    execution = run_command(
-        [*command_prefix, prompt(response_input, selected, objective)],
-        workspace,
-        response_input["timeout_seconds"],
-        events_path,
-        stderr_path,
+
+    def validate_terminal_response(value: object):
+        try:
+            if not isinstance(value, str):
+                raise TypeError("feedback response must be JSON text")
+            return validate_response(selected, json.loads(value))
+        except (TypeError, ValueError, json.JSONDecodeError) as error:
+            raise ResponseRejected(str(error)) from error
+
+    inference_result = invoke(
+        inference=inference,
+        purpose="feedback_response",
+        trusted_task_instructions=(
+            REPAIR_INSTRUCTIONS if repair else RESPONSE_INSTRUCTIONS
+        ),
+        untrusted_task_data=task,
+        requested_capability=Capability.WRITE,
+        execution_root=workspace,
+        timeout_seconds=response_input["timeout_seconds"],
+        evidence_directory=result_directory / "inference",
+        validator=validate_terminal_response,
     )
+    publish_runtime_logs(result_directory, inference_result.receipt)
     progress("feedback-response agent completed")
 
     progress("observing repository after feedback response")
@@ -159,16 +168,22 @@ def main() -> int:
         observe_repository_transition(workspace, before)
     )
 
-    parsed = None if execution["error"] else agent_response(events_path)
-    agent = None if parsed is None else parsed["agent"]
-    response = None
-    response_error = None
-    if agent is not None and agent["status"] == "completed":
-        try:
-            response = validate_response(selected, json.loads(parsed["text"]))
-        except (TypeError, ValueError, json.JSONDecodeError) as error:
-            response_error = str(error)
-
+    response = (
+        inference_result.value if inference_result.outcome == "succeeded" else None
+    )
+    validation = inference_result.receipt["validation"]
+    response_error = (
+        validation.get("error")
+        if inference_result.outcome in {"response_rejected", "validator_failed"}
+        else None
+    )
+    terminal = inference_result.receipt["terminal_response"]
+    agent = (
+        {"status": "completed"}
+        if terminal is not None
+        and inference_result.receipt["protocol"].get("status") == "accepted"
+        else None
+    )
     valid_repository = (
         after is not None
         and after["dirty"] is False
@@ -180,17 +195,11 @@ def main() -> int:
     )
     outcome = (
         "interrupted"
-        if execution["interrupted"]
+        if inference_result.outcome == "interrupted"
         else "timed_out"
-        if execution["timed_out"]
+        if inference_result.outcome == "timed_out"
         else "completed"
-        if (
-            execution["exit_code"] == 0
-            and agent is not None
-            and agent["status"] == "completed"
-            and response is not None
-            and valid_repository
-        )
+        if inference_result.outcome == "succeeded" and valid_repository
         else "failed"
     )
     output = {
@@ -199,7 +208,7 @@ def main() -> int:
         "started_at": started_at,
         "finished_at": timestamp(),
         "duration_seconds": round(time.monotonic() - started, 3),
-        "process": process_result(execution["exit_code"], execution["error"]),
+        "process": runtime_process(inference_result.receipt),
         "agent": agent,
         "response": response,
         **({"response_error": response_error} if response_error else {}),
@@ -347,45 +356,41 @@ def observe_repository_transition(workspace, before):
     return after, commits, descends_from_before, observation_error
 
 
-def prompt(response_input, selected, objective):
-    if "validation_directory" in response_input:
-        validation_directory = Path(response_input["validation_directory"])
-        return f"""Repair the repository validation failure below in the prepared workspace and commit the result. This is failed Validation evidence, not an accepted Review finding.
+def response_task(response_input, selected, objective):
+    """Build provider-neutral task data from role-verified evidence."""
+    task = {
+        "objective": objective,
+        "actionable_findings": selected,
+    }
+    if "validation_directory" not in response_input:
+        return task
+    validation_directory = Path(response_input["validation_directory"])
+    return {
+        **task,
+        "failed_validation": {
+            "directory": str(validation_directory),
+            "input": read_json(validation_directory / "input.json"),
+            "output": read_json(validation_directory / "output.json"),
+            "stdout": (validation_directory / "stdout.log").read_text(),
+            "stderr": (validation_directory / "stderr.log").read_text(),
+        },
+    }
 
-Implementation objective: {objective}
-Failed Validation evidence: {validation_directory}
-Failed Validation input: {validation_directory / "input.json"}
-Failed Validation output: {validation_directory / "output.json"}
-Failed Validation stdout: {validation_directory / "stdout.log"}
-Failed Validation stderr: {validation_directory / "stderr.log"}
 
-Inspect the complete identified input, output, stdout, and stderr before repairing. Return only one JSON object with this exact shape after creating a clean Git commit:
-{{
-  "summary": "concise description of the validation repair",
-  "finding_responses": []
-}}
+def publish_runtime_logs(result: Path, receipt: object) -> None:
+    attempts = receipt["attempts"]
+    for artifact, filename in (("events", "events.jsonl"), ("stderr", "stderr.log")):
+        source = attempts[-1]["artifacts"].get(artifact) if attempts else None
+        if source:
+            shutil.copyfile(result / "inference" / source, result / filename)
+        else:
+            (result / filename).touch()
 
-Do not invent a Review finding and do not wrap the JSON in Markdown."""
 
-    assessment_directory = Path(response_input["assessment_directory"])
-    return f"""Address every actionable assessed finding below in the prepared workspace and commit the result. Do not address findings omitted from this list.
-
-Implementation objective: {objective}
-Actionable findings:
-{json.dumps(selected, indent=2)}
-
-Finding Assessment evidence: {assessment_directory}
-Finding Assessment input: {assessment_directory / "input.json"}
-
-Return only one JSON object with this exact shape after creating a clean Git commit:
-{{
-  "summary": "concise description of the completed response",
-  "finding_responses": [
-    {{"finding_index": 0, "response": "what changed for this finding"}}
-  ]
-}}
-
-Return exactly one response for every supplied finding_index, with no duplicate or omitted indices. Do not wrap the JSON in Markdown."""
+def runtime_process(receipt: object) -> dict[str, object]:
+    attempts = receipt["attempts"]
+    process = attempts[-1].get("process", {}) if attempts else {}
+    return process_result(process.get("exit_code"), process.get("error"))
 
 
 def read_json(path):

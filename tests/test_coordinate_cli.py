@@ -13,9 +13,6 @@ from afk_related_work import build_snapshot, reference
 
 ROOT = Path(__file__).parents[1]
 ATTEMPT_FIXTURE = ROOT / "tests" / "fixture_agent.py"
-REVIEW_FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
-ASSESSMENT_FIXTURE = ROOT / "tests" / "fixture_assessment_agent.py"
-RESPONSE_FIXTURE = ROOT / "tests" / "fixture_response_agent.py"
 INFERENCE_FIXTURE = ROOT / "tests" / "inference_coordinate_fixture.py"
 
 
@@ -1589,15 +1586,13 @@ class CoordinatorCliTest(unittest.TestCase):
                 str(INFERENCE_FIXTURE),
                 review_scenario,
                 assessment_scenario,
+                response_scenario,
             )
         )
         pi = bin_directory / "pi"
         pi.write_text(f'#!/bin/sh\nexec {command} "$@"\n')
         pi.chmod(0o755)
         environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
-        environment["AFK_RESPOND_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(RESPONSE_FIXTURE), response_scenario]
-        )
         return environment
 
     def command(self, request_path, run, *extra):

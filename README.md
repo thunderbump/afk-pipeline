@@ -892,14 +892,18 @@ validation repair from an accepted Review finding; its structured result uses
 an empty `finding_responses` array.
 
 One invocation selects all and only Assessment decisions whose
-`worth_addressing` value is true. The default adapter invokes Pi with
-`gpt-5.6-sol` and workspace-writing tools, and requires it to create a clean Git
-commit. Authentication is inherited from the environment. A deployment or
-deterministic test may set `AFK_RESPOND_AGENT_COMMAND` to a JSON argv array;
-Feedback Response appends its generated prompt as the final argument.
+`worth_addressing` value is true. Only an actionable response or validation
+repair requests the Inference Runtime's semantic `WRITE` capability. The
+runtime owns Pi construction, capability tools, timing, protocol
+interpretation, and retained inference evidence; Feedback Response supplies
+verified task data and validates the domain response. The no-action path does
+not invoke the runtime.
 
-The result directory contains `input.json`, raw `events.jsonl`, raw
-`stderr.log`, and an atomically sealed `output.json`. A completed agent response
+When inference is required, the result directory contains `input.json`,
+runtime-owned `inference/` evidence, projected raw `events.jsonl` and
+`stderr.log`, and an atomically sealed
+`output.json`. The inference receipt preserves the exact terminal response and
+normalized protocol and validation outcomes. A completed agent response
 contains a summary and exactly one non-empty response for every selected
 immutable `finding_index`. Completion also requires a clean final workspace at
 a new descendant `HEAD`; the wrapper records the exact commits between the two
