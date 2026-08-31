@@ -1026,6 +1026,22 @@ class ExportCliTests(unittest.TestCase):
             )
             self.assertTrue(all("path" not in item for item in private))
 
+    def test_host_path_redaction_handles_spaced_filenames_without_consuming_prose(self):
+        redactions = []
+        cases = {
+            "/home/operator/private report.txt": "[redacted-path]",
+            r"C:\Users\operator\private report.txt": "[redacted-path]",
+            "Open /home/operator/private report.txt before publishing": "Open [redacted-path] before publishing",
+            r"Open C:\Users\operator\private report.txt before publishing": "Open [redacted-path] before publishing",
+            "Read /tmp/a and compare /tmp/b": "Read [redacted-path] and compare [redacted-path]",
+            r"Read C:\tmp\a and compare C:\tmp\b": "Read [redacted-path] and compare [redacted-path]",
+        }
+        for private, expected in cases.items():
+            with self.subTest(private=private):
+                self.assertEqual(
+                    afk_export.redact_public_paths(private, redactions), expected
+                )
+
     def test_v2_redacts_structured_credentials_and_general_host_paths_in_views(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1047,8 +1063,10 @@ class ExportCliTests(unittest.TestCase):
                 "clientApiKey": "ordinary-client-api-key-value",
                 "unix": "/data/private/file",
                 "spacedUnix": "/home/Jane Doe/private/repo",
+                "spacedUnixFilename": "/home/operator/private report.txt",
                 "windows": r"C:\Users\operator\private.txt",
                 "spacedWindows": r"C:\Users\Jane Doe\private\repo",
+                "spacedWindowsFilename": r"C:\Users\operator\private report.txt",
             }
             prompt_path.write_text(json.dumps(prompt) + "\n")
             invocation_path = inference / "invocation.json"
@@ -1106,10 +1124,13 @@ class ExportCliTests(unittest.TestCase):
                 "/data/private/file",
                 "/home/Jane Doe/private/repo",
                 "Jane Doe/private/repo",
+                "/home/operator/private report.txt",
+                "report.txt",
                 "/workspace/other-run",
                 r"C:\Users\operator\private.txt",
                 r"C:\Users\Jane Doe\private\repo",
                 r"Jane Doe\private\repo",
+                r"C:\Users\operator\private report.txt",
             ):
                 self.assertNotIn(private, rendered)
             self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 13)

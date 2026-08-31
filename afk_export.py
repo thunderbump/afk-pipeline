@@ -87,16 +87,38 @@ REDACTABLE_CREDENTIAL_TEXT = (
     re.compile(r"[a-z][a-z0-9+.-]*://[^\s/:]+:[^\s/@]+@"),
 )
 SENSITIVE_TEXT = (*REDACTABLE_CREDENTIAL_TEXT, PRIVATE_KEY_TEXT)
+# A component may contain horizontal whitespace, but not at either edge.  The
+# edge rule is important: without it, ``/tmp/a and compare /tmp/b`` is parsed
+# as one path whose second component is "a and compare ".
+POSIX_PATH_COMPONENT = r"[^\s/'\"`](?:[^\r\n/'\"`]*?[^\s/'\"`])?"
+WINDOWS_PATH_COMPONENT = r"[^\s:\\/'\"`](?:[^\r\n:\\/'\"`]*?[^\s:\\/'\"`])?"
 HOST_PATH = re.compile(
     r"(?:"
-    # Intermediate components may contain spaces.  Keep the final component
-    # whitespace-free so ordinary prose following an unquoted path is not
-    # consumed along with the path.
-    r"(?<![A-Za-z0-9./])/(?!/)(?:[^\r\n/'\"`]+/)*[^\s/'\"`]+"
-    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:[^\r\n\\/'\"`]+[\\/])*"
-    r"[^\s\\/'\"`]+)"
-    r"|(?<![\\])\\\\[^\r\n\\/'\"`]+[\\/]"
-    r"(?:[^\r\n\\/'\"`]+[\\/])*[^\s\\/'\"`]+"
+    # A spaced final filename is unambiguous when its last word has a file
+    # extension.  Stop at that extension rather than consuming later prose.
+    r"(?<![A-Za-z0-9./])/(?!/)(?:" + POSIX_PATH_COMPONENT + r"/)*"
+    r"[^\s/'\"`]+(?:[ \t]+[^\s/'\"`]+)+?\.[A-Za-z0-9]{1,16}"
+    r"(?![A-Za-z0-9._-])"
+    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:"
+    + WINDOWS_PATH_COMPONENT
+    + r"[\\/])*[^\s\\/'\"`]+(?:[ \t]+[^\s\\/'\"`]+)+?"
+    r"\.[A-Za-z0-9]{1,16}(?![A-Za-z0-9._-]))"
+    # If a string consists solely of a path, its final component can safely
+    # contain spaces even without an extension.
+    r"|\A/(?!/)(?:" + POSIX_PATH_COMPONENT + r"/)*" + POSIX_PATH_COMPONENT + r"\Z"
+    r"|\A[A-Za-z]:[\\/](?:"
+    + WINDOWS_PATH_COMPONENT
+    + r"[\\/])*"
+    + WINDOWS_PATH_COMPONENT
+    + r"\Z"
+    # General paths retain prose by allowing spaces only in completed,
+    # separator-terminated components and using a whitespace-free final one.
+    r"|(?<![A-Za-z0-9./])/(?!/)(?:" + POSIX_PATH_COMPONENT + r"/)*[^\s/'\"`]+"
+    r"|(?<![A-Za-z0-9])(?:[A-Za-z]:[\\/](?:"
+    + WINDOWS_PATH_COMPONENT
+    + r"[\\/])*[^\s\\/'\"`]+)"
+    r"|(?<![\\])\\\\" + WINDOWS_PATH_COMPONENT + r"[\\/]"
+    r"(?:" + WINDOWS_PATH_COMPONENT + r"[\\/])*[^\s\\/'\"`]+"
     r")"
 )
 SENSITIVE_JSON_KEY = re.compile(
