@@ -797,6 +797,8 @@ class CoordinatorCliTest(unittest.TestCase):
         assignment_path, request_path = self.prepare_run(max_responses=0)
         run = self.root / "resumed-run"
         environment = self.environment(review_scenario="delayed-no-findings")
+        review_started = self.root / "delayed-review-started"
+        environment["AFK_TEST_REVIEW_STARTED_MARKER"] = str(review_started)
         coordinator = subprocess.Popen(
             self.command(request_path, run),
             cwd=ROOT,
@@ -806,6 +808,11 @@ class CoordinatorCliTest(unittest.TestCase):
             text=True,
         )
         self.wait_for_active(run, "review")
+        # The active checkpoint is durable before the component process starts.
+        # Synchronize with the delayed fixture so killing the coordinator tests
+        # consumption of a result sealed by an already-running component rather
+        # than racing process launch under a loaded validation run.
+        self.wait_for_file(review_started)
         os.kill(coordinator.pid, signal.SIGKILL)
         coordinator.wait(timeout=5)
         self.wait_for_file(run / "04-review" / "output.json")

@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import signal
 import subprocess
 import sys
@@ -73,6 +74,9 @@ elif scenario in (
     "validation-evidence",
 ):
     if scenario == "delayed-no-findings":
+        marker = os.environ.get("AFK_TEST_REVIEW_STARTED_MARKER")
+        if marker is not None:
+            Path(marker).write_text("started")
         time.sleep(0.2)
     if scenario in ("sibling-owned-migration", "validation-evidence"):
         prompt = task_prompt()
