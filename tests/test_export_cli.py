@@ -940,6 +940,67 @@ class ExportCliTests(unittest.TestCase):
             ):
                 afk_export.public_artifacts({"redactions": set()})
 
+    def test_v2_admits_only_receipt_bound_inference_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            (inference / "unclaimed-private.txt").write_text("do not publish")
+
+            destination = root / "bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            artifacts = {item["source"]["path"]: item for item in record["artifacts"]}
+            prefix = "coordinator/04-review/inference/"
+            self.assertIn(prefix + "receipt.json", artifacts)
+            self.assertIn(prefix + "prompt.json", artifacts)
+            self.assertIn(prefix + "attempts/1/response.json", artifacts)
+            self.assertNotIn(prefix + "unclaimed-private.txt", artifacts)
+            prompt = artifacts[prefix + "prompt.json"]
+            private = (inference / "prompt.json").read_bytes()
+            self.assertEqual(prompt["source"]["bytes"], len(private))
+            self.assertEqual(
+                prompt["source"]["sha256"], hashlib.sha256(private).hexdigest()
+            )
+
+    def test_v2_rejects_inference_artifact_changed_after_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            (inference / "prompt.json").write_text('{"changed":true}')
+
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_inference_receipt_for_another_private_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["evidence_directory"] = str(root / "other-inference")
+            invocation_path.write_text(json.dumps(invocation))
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt))
+
+            result = self.export_v2(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_v2_malformed_preparation_is_a_normal_invalid_run_rejection(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1641,6 +1702,93 @@ class ExportCliTests(unittest.TestCase):
         (invocation / "output.json").write_text(json.dumps(preflight_output))
         (invocation / "events.jsonl").write_text('{"type":"message_end"}\n')
         (invocation / "stderr.log").write_text("")
+
+    def add_inference_receipt(self, inference):
+        inference.mkdir()
+        (inference / "attempts/1").mkdir(parents=True)
+        adapter = {
+            "kind": "pi",
+            "family": "pi",
+            "contract_version": 1,
+            "identity": "pi-v1",
+            "model": "gpt-test",
+            "thinking": "medium",
+            "capabilities": ["NO_TOOLS", "READ_ONLY", "WRITE"],
+        }
+        invocation = {
+            "schema_version": 1,
+            "purpose": "review",
+            "prompt": {"system": "read only"},
+            "requested_capability": "READ_ONLY",
+            "execution_root": str(inference.parents[3] / "workspace"),
+            "evidence_directory": str(inference.resolve()),
+            "timeout_seconds": 60,
+            "adapter": adapter,
+        }
+        values = {
+            "invocation.json": invocation,
+            "prompt.json": {"system": "read only", "task": "inspect"},
+            "adapter-contract.json": adapter,
+            "attempts/1/response.json": {"answer": "ok"},
+        }
+        for relative, value in values.items():
+            (inference / relative).write_text(json.dumps(value) + "\n")
+        (inference / "attempts/1/events.jsonl").write_text('{"type":"agent_end"}\n')
+        (inference / "attempts/1/stderr.log").write_text("warning\n")
+        sha = lambda relative: hashlib.sha256(
+            (inference / relative).read_bytes()
+        ).hexdigest()
+        receipt = {
+            "schema_version": 1,
+            "identity": {
+                "runtime": "afk-inference-v1",
+                "adapter": "pi-v1",
+                "adapter_family": "pi",
+                "adapter_contract_version": 1,
+                "model": "gpt-test",
+                "thinking": "medium",
+            },
+            "hashes": {
+                "invocation_sha256": sha("invocation.json"),
+                "prompt_sha256": sha("prompt.json"),
+                "task_prompt_sha256": None,
+                "adapter_contract_sha256": sha("adapter-contract.json"),
+            },
+            "policy": {
+                "requested_capability": "READ_ONLY",
+                "system_instructions": "read only",
+                "max_attempts": 1,
+                "single_deadline": True,
+                "validator_trust": "trusted_in_process",
+            },
+            "timing": {
+                "started_at": "2026-08-19T00:00:00Z",
+                "ended_at": "2026-08-19T00:00:01Z",
+                "timeout_seconds": 60,
+                "duration_seconds": 1,
+            },
+            "attempt_count": 1,
+            "attempts": [
+                {
+                    "attempt_number": 1,
+                    "duration_seconds": 1,
+                    "protocol": {"status": "accepted"},
+                    "artifacts": {
+                        "events": "attempts/1/events.jsonl",
+                        "events_sha256": sha("attempts/1/events.jsonl"),
+                        "stderr": "attempts/1/stderr.log",
+                        "stderr_sha256": sha("attempts/1/stderr.log"),
+                        "response": "attempts/1/response.json",
+                        "response_sha256": sha("attempts/1/response.json"),
+                    },
+                }
+            ],
+            "protocol": {"status": "accepted"},
+            "validation": {"status": "accepted"},
+            "terminal_response": {"answer": "ok"},
+            "outcome": "succeeded",
+        }
+        (inference / "receipt.json").write_text(json.dumps(receipt) + "\n")
 
     def sealed_preparer(self, root):
         source = root / "source-run"

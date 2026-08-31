@@ -99,6 +99,14 @@ CREDENTIAL_OPTION_VALUE = re.compile(
 )
 REDACTED_SECRET = "[redacted-secret]"
 PUBLIC_PREFLIGHT_CLASSIFIER_KEY = "[sanitized-preflight-classifier-key]"
+INFERENCE_JSON_KINDS = {
+    "inference_receipt",
+    "inference_invocation",
+    "inference_prompt",
+    "inference_contract",
+    "inference_response",
+}
+SHA256_TEXT = re.compile(r"[0-9a-f]{64}\Z")
 
 
 class ExportError(Exception):
@@ -1125,6 +1133,7 @@ def artifact_candidates(observed):
         validated_preflight_classifier_key=None,
         validated_preflight_output_raw=None,
         validated_raw=None,
+        expected_sha256=None,
     ):
         if not unsafe_path and not safe_relative(relative):
             return
@@ -1159,6 +1168,7 @@ def artifact_candidates(observed):
                 ),
                 "validated_preflight_output_raw": validated_preflight_output_raw,
                 "validated_raw": validated_raw,
+                "expected_sha256": expected_sha256,
             }
         )
 
@@ -1216,6 +1226,14 @@ def artifact_candidates(observed):
             0,
             validated_raw=observed["acceptance_routing"]["policy_raw"],
         )
+        inference_relative = "planner/inference"
+        if (root / inference_relative).exists() or (
+            root / inference_relative
+        ).is_symlink():
+            for item in receipt_bound_inference_artifacts(
+                root, inference_relative, "acceptance_planning"
+            ):
+                add(**item)
     if observed["state"] is not None:
         coordinator_prefix = (
             ""
@@ -1248,6 +1266,18 @@ def artifact_candidates(observed):
             add(f"{base}/input.json", scope, "json", "application/json", 0)
             add(f"{base}/output.json", scope, "json", "application/json", 0)
             output = read_json(root / base / "output.json")
+            inference_relative = f"{base}/inference"
+            if (root / inference_relative).exists() or (
+                root / inference_relative
+            ).is_symlink():
+                inference_purpose = {
+                    "assessment": "finding_assessment",
+                    "response": "feedback_response",
+                }.get(entry["component"], entry["component"])
+                for item in receipt_bound_inference_artifacts(
+                    root, inference_relative, inference_purpose
+                ):
+                    add(**item)
             for kind, filename in sorted(output.get("artifacts", {}).items()):
                 if kind not in ARTIFACTS[entry["component"]] or not isinstance(
                     filename, str
@@ -1318,10 +1348,171 @@ def artifact_candidates(observed):
     return result
 
 
+def receipt_bound_inference_artifacts(root, relative, purpose):
+    """Authenticate one runtime evidence directory and return its closed catalog."""
+    directory = root / relative
+    try:
+        require_directory(directory)
+        receipt_raw = read_bytes(directory / "receipt.json", MAX_JSON_BYTES)
+        receipt = json.loads(decode_text(receipt_raw))
+        invocation_raw = read_bytes(directory / "invocation.json", MAX_JSON_BYTES)
+        invocation = json.loads(decode_text(invocation_raw))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ExportError("invalid Inference Receipt evidence") from error
+
+    if not isinstance(receipt, dict) or not isinstance(invocation, dict):
+        raise ExportError("invalid Inference Receipt evidence")
+    identity = receipt.get("identity")
+    hashes = receipt.get("hashes")
+    adapter = invocation.get("adapter")
+    if (
+        receipt.get("schema_version") != 1
+        or not isinstance(identity, dict)
+        or identity.get("runtime") != "afk-inference-v1"
+        or identity.get("adapter") != "pi-v1"
+        or identity.get("adapter_family") != "pi"
+        or identity.get("adapter_contract_version") != 1
+        or not isinstance(adapter, dict)
+        or adapter.get("kind") != "pi"
+        or adapter.get("family") != "pi"
+        or adapter.get("contract_version") != 1
+        or adapter.get("identity") != identity.get("adapter")
+        or adapter.get("model") != identity.get("model")
+        or adapter.get("thinking") != identity.get("thinking")
+        or invocation.get("schema_version") != 1
+        or invocation.get("purpose") != purpose
+        or invocation.get("evidence_directory") != str(directory.resolve())
+        or not isinstance(hashes, dict)
+    ):
+        raise ExportError("Inference Receipt private source identity disagrees")
+
+    catalog = []
+
+    def bind(path, claimed_hash, kind, media_type, priority):
+        if claimed_hash is None:
+            return
+        if not isinstance(claimed_hash, str) or not SHA256_TEXT.fullmatch(claimed_hash):
+            raise ExportError("invalid Inference Receipt artifact hash")
+        if not safe_relative(path) or not path.startswith(relative + "/"):
+            raise ExportError("invalid Inference Receipt artifact identity")
+        try:
+            raw = read_bytes(root / path, V2_MAX_ARTIFACT_BYTES)
+        except (OSError, ExportError) as error:
+            raise ExportError("Inference Receipt artifact is unavailable") from error
+        if digest(raw) != claimed_hash:
+            raise ExportError("Inference Receipt artifact hash disagrees")
+        catalog.append(
+            {
+                "relative": path,
+                "scope": f"inference:{purpose}",
+                "kind": kind,
+                "media_type": media_type,
+                "priority": priority,
+                "validated_raw": raw,
+                "expected_sha256": claimed_hash,
+            }
+        )
+
+    bind(
+        f"{relative}/invocation.json",
+        hashes.get("invocation_sha256"),
+        "inference_invocation",
+        "application/json",
+        0,
+    )
+    bind(
+        f"{relative}/prompt.json",
+        hashes.get("prompt_sha256"),
+        "inference_prompt",
+        "application/json",
+        0,
+    )
+    contract_name = "adapter-contract.json"
+    contract_hash = hashes.get("adapter_contract_sha256")
+    if "adapter_script_sha256" in hashes:
+        raise ExportError("Inference Receipt names a non-production adapter")
+    bind(
+        f"{relative}/{contract_name}",
+        contract_hash,
+        "inference_contract",
+        "application/json",
+        0,
+    )
+    if hashes.get("task_prompt_sha256") is not None:
+        bind(
+            f"{relative}/task-prompt.txt",
+            hashes["task_prompt_sha256"],
+            "inference_prompt_text",
+            "text/plain; charset=utf-8",
+            0,
+        )
+
+    attempts = receipt.get("attempts")
+    if not isinstance(attempts, list) or receipt.get("attempt_count") != len(attempts):
+        raise ExportError("invalid Inference Receipt attempt catalog")
+    for index, attempt in enumerate(attempts, 1):
+        if not isinstance(attempt, dict):
+            raise ExportError("invalid Inference Receipt attempt identity")
+        artifacts = attempt.get("artifacts")
+        if attempt.get("attempt_number") != index or not isinstance(artifacts, dict):
+            raise ExportError("invalid Inference Receipt attempt identity")
+        expected = {
+            "events": (
+                f"attempts/{index}/events.jsonl",
+                "inference_events",
+                "application/x-ndjson",
+                2,
+            ),
+            "stderr": (
+                f"attempts/{index}/stderr.log",
+                "inference_log",
+                "text/plain; charset=utf-8",
+                1,
+            ),
+            "response": (
+                f"attempts/{index}/response.json",
+                "inference_response",
+                "application/json",
+                0,
+            ),
+        }
+        for name, (expected_path, kind, media, priority) in expected.items():
+            path = artifacts.get(name)
+            claimed = artifacts.get(f"{name}_sha256")
+            if path is None and claimed is None:
+                continue
+            if path != expected_path:
+                raise ExportError(
+                    "Inference Receipt attempt artifact identity disagrees"
+                )
+            bind(f"{relative}/{path}", claimed, kind, media, priority)
+
+    # The receipt is the authority for the other entries. Retain its exact
+    # private identity even though a receipt cannot recursively hash itself.
+    catalog.append(
+        {
+            "relative": f"{relative}/receipt.json",
+            "scope": f"inference:{purpose}",
+            "kind": "inference_receipt",
+            "media_type": "application/json",
+            "priority": 0,
+            "validated_raw": receipt_raw,
+            "expected_sha256": digest(receipt_raw),
+        }
+    )
+    return catalog
+
+
 def derive_public_artifact(candidate, redactions):
     source = candidate["source"]
+    source_identity = {"path": source}
+    if candidate.get("expected_sha256") is not None:
+        source_identity.update(
+            bytes=len(candidate["validated_raw"]),
+            sha256=candidate["expected_sha256"],
+        )
     base = {
-        "source": {"path": source},
+        "source": source_identity,
         "scope": candidate["scope"],
         "kind": candidate["kind"],
         "media_type": candidate["media_type"],
@@ -1378,7 +1569,7 @@ def derive_public_artifact(candidate, redactions):
                 raise ExportError("validated related-work snapshot changed")
             public = raw
             changed = False
-        elif candidate["kind"] in {"json", "planner", "policy"}:
+        elif candidate["kind"] in {"json", "planner", "policy"} | INFERENCE_JSON_KINDS:
             value = json.loads(text)
             changed = sanitize_validated_preflight_classifier_key(
                 value, candidate.get("validated_preflight_classifier_key")
@@ -1386,7 +1577,7 @@ def derive_public_artifact(candidate, redactions):
             value, generally_changed = sanitize_json_value(value, redactions)
             changed = changed or generally_changed
             public = encode_json(value)
-        elif candidate["kind"] == "events":
+        elif candidate["kind"] in {"events", "inference_events"}:
             lines = []
             changed = False
             for line in text.splitlines():

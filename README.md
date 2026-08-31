@@ -604,7 +604,14 @@ published. Each descriptor identifies a safe Run-relative source, scope, kind,
 media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
 UTF-8 logs, and diffs are written only as deterministic derived copies below
-`artifacts/`; private source files are never rewritten. Known host paths are
+`artifacts/`; private source files are never rewritten. Inference Runtime
+artifacts are admitted from a closed Receipt catalog only. The exporter verifies
+the `afk-inference-v1`/Pi adapter identity, the canonical private evidence
+directory recorded by the invocation, runtime-owned attempt paths, and every
+non-null Receipt SHA-256 before deriving bytes. Unclaimed files are ignored and
+an identity or hash disagreement rejects the Run. Inference descriptors retain
+the verified private byte count and hash separately from their derived public
+byte count and hash. Known host paths are
 redacted, as are recognized credential forms. In a schema-validated Preflight
 output, the classifier `key` field alone is replaced with an explicit public
 marker; the remaining Preflight fields and the private source record are
