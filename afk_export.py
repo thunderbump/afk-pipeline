@@ -96,9 +96,10 @@ HOST_PATH = re.compile(
     r")"
 )
 SENSITIVE_JSON_KEY = re.compile(
-    r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)|"
-    r"(?:api|private|ssh|encryption|signing)[_-]?key|auth(?:orization)?|"
-    r"credentials?|cookie|session[_-]?id|aws[_-]?secret[_-]?access[_-]?key)$"
+    r"(?i)^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|passphrase|token|secret)"
+    r"(?:[_-]?key)?|(?:[a-z0-9]+[_-])*(?:api|private|ssh|encryption|signing)"
+    r"[_-]?key|auth(?:orization)?|credentials?|cookie|session[_-]?id|"
+    r"aws[_-]?secret[_-]?access[_-]?key)$"
 )
 JSON_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 CREDENTIAL_OPTION = re.compile(

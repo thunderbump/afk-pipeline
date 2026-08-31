@@ -1040,6 +1040,9 @@ class ExportCliTests(unittest.TestCase):
                 "token": "opaque-value",
                 "accessToken": "ordinary-access-value",
                 "clientSecret": "ordinary-client-value",
+                "secretKey": "ordinary-secret-key-value",
+                "clientSecretKey": "ordinary-client-secret-key-value",
+                "clientApiKey": "ordinary-client-api-key-value",
                 "unix": "/data/private/file",
                 "windows": r"C:\Users\operator\private.txt",
             }
@@ -1087,6 +1090,9 @@ class ExportCliTests(unittest.TestCase):
                 "opaque-value",
                 "ordinary-access-value",
                 "ordinary-client-value",
+                "ordinary-secret-key-value",
+                "ordinary-client-secret-key-value",
+                "ordinary-client-api-key-value",
                 "ordinary-api-value",
                 "ordinary-private-value",
                 "ordinary-session-value",
@@ -1096,7 +1102,7 @@ class ExportCliTests(unittest.TestCase):
                 r"C:\Users\operator\private.txt",
             ):
                 self.assertNotIn(private, rendered)
-            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 8)
+            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 11)
             self.assertIn("[redacted-path]", rendered)
 
     def test_v2_uses_validation_attempt_identity_for_duplicate_responses(self):
