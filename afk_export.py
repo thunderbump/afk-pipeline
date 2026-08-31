@@ -100,6 +100,7 @@ SENSITIVE_JSON_KEY = re.compile(
     r"(?:api|private|ssh|encryption|signing)[_-]?key|auth(?:orization)?|"
     r"credentials?|cookie|session[_-]?id|aws[_-]?secret[_-]?access[_-]?key)$"
 )
+JSON_CAMEL_BOUNDARY = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 CREDENTIAL_OPTION = re.compile(
     r"(?i)^--(?:access[-_]?token|api[-_]?key|client[-_]?secret|password|secret|token)$"
 )
@@ -1773,6 +1774,23 @@ def _receipt_bound_inference_artifacts(
             )
     elif terminal_value is not None:
         raise ExportError("Inference Receipt terminal response lacks attempt identity")
+    else:
+        # A null terminal value can mean either no response or an accepted JSON
+        # null response. Accepted protocol/validation state must therefore carry
+        # an attempt number rather than silently degrading to an unavailable view.
+        accepted_without_identity = any(
+            isinstance(record, dict) and record.get("status") == "accepted"
+            for record in (
+                receipt.get("protocol"),
+                validation,
+                *(attempt.get("protocol") for attempt in attempts),
+                *(attempt.get("validation") for attempt in attempts),
+            )
+        )
+        if accepted_without_identity:
+            raise ExportError(
+                "Inference Receipt terminal response lacks attempt identity"
+            )
 
     for item in response_records:
         view = encode_json(
@@ -2001,6 +2019,12 @@ def nondownloadable_descriptor(base, state, reason):
     }
 
 
+def sensitive_json_key(value):
+    """Recognize sensitive compound keys in separated and CamelCase forms."""
+    separated = JSON_CAMEL_BOUNDARY.sub("_", value)
+    return bool(SENSITIVE_JSON_KEY.fullmatch(separated))
+
+
 def sanitize_json_value(value, redactions):
     if isinstance(value, str):
         option = CREDENTIAL_OPTION_VALUE.fullmatch(value)
@@ -2028,7 +2052,7 @@ def sanitize_json_value(value, redactions):
             if not isinstance(key, str):
                 raise ExportError("JSON object key is not text")
             public_key = sanitize_public_text(key, redactions)
-            if SENSITIVE_JSON_KEY.fullmatch(key) and value[key] is not None:
+            if sensitive_json_key(key) and value[key] is not None:
                 public = REDACTED_SECRET
                 item_changed = value[key] != REDACTED_SECRET
             else:

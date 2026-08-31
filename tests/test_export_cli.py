@@ -1038,6 +1038,8 @@ class ExportCliTests(unittest.TestCase):
             prompt["untrusted_task_data"] = {
                 "password": "hunter2",
                 "token": "opaque-value",
+                "accessToken": "ordinary-access-value",
+                "clientSecret": "ordinary-client-value",
                 "unix": "/data/private/file",
                 "windows": r"C:\Users\operator\private.txt",
             }
@@ -1049,8 +1051,10 @@ class ExportCliTests(unittest.TestCase):
 
             response_path = inference / "attempts/1/response.json"
             response = {
-                "api_key": "ordinary-looking-value",
-                "nested": {"client_secret": "small", "path": "/workspace/other-run"},
+                "apiKey": "ordinary-api-value",
+                "privateKey": "ordinary-private-value",
+                "sessionId": "ordinary-session-value",
+                "nested": {"clientSecret": "small", "path": "/workspace/other-run"},
             }
             response_path.write_text(json.dumps(response) + "\n")
             receipt_path = inference / "receipt.json"
@@ -1081,14 +1085,18 @@ class ExportCliTests(unittest.TestCase):
             for private in (
                 "hunter2",
                 "opaque-value",
-                "ordinary-looking-value",
+                "ordinary-access-value",
+                "ordinary-client-value",
+                "ordinary-api-value",
+                "ordinary-private-value",
+                "ordinary-session-value",
                 "small",
                 "/data/private/file",
                 "/workspace/other-run",
                 r"C:\Users\operator\private.txt",
             ):
                 self.assertNotIn(private, rendered)
-            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 4)
+            self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 8)
             self.assertIn("[redacted-path]", rendered)
 
     def test_v2_uses_validation_attempt_identity_for_duplicate_responses(self):
@@ -1169,6 +1177,31 @@ class ExportCliTests(unittest.TestCase):
             view = json.loads((destination / response["path"]).read_text())
             self.assertTrue(view["available"])
             self.assertFalse(view["terminal"])
+
+    def test_v2_rejects_accepted_terminal_state_without_attempt_identity(self):
+        for accepted_source in ("validation", "protocol"):
+            with (
+                self.subTest(accepted_source=accepted_source),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                inference = source / "coordinator/04-review/inference"
+                self.add_inference_receipt(inference)
+                receipt_path = inference / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                receipt["terminal_response"] = None
+                receipt["validation"] = {"status": "not_started"}
+                receipt["protocol"] = {"status": "malformed"}
+                receipt["attempts"][0].pop("validation")
+                receipt["attempts"][0]["protocol"] = {"status": "malformed"}
+                receipt[accepted_source] = {"status": "accepted"}
+                receipt_path.write_text(json.dumps(receipt) + "\n")
+
+                result = self.export_v2(source, root / "bundle")
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_v2_derives_rejected_attempt_and_redacts_unsafe_public_view_content(self):
         with tempfile.TemporaryDirectory() as temporary:
