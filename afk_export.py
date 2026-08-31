@@ -1436,14 +1436,30 @@ def _receipt_bound_inference_artifacts(
         invocation_raw = read_bytes_at(
             directory_descriptor, "invocation.json", MAX_JSON_BYTES
         )
-        invocation = json.loads(decode_text(invocation_raw))
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ExportError("invalid Inference Receipt evidence") from error
 
-    if not isinstance(receipt, dict) or not isinstance(invocation, dict):
+    if not isinstance(receipt, dict):
         raise ExportError("invalid Inference Receipt evidence")
     identity = receipt.get("identity")
     hashes = receipt.get("hashes")
+    if not isinstance(hashes, dict):
+        raise ExportError("Inference Receipt private source identity disagrees")
+    invocation_hash = hashes.get("invocation_sha256")
+    if invocation_hash is None:
+        raise ExportError("Inference Receipt omits its invocation hash")
+    if not isinstance(invocation_hash, str) or not SHA256_TEXT.fullmatch(
+        invocation_hash
+    ):
+        raise ExportError("invalid Inference Receipt artifact hash")
+    if digest(invocation_raw) != invocation_hash:
+        raise ExportError("Inference Receipt artifact hash disagrees")
+    try:
+        invocation = json.loads(decode_text(invocation_raw))
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise ExportError("invalid Inference Receipt evidence") from error
+    if not isinstance(invocation, dict):
+        raise ExportError("invalid Inference Receipt evidence")
     adapter = invocation.get("adapter")
     model = identity.get("model") if isinstance(identity, dict) else None
     thinking = identity.get("thinking") if isinstance(identity, dict) else None
@@ -1481,7 +1497,6 @@ def _receipt_bound_inference_artifacts(
         or invocation.get("schema_version") != 1
         or invocation.get("purpose") != purpose
         or invocation.get("evidence_directory") != str(root.resolve() / relative)
-        or not isinstance(hashes, dict)
     ):
         raise ExportError("Inference Receipt private source identity disagrees")
 

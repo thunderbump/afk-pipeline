@@ -979,6 +979,29 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1, result.stderr)
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_v2_rejects_receipt_without_invocation_hash_binding(self):
+        for case in ("missing", "null"):
+            with (
+                self.subTest(case=case),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                inference = source / "coordinator/04-review/inference"
+                self.add_inference_receipt(inference)
+                receipt_path = inference / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                if case == "missing":
+                    receipt["hashes"].pop("invocation_sha256")
+                else:
+                    receipt["hashes"]["invocation_sha256"] = None
+                receipt_path.write_text(json.dumps(receipt))
+
+                result = self.export_v2(source, root / "bundle")
+
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_v2_rejects_symlinked_inference_artifact_directories(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
