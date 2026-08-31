@@ -1,3 +1,4 @@
+import base64
 import json
 import signal
 import subprocess
@@ -36,7 +37,12 @@ elif scenario in ("address", "capture-prompt", "delayed-address"):
     if scenario == "delayed-address":
         time.sleep(0.2)
     elif scenario == "capture-prompt":
-        Path(sys.argv[2]).write_text(sys.argv[-1])
+        encoded = (
+            sys.argv[-1]
+            .split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[1]
+            .splitlines()[0]
+        )
+        Path(sys.argv[2]).write_text(json.dumps(json.loads(base64.b64decode(encoded))))
     assessment = {
         "summary": "The finding should be addressed.",
         "decisions": [

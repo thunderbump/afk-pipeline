@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from afk_review.contract import REVIEW_AUDIT
+from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_assessment_agent.py"
@@ -147,6 +149,10 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertEqual(output["artifacts"]["events"], "events.jsonl")
         self.assertTrue((result / "events.jsonl").is_file())
         self.assertEqual((result / "stderr.log").read_text(), "")
+        receipt = json.loads((result / "inference/receipt.json").read_text())
+        invocation = json.loads((result / "inference/invocation.json").read_text())
+        self.assertEqual(receipt["policy"]["requested_capability"], "READ_ONLY")
+        self.assertEqual(invocation["execution_root"], str(self.workspace))
         self.assertFalse((result / "output.json.tmp").exists())
 
     def test_completed_shapes_cover_no_findings_dismiss_and_mixed(self):
@@ -301,8 +307,7 @@ class AssessmentCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((result / "output.json").read_text())
-        self.assertIsNone(output["process"]["exit_code"])
-        self.assertIn("missing-agent", output["process"]["error"])
+        self.assertNotEqual(output["process"]["exit_code"], 0)
         self.assertIsNone(output["agent"])
 
         result, completed = self.run_assessment(
@@ -426,9 +431,16 @@ class AssessmentCliTest(unittest.TestCase):
         self.write_json(input_path, assessment_input)
         result = self.root / result_name
         environment = os.environ.copy()
-        environment["AFK_ASSESS_AGENT_COMMAND"] = json.dumps(
-            command or [sys.executable, str(FIXTURE), scenario]
-        )
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir(exist_ok=True)
+        if command is None:
+            install_pi(bin_directory, FIXTURE, scenario)
+        else:
+            executable = bin_directory / "pi"
+            rendered = " ".join(shlex.quote(item) for item in command)
+            executable.write_text(f'#!/bin/sh\nexec {rendered} "$@"\n')
+            executable.chmod(0o755)
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         return input_path, result, environment
 
     def invoke(self, input_path, result, environment):

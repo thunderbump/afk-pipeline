@@ -1,3 +1,4 @@
+import base64
 import json
 import signal
 import subprocess
@@ -63,20 +64,16 @@ elif scenario in ("no-findings", "delayed-no-findings", "sibling-owned-migration
     if scenario == "delayed-no-findings":
         time.sleep(0.2)
     if scenario == "sibling-owned-migration":
-        prompt = sys.argv[-1]
-        if "Caller migration is owned by this sibling." in prompt:
-            raise SystemExit("snapshot content was injected into the prompt")
-        reference_line = next(
-            line
-            for line in prompt.splitlines()
-            if line.startswith("Frozen related-work context: ")
+        encoded = (
+            sys.argv[-1]
+            .split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[1]
+            .splitlines()[0]
         )
-        snapshot = Path(reference_line.split(": ", 1)[1].split(" (sha256 ", 1)[0])
-        related = [json.loads(line) for line in snapshot.read_text().splitlines()]
+        task = json.loads(base64.b64decode(encoded))
         if not any(
             row.get("relationship") == "sibling"
             and row.get("title") == "Migrate callers"
-            for row in related
+            for row in task["related_work"]
         ):
             raise SystemExit("caller migration was not sibling-owned")
     review = {

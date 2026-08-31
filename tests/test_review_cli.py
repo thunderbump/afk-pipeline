@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -9,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from afk_related_work import build_snapshot, reference
+from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
@@ -163,6 +165,10 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIn("+after", diff)
         self.assertTrue((result / "events.jsonl").is_file())
         self.assertEqual((result / "stderr.log").read_text(), "")
+        receipt = json.loads((result / "inference/receipt.json").read_text())
+        invocation = json.loads((result / "inference/invocation.json").read_text())
+        self.assertEqual(receipt["policy"]["requested_capability"], "READ_ONLY")
+        self.assertEqual(invocation["execution_root"], str(self.workspace))
         self.assertFalse((result / "output.json.tmp").exists())
 
     def test_feedback_response_change_uses_the_same_review_interface(self):
@@ -283,7 +289,13 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
-        self.assertEqual(output["agent"]["status"], "error")
+        self.assertIsNone(output["agent"])
+        self.assertEqual(
+            json.loads((result / "inference/receipt.json").read_text())["protocol"][
+                "status"
+            ],
+            "protocol_malformed",
+        )
 
         result, completed = self.run_review("damage-git", result_name="damaged-git")
 
@@ -301,10 +313,9 @@ class ReviewCliTest(unittest.TestCase):
                 self.assertEqual(completed.returncode, 1, completed.stderr)
                 output = json.loads((result / "output.json").read_text())
                 self.assertEqual(output["outcome"], "failed")
-                self.assertEqual(
-                    output["agent"],
-                    {"status": "error", "error": "invalid agent event JSON"},
-                )
+                self.assertIsNone(output["agent"])
+                receipt = json.loads((result / "inference/receipt.json").read_text())
+                self.assertEqual(receipt["protocol"]["status"], "protocol_malformed")
                 self.assertIsNone(output["review"])
                 self.assertTrue(output["repository"]["unchanged"])
                 self.assertFalse((result / "output.json.tmp").exists())
@@ -360,8 +371,7 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stderr)
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
-        self.assertIsNone(output["process"]["exit_code"])
-        self.assertIn("missing-agent", output["process"]["error"])
+        self.assertNotEqual(output["process"]["exit_code"], 0)
         self.assertIsNone(output["agent"])
 
     def test_interrupt_terminates_the_agent_process_group_and_seals_output(self):
@@ -582,9 +592,16 @@ class ReviewCliTest(unittest.TestCase):
         self.write_json(input_path, review)
         result = self.root / result_name
         environment = os.environ.copy()
-        environment["AFK_REVIEW_AGENT_COMMAND"] = json.dumps(
-            command or [sys.executable, str(FIXTURE), scenario, *(extra_args or [])]
-        )
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir(exist_ok=True)
+        if command is None:
+            install_pi(bin_directory, FIXTURE, scenario, *(extra_args or []))
+        else:
+            executable = bin_directory / "pi"
+            rendered = " ".join(shlex.quote(item) for item in command)
+            executable.write_text(f'#!/bin/sh\nexec {rendered} "$@"\n')
+            executable.chmod(0o755)
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         return input_path, result, environment
 
     def invoke(self, input_path, result, environment):

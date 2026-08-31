@@ -1,5 +1,6 @@
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -15,6 +16,7 @@ ATTEMPT_FIXTURE = ROOT / "tests" / "fixture_agent.py"
 REVIEW_FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
 ASSESSMENT_FIXTURE = ROOT / "tests" / "fixture_assessment_agent.py"
 RESPONSE_FIXTURE = ROOT / "tests" / "fixture_response_agent.py"
+INFERENCE_FIXTURE = ROOT / "tests" / "inference_coordinate_fixture.py"
 
 
 class PublicCoordinatorCliTest(unittest.TestCase):
@@ -964,7 +966,11 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 1, completed.stderr)
         review = json.loads((run / "04-review" / "output.json").read_text())
         self.assertEqual(review["outcome"], "failed")
-        self.assertEqual(review["agent"]["status"], "error")
+        self.assertIsNone(review["agent"])
+        receipt = json.loads(
+            (run / "04-review" / "inference" / "receipt.json").read_text()
+        )
+        self.assertEqual(receipt["protocol"]["status"], "protocol_malformed")
         output = json.loads((run / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
         self.assertEqual(output["failed_component"], "review")
@@ -1567,12 +1573,21 @@ class CoordinatorCliTest(unittest.TestCase):
         response_scenario="commit",
     ):
         environment = os.environ.copy()
-        environment["AFK_REVIEW_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(REVIEW_FIXTURE), review_scenario]
+        bin_directory = self.root / "inference-bin"
+        bin_directory.mkdir(exist_ok=True)
+        command = " ".join(
+            shlex.quote(item)
+            for item in (
+                sys.executable,
+                str(INFERENCE_FIXTURE),
+                review_scenario,
+                assessment_scenario,
+            )
         )
-        environment["AFK_ASSESS_AGENT_COMMAND"] = json.dumps(
-            [sys.executable, str(ASSESSMENT_FIXTURE), assessment_scenario]
-        )
+        pi = bin_directory / "pi"
+        pi.write_text(f'#!/bin/sh\nexec {command} "$@"\n')
+        pi.chmod(0o755)
+        environment["PATH"] = f"{bin_directory}:{environment['PATH']}"
         environment["AFK_RESPOND_AGENT_COMMAND"] = json.dumps(
             [sys.executable, str(RESPONSE_FIXTURE), response_scenario]
         )

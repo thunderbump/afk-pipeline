@@ -1,9 +1,6 @@
-import os
 import unittest
 from pathlib import Path
-from unittest import mock
 
-from afk_agent import read_only_pi_command
 from afk_config import (
     INFERENCE_ROLE_DEFAULTS,
     effective_inference_roles,
@@ -57,22 +54,15 @@ class InferenceRoleConfigurationTest(unittest.TestCase):
                 }
             )
 
-    def test_exact_argv_environment_override_precedes_selected_values(self):
-        with mock.patch.dict(
-            os.environ, {"AFK_REVIEW_AGENT_COMMAND": '["fixture", "--exact"]'}
-        ):
-            command = read_only_pi_command(
-                "AFK_REVIEW_AGENT_COMMAND", "prompt", "terra", "high"
-            )
-        self.assertEqual(command, ["fixture", "--exact"])
-
-    def test_selected_values_are_in_default_pi_argv(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            command = read_only_pi_command(
-                "AFK_REVIEW_AGENT_COMMAND", "prompt", "terra", "high"
-            )
-        self.assertEqual(command[command.index("--model") + 1], "terra")
-        self.assertEqual(command[command.index("--thinking") + 1], "high")
+    def test_read_only_roles_do_not_construct_provider_processes(self):
+        root = Path(__file__).parents[1]
+        for role in ("afk_review", "afk_assess"):
+            source = (root / role / "__main__.py").read_text()
+            self.assertIn("requested_capability=Capability.READ_ONLY", source)
+            self.assertIn("execution_root=workspace", source)
+            self.assertNotIn("read_only_pi_command", source)
+            self.assertNotIn("AFK_REVIEW_AGENT_COMMAND", source)
+            self.assertNotIn("AFK_ASSESS_AGENT_COMMAND", source)
 
 
 class FrozenCoordinatorRoleTest(unittest.TestCase):
