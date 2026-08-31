@@ -476,7 +476,6 @@ def review_input(request, assignment, state, run_directory):
     return stage_input(
         assignment["workspace"],
         request["agent_timeout_seconds"],
-        inference=role_inference(request, "review"),
         related_work=request.get("related_work"),
         change_directory=str((run_directory / change).resolve()),
         validation_directory=str((run_directory / validation).resolve()),
@@ -488,7 +487,6 @@ def assessment_input(request, assignment, state, run_directory):
     return stage_input(
         assignment["workspace"],
         request["agent_timeout_seconds"],
-        inference=role_inference(request, "finding_assessment"),
         related_work=request.get("related_work"),
         review_directory=str((run_directory / review).resolve()),
     )
@@ -512,7 +510,6 @@ def response_input(request, assignment, state, run_directory):
         return stage_input(
             assignment["workspace"],
             request["agent_timeout_seconds"],
-            inference=role_inference(request, "feedback_response"),
             validation_directory=str((run_directory / validation).resolve()),
             source={
                 "kind": kind,
@@ -524,14 +521,8 @@ def response_input(request, assignment, state, run_directory):
     return stage_input(
         assignment["workspace"],
         request["agent_timeout_seconds"],
-        inference=role_inference(request, "feedback_response"),
         assessment_directory=str((run_directory / assessment).resolve()),
     )
-
-
-def role_inference(request, role):
-    roles = request.get("inference_roles")
-    return None if roles is None else roles[role]
 
 
 def stage_input(workspace, timeout, **evidence):

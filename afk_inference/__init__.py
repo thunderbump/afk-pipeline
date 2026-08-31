@@ -9,7 +9,6 @@ from .runtime import (
     ResponseRejected,
     ScriptedResult,
     invoke,
-    invoke_role,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "ResponseRejected",
     "ScriptedResult",
     "invoke",
-    "invoke_role",
 ]

@@ -80,12 +80,11 @@ class ContinuationPublicationTest(unittest.TestCase):
                     (self.coordinator / "output.json").read_bytes(), b"original-output"
                 )
 
-    def test_continuation_uses_frozen_roles_not_mutable_config_roles(self):
+    def test_continuation_loads_current_non_inference_configuration(self):
         before = self.observed("exhausted", [])
         after = self.observed("stop", [self.continuation])
 
-        def load_config(path, *, include_inference_roles=True):
-            self.assertFalse(include_inference_roles)
+        def load_config(path):
             return self.config
 
         with (
@@ -566,7 +565,7 @@ class RunPreparerCliTest(unittest.TestCase):
                         afk_run.policy_terminal(malformed, planner_input, policy_input)
                     )
 
-    def test_null_inference_roles_is_rejected_before_run_creation(self):
+    def test_obsolete_inference_roles_configuration_is_rejected(self):
         config = json.loads(self.config.read_text())
         config["inference_roles"] = None
         self.config.write_text(json.dumps(config))
@@ -574,18 +573,10 @@ class RunPreparerCliTest(unittest.TestCase):
         result = self.invoke("run", self.bead["id"], "--config", str(self.config))
 
         self.assertEqual(result.returncode, 2)
-        self.assertIn("inference_roles contains an invalid role", result.stderr)
+        self.assertIn("configuration", result.stderr)
+        self.assertIn("is malformed", result.stderr)
         self.assertFalse((self.root / "runs").exists())
         self.assertFalse((self.root / "worktrees").exists())
-
-    def test_continuation_config_ignores_changed_inference_roles(self):
-        config = json.loads(self.config.read_text())
-        config["inference_roles"] = None
-        self.config.write_text(json.dumps(config))
-
-        loaded = afk_run.load_config(self.config, include_inference_roles=False)
-
-        self.assertNotIn("inference_roles", loaded)
 
     def test_validation_evidence_is_required_before_run_creation(self):
         config = json.loads(self.config.read_text())

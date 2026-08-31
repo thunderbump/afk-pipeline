@@ -13,7 +13,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from afk_config import effective_inference_roles
 from afk_coordinate.contract import validate_output as validate_coordinator_output
 from afk_plan.contract import validate_catalog, validate_planner_output
 from afk_plan.contract import validate_input as validate_planner_input
@@ -144,7 +143,7 @@ def continue_run(source, additional_responses, config_path, abandon_active=False
         )
         return 2
     try:
-        config = load_config(config_path, include_inference_roles=False)
+        config = load_config(config_path)
         if config.get("publication") is None:
             raise PreparationError("continuation publication is not configured")
         source = source.absolute().resolve(strict=True)
@@ -329,16 +328,11 @@ def run(bead_id, config_path):
                 "timeout_seconds": project["validation"]["timeout_seconds"],
             },
             **config["coordinator"],
-            "inference_roles": {
-                role: config["inference_roles"][role]
-                for role in ("review", "finding_assessment", "feedback_response")
-            },
         }
         planner_request = acceptance_routing_request(
             bead_id,
             bead,
             config["acceptance_routing"],
-            config["inference_roles"]["acceptance_planner"],
         )
         started = timestamp()
         preparation = {
@@ -346,7 +340,6 @@ def run(bead_id, config_path):
             "run": {"id": run_id, "artifact_root": str(artifact)},
             "bead": {"id": bead_id},
             "project": {"slug": project_slug},
-            "inference_roles": config["inference_roles"],
             "related_work": related_work,
             "repository": {
                 "path": str(repository),
@@ -907,7 +900,7 @@ def admission_terminal(stdout, exit_code, expected_identity):
     return None, "admission_protocol"
 
 
-def load_config(path, *, include_inference_roles=True):
+def load_config(path):
     try:
         value = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as error:
@@ -932,7 +925,7 @@ def load_config(path, *, include_inference_roles=True):
         raise PreparationError(
             "configuration attestation is retired; use capability-based outside_help"
         )
-    optional = {"publication", "inference_roles"}
+    optional = {"publication"}
     if (
         not isinstance(value, dict)
         or value.get("schema_version") != 1
@@ -951,19 +944,6 @@ def load_config(path, *, include_inference_roles=True):
         raise PreparationError(
             f"configured central Beads workspace {value['beads_workspace']} is unavailable"
         )
-    if include_inference_roles:
-        try:
-            value["inference_roles"] = (
-                effective_inference_roles(value["inference_roles"])
-                if "inference_roles" in value
-                else effective_inference_roles()
-            )
-        except ValueError as error:
-            raise PreparationError(str(error)) from error
-    else:
-        # Continuation consumes the role settings frozen in Coordinator input.
-        # Later operator edits must not change or block that immutable request.
-        value.pop("inference_roles", None)
     validate_acceptance_routing(value["acceptance_routing"])
     validate_assignment_defaults(value["assignment"])
     validate_coordinator(value["coordinator"])
@@ -1224,7 +1204,7 @@ def safe_bead(bead_id, bead):
     return result
 
 
-def acceptance_routing_request(bead_id, bead, routing, inference=None):
+def acceptance_routing_request(bead_id, bead, routing):
     """Freeze the exact capability catalog and source fields used for admission."""
     try:
         return validate_planner_input(
@@ -1239,7 +1219,6 @@ def acceptance_routing_request(bead_id, bead, routing, inference=None):
                 },
                 "catalog": routing["catalog"],
                 "timeout_seconds": routing["timeout_seconds"],
-                **({"inference": inference} if inference is not None else {}),
             }
         )
     except (TypeError, ValueError) as error:
@@ -1415,13 +1394,8 @@ def fail_preparation(preparation, category, message):
 
 def worker_environment():
     allowed = {"PATH", "HOME", "USER", "LOGNAME", "LANG", "TMPDIR", "TERM", "TZ"}
-    exact = {
-        "AFK_PREFLIGHT_AGENT_COMMAND",
-        "AFK_REVIEW_AGENT_COMMAND",
-        "AFK_ASSESS_AGENT_COMMAND",
-    }
     return {
         name: value
         for name, value in os.environ.items()
-        if name in allowed or name in exact or name.startswith("LC_")
+        if name in allowed or name.startswith("LC_")
     }

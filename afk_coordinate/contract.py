@@ -2,7 +2,6 @@
 
 from pathlib import Path
 
-from afk_config import validate_inference_setting
 from afk_related_work import validate_reference
 
 # These are the topology facts needed to prove that terminal history could have
@@ -56,8 +55,6 @@ def validate_request(value):
         "agent_timeout_seconds",
         "max_responses",
     }
-    if isinstance(value, dict) and "inference_roles" in value:
-        expected.add("inference_roles")
     if isinstance(value, dict) and "related_work" in value:
         expected.add("related_work")
     if not isinstance(value, dict) or value.get("schema_version") != 1:
@@ -84,13 +81,6 @@ def validate_request(value):
     positive_integer(value["agent_timeout_seconds"], "agent timeout")
     if "related_work" in value:
         validate_reference(value["related_work"])
-    roles = value.get("inference_roles")
-    if roles is not None:
-        expected_roles = {"review", "finding_assessment", "feedback_response"}
-        if not isinstance(roles, dict) or set(roles) != expected_roles:
-            raise ValueError("coordinator inference_roles is malformed")
-        for setting in roles.values():
-            validate_inference_setting(setting)
     limit = value["max_responses"]
     if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
         raise ValueError("max_responses must be a nonnegative integer")

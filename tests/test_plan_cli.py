@@ -6,7 +6,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from afk_plan.contract import validate_planner_output
 from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
@@ -74,20 +73,14 @@ class PlanCliTest(unittest.TestCase):
         self.assertIsNotNone(receipt["terminal_response"])
         self.assertFalse((self.result / "output.json.tmp").exists())
 
-    def test_domain_inference_setting_does_not_select_the_runtime_adapter(self):
-        self.request["inference"] = {
-            "model": "gpt-5.6-terra",
-            "thinking": "medium",
-        }
+    def test_role_specific_inference_setting_is_rejected(self):
+        self.request["inference"] = {"model": "other", "thinking": "medium"}
 
         completed = self.invoke("valid")
 
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        output = json.loads((self.result / "output.json").read_text())
-        self.assertEqual(output["planner"]["model"], "gpt-5.6-luna")
-        self.assertEqual(validate_planner_output(self.request, output), output)
-        receipt = json.loads((self.result / "inference/receipt.json").read_text())
-        self.assertEqual(receipt["identity"]["model"], "gpt-5.6-luna")
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("input must contain exactly", completed.stderr)
+        self.assertFalse(self.result.exists())
 
     def test_seals_capability_oriented_direct_routing(self):
         self.request["schema_version"] = 2

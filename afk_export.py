@@ -11,12 +11,9 @@ import tempfile
 from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
-from afk_config import (
-    INFERENCE_ROLE_DEFAULTS,
-    SUPPORTED_THINKING,
-    effective_inference_roles,
-    validate_inference_setting,
-)
+
+SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
+
 from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
@@ -372,12 +369,9 @@ def load_source_v2(
     }
     if not isinstance(preparation, dict) or set(preparation) not in (
         required,
-        required | {"inference_roles"},
         required | {"related_work"},
-        required | {"inference_roles", "related_work"},
     ):
         raise ExportError("invalid paused Run Preparer evidence")
-    validate_prepared_inference_roles(preparation)
     if preparation.get("schema_version") != 1 or preparation.get("errors") != []:
         raise ExportError("invalid paused Run Preparer evidence")
     run, project_record, bead = (
@@ -417,7 +411,6 @@ def load_source_v2(
         raise ExportError("paused Run has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
-    validate_prepared_request_inference_roles(preparation, request)
     related_work = load_related_work(source, preparation, assignment, request)
     assignment_bead = (
         assignment.get("source", {}).get("id")
@@ -482,17 +475,11 @@ def load_terminal_routing(
     }
     if (
         not isinstance(preparation, dict)
-        or set(preparation)
-        not in (
-            expected,
-            expected | {"inference_roles"},
-            expected | {"inference_roles", "related_work"},
-        )
+        or set(preparation) not in (expected, expected | {"related_work"})
         or preparation.get("schema_version") != 1
         or preparation.get("errors") != []
     ):
         raise ExportError("invalid terminal Acceptance Routing preparation")
-    validate_prepared_inference_roles(preparation)
     run, project_record, bead = (
         preparation.get("run"),
         preparation.get("project"),
@@ -528,7 +515,6 @@ def load_terminal_routing(
         raise ExportError("terminal Acceptance Routing has Coordinator history")
     assignment = validate_assignment(read_json(source / "assignment.json"))
     request = validate_request(read_json(source / "coordinator-request.json"))
-    validate_prepared_request_inference_roles(preparation, request)
     related_work = load_related_work(source, preparation, assignment, request)
     if assignment.get("source") != {"kind": "bead", "id": bead["id"]}:
         raise ExportError("Acceptance Routing Bead identity disagrees")
@@ -680,8 +666,6 @@ def load_source(
     require_directory(coordinator)
     assignment = validate_assignment(read_json(coordinator / "assignment.json"))
     request = validate_request(read_json(coordinator / "input.json"))
-    if preparation is not None:
-        validate_prepared_request_inference_roles(preparation, request)
     if root_assignment is not None and root_assignment != assignment:
         raise ExportError("Run Preparer Assignment disagrees with Coordinator")
     if root_request is not None and root_request != request:
@@ -828,40 +812,6 @@ def load_continuation_lineage(
     return state, output, terminal_directory, observed
 
 
-def validate_prepared_inference_roles(value):
-    if "inference_roles" not in value:
-        return
-    roles = value["inference_roles"]
-    try:
-        effective = effective_inference_roles(roles)
-        for setting in roles.values():
-            validate_inference_setting(setting)
-    except (AttributeError, ValueError) as error:
-        raise ExportError("invalid prepared inference roles") from error
-    legacy = all(set(setting) == {"model", "thinking"} for setting in roles.values())
-    if set(roles) != set(INFERENCE_ROLE_DEFAULTS) or (
-        not legacy and roles != effective
-    ):
-        raise ExportError("invalid prepared inference roles")
-
-
-def validate_prepared_request_inference_roles(preparation, request):
-    """Bind shared prepared policy to the request Coordinator consumed."""
-    prepared_roles = preparation.get("inference_roles")
-    request_roles = request.get("inference_roles")
-    if prepared_roles is None or request_roles is None:
-        # Legacy Runs may predate either durable policy record, so there is no
-        # pair of frozen records whose shared roles can be compared.
-        return
-    try:
-        prepared = effective_inference_roles(prepared_roles)
-        requested = effective_inference_roles(request_roles)
-    except ValueError as error:
-        raise ExportError("invalid prepared inference roles") from error
-    if any(prepared[role] != requested[role] for role in request_roles):
-        raise ExportError("prepared inference roles disagree with Coordinator request")
-
-
 def validate_preparation(source, value):
     expected = {
         "schema_version",
@@ -881,16 +831,11 @@ def validate_preparation(source, value):
             frozenset(expected),
             frozenset(expected | {"preflight"}),
             frozenset(expected | {"routing"}),
-            frozenset(expected | {"inference_roles"}),
-            frozenset(expected | {"preflight", "inference_roles"}),
-            frozenset(expected | {"routing", "inference_roles"}),
-            frozenset(expected | {"routing", "inference_roles", "related_work"}),
-            frozenset(expected | {"inference_roles", "related_work"}),
+            frozenset(expected | {"routing", "related_work"}),
         }
         or value.get("schema_version") != 1
     ):
         raise ExportError("invalid Run Preparer evidence")
-    validate_prepared_inference_roles(value)
     if value["preparation_status"] != "prepared" or value["errors"] != []:
         raise ExportError("Run Preparer did not seal a prepared Run")
     run = value["run"]
@@ -1050,11 +995,6 @@ def normalize_run_v2(observed):
                 observed["assignment"]["objective"], observed["redactions"]
             ),
             "response_limit": observed["request"]["max_responses"],
-            **(
-                {"inference_roles": observed["preparation"]["inference_roles"]}
-                if "inference_roles" in observed["preparation"]
-                else {}
-            ),
             "status": (
                 observed["preparation"]["preparation_status"] if routing else "paused"
             ),
@@ -1213,41 +1153,6 @@ def artifact_candidates(observed):
     result = []
     seen = set()
 
-    def frozen_inference_setting(role):
-        """Return the policy from the record that actually drove this role."""
-        request = observed.get("request")
-        request_roles = (
-            request.get("inference_roles") if isinstance(request, dict) else None
-        )
-        # Coordinator input is authoritative for its review, assessment, and
-        # response stages. Preparation carries the acceptance planner role,
-        # which is consumed before Coordinator starts.
-        if isinstance(request_roles, dict) and role in request_roles:
-            roles = request_roles
-        else:
-            preparation = observed.get("preparation")
-            prepared_roles = (
-                preparation.get("inference_roles")
-                if isinstance(preparation, dict)
-                else None
-            )
-            # Acceptance planning is always preparation-driven. Prepared policy
-            # also remains the receipt authority for readable legacy Runs whose
-            # Coordinator input predates its own inference_roles field.
-            roles = (
-                prepared_roles
-                if isinstance(prepared_roles, dict) and role in prepared_roles
-                else None
-            )
-        if roles is None:
-            # Older readable Runs predate frozen inference policy. Their receipts
-            # still receive intrinsic identity and contract validation below.
-            return None
-        try:
-            return effective_inference_roles(roles)[role]
-        except (KeyError, ValueError) as error:
-            raise ExportError("invalid prepared inference roles") from error
-
     def add(
         relative,
         scope,
@@ -1369,7 +1274,7 @@ def artifact_candidates(observed):
                 root,
                 inference_relative,
                 "acceptance_planning",
-                frozen_inference_setting("acceptance_planner"),
+                None,
             ):
                 add(**item)
     if observed["state"] is not None:
@@ -1416,7 +1321,7 @@ def artifact_candidates(observed):
                     root,
                     inference_relative,
                     inference_purpose,
-                    frozen_inference_setting(inference_purpose),
+                    None,
                 ):
                     add(**item)
             for kind, filename in sorted(output.get("artifacts", {}).items()):
@@ -2274,22 +2179,6 @@ def normalize_run(observed, include_evidence=True):
             observed["assignment"]["objective"], observed["redactions"]
         ),
         "response_limit": observed["request"]["max_responses"],
-        **(
-            {
-                "inference_roles": (
-                    observed["preparation"]["inference_roles"]
-                    if observed.get("preparation") is not None
-                    and "inference_roles" in observed["preparation"]
-                    else observed["request"]["inference_roles"]
-                )
-            }
-            if (
-                observed.get("preparation") is not None
-                and "inference_roles" in observed["preparation"]
-            )
-            or "inference_roles" in observed["request"]
-            else {}
-        ),
         "status": state["status"],
         "terminal": state["terminal"],
         "history": history,

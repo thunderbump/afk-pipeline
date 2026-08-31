@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 
 from afk_change.contract import validate_change_output, validate_git_transition
-from afk_config import INFERENCE_ROLE_DEFAULTS, validate_inference_setting
 from afk_inference import Capability, ResponseRejected, invoke
 from afk_related_work import validate_reference, validate_snapshot
 from afk_review.contract import validate_review
@@ -51,7 +50,6 @@ def main() -> int:
     progress("loading review input")
     review_input = json.loads(input_path.read_text())
     validate_input(review_input)
-    inference = review_input.get("inference", INFERENCE_ROLE_DEFAULTS["review"])
     progress("review input accepted")
 
     progress("loading Committed Change and Validation evidence")
@@ -87,7 +85,6 @@ def main() -> int:
             raise ResponseRejected(str(error)) from error
 
     inference_result = invoke(
-        inference=inference,
         purpose="review",
         trusted_task_instructions=REVIEW_INSTRUCTIONS,
         untrusted_task_data=review_task(review_input, evidence, diff_path),
@@ -165,12 +162,12 @@ def main() -> int:
 def validate_input(value: object) -> None:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("review must use schema_version 1")
+    if "inference" in value:
+        raise ValueError("review input cannot override inference policy")
     for field in ("workspace", "change_directory", "validation_directory"):
         path = value.get(field)
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError(f"review {field} must be an absolute path")
-    if "inference" in value:
-        validate_inference_setting(value["inference"])
     if "related_work" in value:
         validate_reference(value["related_work"])
         validate_snapshot(value["related_work"]["path"], value["related_work"])

@@ -5,8 +5,6 @@ import json
 import re
 from datetime import datetime, timedelta
 
-from afk_config import INFERENCE_ROLE_DEFAULTS, validate_inference_setting
-
 MAX_TEXT = 32 * 1024
 MAX_CRITERIA = 128
 MAX_CHILDREN = 64
@@ -34,11 +32,7 @@ def validate_input(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("input must be an object")
     expected = {"schema_version", "parent", "catalog", "timeout_seconds"}
-    request = object_with_keys(
-        value, expected | ({"inference"} if "inference" in value else set()), "input"
-    )
-    if "inference" in request:
-        request["inference"] = validate_inference_setting(request["inference"])
+    request = object_with_keys(value, expected, "input")
     if request["schema_version"] not in {1, 2}:
         raise ValueError("input schema_version must be 1 or 2")
     timeout = request["timeout_seconds"]
@@ -683,9 +677,7 @@ def validate_planner_output(planner_input: object, value: object) -> dict[str, o
         },
         "Planner output",
     )
-    # Adapter selection is runtime-owned. The optional inference field remains
-    # readable for input/evidence compatibility but cannot choose role policy.
-    planner_model = INFERENCE_ROLE_DEFAULTS["acceptance_planner"]["model"]
+    planner_model = "gpt-5.6-luna"
     if (
         output["schema_version"] != 1
         or output["outcome"] != "completed"

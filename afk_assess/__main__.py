@@ -7,7 +7,6 @@ from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
-from afk_config import INFERENCE_ROLE_DEFAULTS, validate_inference_setting
 from afk_inference import Capability, ResponseRejected, invoke
 from afk_related_work import validate_reference, validate_snapshot
 from afk_review.contract import validate_review
@@ -51,9 +50,6 @@ def main() -> int:
     progress("loading finding-assessment input")
     assessment_input = json.loads(input_path.read_text())
     validate_input(assessment_input)
-    inference = assessment_input.get(
-        "inference", INFERENCE_ROLE_DEFAULTS["finding_assessment"]
-    )
     progress("finding-assessment input accepted")
 
     progress("loading completed Review evidence")
@@ -86,7 +82,6 @@ def main() -> int:
             raise ResponseRejected(str(error)) from error
 
     inference_result = invoke(
-        inference=inference,
         purpose="finding_assessment",
         trusted_task_instructions=ASSESSMENT_INSTRUCTIONS,
         untrusted_task_data=task,
@@ -162,12 +157,12 @@ def main() -> int:
 def validate_input(value: object) -> None:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("finding assessment must use schema_version 1")
+    if "inference" in value:
+        raise ValueError("finding assessment cannot override inference policy")
     for field in ("workspace", "review_directory"):
         path = value.get(field)
         if not isinstance(path, str) or not Path(path).is_absolute():
             raise ValueError(f"finding assessment {field} must be an absolute path")
-    if "inference" in value:
-        validate_inference_setting(value["inference"])
     if "related_work" in value:
         validate_reference(value["related_work"])
         validate_snapshot(value["related_work"]["path"], value["related_work"])

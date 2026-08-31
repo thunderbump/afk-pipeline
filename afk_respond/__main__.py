@@ -8,7 +8,6 @@ from pathlib import Path
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
-from afk_config import INFERENCE_ROLE_DEFAULTS
 from afk_inference import Capability, ResponseRejected, invoke
 from afk_respond.contract import actionable_findings, validate_input, validate_response
 from afk_review.contract import validate_review
@@ -78,9 +77,6 @@ def main() -> int:
         selected = actionable_findings(review, assessment)
     requires_agent = repair or bool(selected)
     if requires_agent:
-        inference = response_input.get(
-            "inference", INFERENCE_ROLE_DEFAULTS["feedback_response"]
-        )
         task = response_task(response_input, selected, objective)
 
     progress("preparing feedback-response result directory")
@@ -148,7 +144,6 @@ def main() -> int:
             raise ResponseRejected(str(error)) from error
 
     inference_result = invoke(
-        inference=inference,
         purpose="feedback_response",
         trusted_task_instructions=(
             REPAIR_INSTRUCTIONS if repair else RESPONSE_INSTRUCTIONS

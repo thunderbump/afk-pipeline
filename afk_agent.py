@@ -2,87 +2,11 @@
 
 import json
 import math
-import os
 from pathlib import Path
 
 # Pi defaults to three model retries. Keep interpretation bounded even when an
 # untrusted event stream advertises a larger maximum.
 MAX_AUTO_RETRIES = 3
-
-
-def read_only_pi_command(
-    configuration_name: str,
-    system_prompt: str,
-    model: str = "gpt-5.6-sol",
-    thinking: str = "medium",
-) -> list[str]:
-    return pi_command(
-        configuration_name, system_prompt, "read,grep,find,ls", model, thinking
-    )
-
-
-def write_pi_command(
-    configuration_name: str,
-    system_prompt: str,
-    model: str = "gpt-5.6-sol",
-    thinking: str = "medium",
-) -> list[str]:
-    return pi_command(
-        configuration_name,
-        system_prompt,
-        "read,bash,edit,write,grep,find,ls",
-        model,
-        thinking,
-    )
-
-
-def no_tool_pi_command(
-    configuration_name: str, system_prompt: str, model: str, thinking: str
-) -> list[str]:
-    return pi_command(configuration_name, system_prompt, None, model, thinking)
-
-
-def pi_command(
-    configuration_name: str,
-    system_prompt: str,
-    tools: str | None,
-    model: str = "gpt-5.6-sol",
-    thinking: str = "medium",
-) -> list[str]:
-    configured = os.environ.get(configuration_name)
-    if configured is not None:
-        command = json.loads(configured)
-        if (
-            not isinstance(command, list)
-            or not command
-            or not all(isinstance(argument, str) for argument in command)
-        ):
-            raise ValueError(f"{configuration_name} must be a JSON argv array")
-        return command
-    return [
-        "/usr/bin/env",
-        "PI_TELEMETRY=0",
-        "PI_SKIP_VERSION_CHECK=1",
-        "pi",
-        "--provider",
-        "openai-codex",
-        "--model",
-        model,
-        "--thinking",
-        thinking,
-        "--mode",
-        "json",
-        "--print",
-        "--no-session",
-        *(["--tools", tools] if tools is not None else ["--no-tools"]),
-        "--no-extensions",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-themes",
-        "--no-context-files",
-        "--system-prompt",
-        system_prompt,
-    ]
 
 
 def agent_response(events_path: Path) -> dict[str, object]:

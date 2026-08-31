@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from afk_config import validate_inference_setting
-
 
 def validate_input(value: object) -> dict[str, object]:
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("feedback response must use schema_version 1")
+    if "inference" in value:
+        raise ValueError("feedback response cannot override inference policy")
     workspace = value.get("workspace")
     if not isinstance(workspace, str) or not Path(workspace).is_absolute():
         raise ValueError("feedback response workspace must be an absolute path")
@@ -40,8 +40,6 @@ def validate_input(value: object) -> dict[str, object]:
         raise ValueError(
             "review feedback response cannot contain validation repair fields"
         )
-    if "inference" in value:
-        validate_inference_setting(value["inference"])
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("feedback response timeout_seconds must be a positive integer")

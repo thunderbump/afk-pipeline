@@ -111,53 +111,6 @@ class ExportCliTests(unittest.TestCase):
             }
             self.assertEqual(first_files, second_files)
 
-    def test_completed_prepared_exports_retain_all_frozen_inference_roles(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = self.sealed_preparer(root)
-            roles = {
-                "acceptance_planner": {
-                    "model": "planner-frozen",
-                    "thinking": "high",
-                },
-                "review": {"model": "review-frozen", "thinking": "low"},
-                "finding_assessment": {
-                    "model": "assessment-frozen",
-                    "thinking": "minimal",
-                },
-                "feedback_response": {
-                    "model": "response-frozen",
-                    "thinking": "xhigh",
-                },
-            }
-            preparation_path = source / "preparation.json"
-            preparation = json.loads(preparation_path.read_text())
-            preparation["inference_roles"] = roles
-            preparation_path.write_text(json.dumps(preparation))
-            coordinator_roles = {
-                role: roles[role]
-                for role in ("review", "finding_assessment", "feedback_response")
-            }
-            for request_path in (
-                source / "coordinator-request.json",
-                source / "coordinator" / "input.json",
-            ):
-                request = json.loads(request_path.read_text())
-                request["inference_roles"] = coordinator_roles
-                request_path.write_text(json.dumps(request))
-
-            for schema_version in (1, 2):
-                with self.subTest(schema_version=schema_version):
-                    destination = root / f"bundle-v{schema_version}"
-                    result = (
-                        self.export_v1(source, destination)
-                        if schema_version == 1
-                        else self.export_v2(source, destination)
-                    )
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    record = json.loads((destination / "workflow-run.json").read_text())
-                    self.assertEqual(record["inference_roles"], roles)
-
     def test_exports_a_direct_coordinator_with_explicit_identity(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1545,58 +1498,6 @@ class ExportCliTests(unittest.TestCase):
                 invocation_path.read_bytes()
             ).hexdigest()
             receipt_path.write_text(json.dumps(receipt))
-
-            result = self.export_v2(source, root / "bundle")
-
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
-
-    def test_v2_rejects_receipt_identity_that_disagrees_with_frozen_role(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = self.sealed_preparer(root)
-            preparation_path = source / "preparation.json"
-            preparation = json.loads(preparation_path.read_text())
-            preparation["inference_roles"] = afk_export.INFERENCE_ROLE_DEFAULTS
-            preparation_path.write_text(json.dumps(preparation))
-            inference = source / "coordinator/04-review/inference"
-            self.add_inference_receipt(inference)
-
-            # Receipt, invocation, and contract consistently claim gpt-test, but
-            # that is not the private source frozen for the review role.
-            result = self.export_v2(source, root / "bundle")
-
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
-
-    def test_v2_rejects_preparation_policy_conflicting_with_coordinator_input(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = self.sealed_preparer(root)
-            coordinator_roles = {
-                role: dict(afk_export.INFERENCE_ROLE_DEFAULTS[role])
-                for role in ("review", "finding_assessment", "feedback_response")
-            }
-            for request_path in (
-                source / "coordinator-request.json",
-                source / "coordinator/input.json",
-            ):
-                request = json.loads(request_path.read_text())
-                request["inference_roles"] = coordinator_roles
-                request_path.write_text(json.dumps(request))
-
-            # The receipt consistently matches this later preparation edit, but
-            # not the review policy in the input Coordinator actually consumed.
-            prepared_roles = {
-                role: dict(setting)
-                for role, setting in afk_export.INFERENCE_ROLE_DEFAULTS.items()
-            }
-            prepared_roles["review"]["model"] = "gpt-test"
-            preparation_path = source / "preparation.json"
-            preparation = json.loads(preparation_path.read_text())
-            preparation["inference_roles"] = prepared_roles
-            preparation_path.write_text(json.dumps(preparation))
-            self.add_inference_receipt(source / "coordinator/04-review/inference")
 
             result = self.export_v2(source, root / "bundle")
 

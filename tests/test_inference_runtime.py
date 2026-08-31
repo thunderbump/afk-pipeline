@@ -12,7 +12,6 @@ from afk_inference import (
     InferenceRuntime,
     ResponseRejected,
     ScriptedResult,
-    invoke_role,
 )
 from afk_inference import invoke as invoke_inference
 
@@ -50,27 +49,39 @@ class InferenceRuntimeTest(unittest.TestCase):
             self.assertEqual(result.receipt["terminal_response"], "ok")
             self.assertTrue((root / "evidence/receipt.json").is_file())
 
-    def test_exported_invoke_role_accepts_explicit_inference_policy(self):
+    def test_production_roles_use_runtime_owned_policy(self):
         expected = object()
-        with mock.patch.object(
-            InferenceRuntime, "invoke", autospec=True, return_value=expected
-        ) as runtime_invoke:
-            result = invoke_role(
-                inference={"model": "test-model", "thinking": "medium"},
-                purpose="custom_role",
-                trusted_task_instructions="Do the task.",
-                untrusted_task_data={},
-                requested_capability=Capability.NO_TOOLS,
-                execution_root=".",
-                timeout_seconds=1,
-                evidence_directory="evidence",
-                validator=lambda value: value,
-            )
+        policies = {
+            "acceptance_planning": ("gpt-5.6-luna", "low"),
+            "review": ("gpt-5.6-sol", "medium"),
+            "finding_assessment": ("gpt-5.6-sol", "medium"),
+            "feedback_response": ("gpt-5.6-sol", "medium"),
+            "parent_acceptance_review": ("gpt-5.6-luna", "low"),
+        }
+        for purpose, policy in policies.items():
+            with (
+                self.subTest(purpose=purpose),
+                mock.patch.object(
+                    InferenceRuntime, "invoke", autospec=True, return_value=expected
+                ) as runtime_invoke,
+            ):
+                result = invoke_inference(
+                    purpose=purpose,
+                    trusted_task_instructions="Do the task.",
+                    untrusted_task_data={},
+                    requested_capability=Capability.NO_TOOLS,
+                    execution_root=".",
+                    timeout_seconds=1,
+                    evidence_directory="evidence",
+                    validator=lambda value: value,
+                )
+                self.assertIs(result, expected)
+                adapter = runtime_invoke.call_args.kwargs["adapter"]
+                self.assertEqual((adapter.model, adapter.thinking), policy)
 
-        self.assertIs(result, expected)
-        adapter = runtime_invoke.call_args.kwargs["adapter"]
-        self.assertEqual((adapter.model, adapter.thinking), ("test-model", "medium"))
-        self.assertEqual(runtime_invoke.call_args.kwargs["purpose"], "custom_role")
+    def test_role_specific_policy_override_is_rejected(self):
+        with self.assertRaisesRegex(TypeError, "not accepted"):
+            invoke_inference(inference={"model": "other", "thinking": "high"})
 
     def test_success_retains_exact_evidence_and_seals_receipt_last(self):
         adapter = FixtureAdapter(
