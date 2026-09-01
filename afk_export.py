@@ -2103,6 +2103,11 @@ def derive_public_artifact(candidate, redactions):
             # Optional evidence remains describable, but required frozen context
             # cannot degrade into a nondownloadable artifact after source loading.
             return unavailable("unavailable", "unavailable")
+    json_sanitizer = (
+        sanitize_secret_json_value
+        if candidate.get("secrets_only")
+        else sanitize_json_value
+    )
     try:
         validated_preflight_output_raw = candidate.get("validated_preflight_output_raw")
         if (
@@ -2133,12 +2138,7 @@ def derive_public_artifact(candidate, redactions):
             changed = sanitize_validated_preflight_classifier_key(
                 value, candidate.get("validated_preflight_classifier_key")
             )
-            sanitizer = (
-                sanitize_secret_json_value
-                if candidate.get("secrets_only")
-                else sanitize_json_value
-            )
-            value, generally_changed = sanitizer(value, redactions)
+            value, generally_changed = json_sanitizer(value, redactions)
             changed = changed or generally_changed
             public = encode_json(value)
         elif candidate["kind"] in {"events", "inference_events"} or (
@@ -2150,12 +2150,7 @@ def derive_public_artifact(candidate, redactions):
                 if not line.strip():
                     continue
                 value = json.loads(line)
-                sanitizer = (
-                    sanitize_secret_json_value
-                    if candidate.get("secrets_only")
-                    else sanitize_json_value
-                )
-                value, item_changed = sanitizer(value, redactions)
+                value, item_changed = json_sanitizer(value, redactions)
                 changed = changed or item_changed
                 lines.append(json.dumps(value, sort_keys=True, separators=(",", ":")))
             if not lines:
