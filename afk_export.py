@@ -1196,7 +1196,9 @@ def public_artifacts(observed, candidates=None):
             # Optional evidence may degrade to a descriptor, but the frozen
             # related-work bytes are required publication evidence.  Do not
             # silently omit them when earlier artifacts exhaust either budget.
-            if candidate.get("kind") == "related_work":
+            if candidate.get("kind") == "related_work" and not candidate.get(
+                "secrets_only"
+            ):
                 raise ExportError(
                     "validated related-work snapshot cannot be published: bundle_limit"
                 )
@@ -2108,6 +2110,13 @@ def derive_public_artifact(candidate, redactions):
         if candidate.get("secrets_only")
         else sanitize_json_value
     )
+    if (
+        candidate["kind"] == "related_work"
+        and generated is None
+        and candidate.get("validated_raw") is not None
+        and raw != candidate["validated_raw"]
+    ):
+        raise ExportError("validated related-work snapshot changed")
     try:
         validated_preflight_output_raw = candidate.get("validated_preflight_output_raw")
         if (
@@ -2120,8 +2129,6 @@ def derive_public_artifact(candidate, redactions):
             and candidate.get("validated_raw") is not None
             and raw != candidate["validated_raw"]
         ):
-            if candidate["kind"] == "related_work":
-                raise ExportError("validated related-work snapshot changed")
             raise ExportError("validated Acceptance Routing output changed")
         text = decode_text(raw)
         if candidate.get("inference_view"):
@@ -2165,7 +2172,7 @@ def derive_public_artifact(candidate, redactions):
             changed = sanitized != text
             public = sanitized.encode()
     except ExportError:
-        if candidate["kind"] == "related_work":
+        if candidate["kind"] == "related_work" and not candidate.get("secrets_only"):
             raise
         return nondownloadable_descriptor(base, "unsafe", "unsafe_or_invalid"), None
     except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):

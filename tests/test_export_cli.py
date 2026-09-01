@@ -1771,6 +1771,37 @@ class ExportCliTests(unittest.TestCase):
             self.assertNotIn("ghp_example_value", v3_public)
             self.assertIn(afk_export.REDACTED_SECRET, v3_public)
 
+            unsafe_related = (
+                b'{"description":"-----BEGIN PRIVATE KEY-----",'
+                b'"id":"central-example","relationship":"subject"}\n'
+            )
+            related_path.write_bytes(unsafe_related)
+            related.update(
+                sha256=hashlib.sha256(unsafe_related).hexdigest(),
+                bytes=len(unsafe_related),
+            )
+            preparation["related_work"] = related
+            assignment["related_work"] = related
+            coordinator_request["related_work"] = related
+            preparation_path.write_text(json.dumps(preparation))
+            assignment_path.write_text(json.dumps(assignment))
+            request_path.write_text(json.dumps(coordinator_request))
+            unsafe_destination = root / "unsafe-related-v3-bundle"
+            unsafe_result = self.export_v3(source, unsafe_destination)
+            self.assertEqual(unsafe_result.returncode, 0, unsafe_result.stderr)
+            unsafe_record = json.loads(
+                (unsafe_destination / "workflow-run.json").read_text()
+            )
+            unsafe_descriptor = next(
+                item
+                for item in unsafe_record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(unsafe_descriptor["state"], "unsafe")
+            self.assertEqual(
+                unsafe_descriptor["unavailable_reason"], "unsafe_or_invalid"
+            )
+
             invocation_input = {**preflight_input, "title": "Fabricated invocation"}
             (preflight / "input.json").write_text(json.dumps(invocation_input))
             rejected_destination = root / "inconsistent-paused-bundle"
