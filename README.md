@@ -206,10 +206,12 @@ created with exact project/readiness labels and a parent relationship; existing
 children must still match the accepted plan. Planned `depends_on` edges become
 Beads `blocks` relationships.
 
-External children receive a fixed completion handoff section after their actual
-Bead ID is known. It names the parent, plan digest, child, criteria, expected
-authority, required subject fields, and Completion Record shape. Inference never
-receives Beads write authority.
+Children routed to `outside_help` receive an `Outside capability required`
+section after their actual Bead ID is known. It records the unavailable-capability
+reason, expected outside source, `external_check` evidence route, parent and plan
+identities, and child Bead ID, then instructs operators to attach performed-work
+evidence before closure. Other children receive no extra handoff section.
+Inference never receives Beads write authority.
 
 Each invocation uses a new result directory. Success seals `decision: published`;
 an exact replay seals `decision: replayed` without duplicate
