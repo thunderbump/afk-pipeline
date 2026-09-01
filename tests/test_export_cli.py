@@ -1678,6 +1678,57 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(descriptors["inference_task_data"]["state"], "oversized")
             self.assertEqual(len(descriptors), 3)
 
+    def test_unicode_prompt_section_uses_utf8_size_for_receipt_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["system"] = "😀" * 1000
+            prompt_path.write_text(json.dumps(prompt, ensure_ascii=False) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(
+                json.dumps(invocation, ensure_ascii=False) + "\n"
+            )
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["policy"]["system_instructions"] = prompt["system"]
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt, ensure_ascii=False) + "\n")
+
+            metadata = {**receipt, "terminal_response": None}
+            utf8_size = len(
+                (json.dumps(metadata, indent=2, ensure_ascii=False) + "\n").encode()
+            )
+            ascii_size = len(
+                (json.dumps(metadata, indent=2, ensure_ascii=True) + "\n").encode()
+            )
+            self.assertLess(utf8_size, ascii_size)
+
+            with mock.patch("afk_export.MAX_JSON_BYTES", utf8_size):
+                catalog = afk_export.receipt_bound_inference_artifacts(
+                    root, relative, "review"
+                )
+
+            sections = {
+                item["kind"]: item
+                for item in catalog
+                if item["kind"].startswith("inference_")
+            }
+            self.assertIn("inference_system_instructions", sections)
+            self.assertIn("inference_task_instructions", sections)
+            self.assertIn("inference_task_data", sections)
+
     def test_receipt_loading_rejects_oversized_integrity_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
