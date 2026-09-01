@@ -35,9 +35,9 @@ if scenario == "incomplete":
         "objective": "Implement and prove the behavior required by criterion-1.",
         "criteria": ["criterion-1"],
         "project": "example",
-        "owner": "Example agent",
+        "owner": "AFK Run",
         "phase": "implementation",
-        "execution": "agent",
+        "executor": "afk_run",
         "evidence_route": "pipeline_run",
         "depends_on": [],
     }

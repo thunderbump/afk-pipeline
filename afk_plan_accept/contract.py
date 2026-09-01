@@ -9,10 +9,8 @@ from afk_plan.contract import (
     validate_plan,
 )
 
-POLICY = "contract-valid-proposed-v1"
-DIRECT_POLICY = "pipeline-compatible-direct-v1"
-CAPABILITY_POLICY = "contract-valid-capability-plan-v2"
-CAPABILITY_DIRECT_POLICY = "pipeline-compatible-capability-direct-v2"
+POLICY = "contract-valid-capability-plan-v2"
+DIRECT_POLICY = "pipeline-compatible-capability-direct-v2"
 OUTPUT_FIELDS = {
     "schema_version",
     "outcome",
@@ -26,14 +24,6 @@ OUTPUT_FIELDS = {
     "error_category",
     "artifacts",
 }
-
-
-class PlanNeedsHuman(ValueError):
-    """Raised when a valid plan retains inference ambiguity."""
-
-
-class RoutingNeedsHuman(ValueError):
-    """Raised when a direct route cannot safely use the existing pipeline."""
 
 
 class PlanNeedsClarification(ValueError):
@@ -53,20 +43,22 @@ class RoutingNeedsOutsideHelp(ValueError):
 
 
 def plan_policy(version: int) -> str:
-    return POLICY if version == 1 else CAPABILITY_POLICY
+    if version != 2:
+        raise ValueError("routing schema_version must be 2")
+    return POLICY
 
 
 def direct_policy(version: int) -> str:
-    return DIRECT_POLICY if version == 1 else CAPABILITY_DIRECT_POLICY
+    if version != 2:
+        raise ValueError("routing schema_version must be 2")
+    return DIRECT_POLICY
 
 
 def accept_plan(planner_input: object, plan: object) -> dict[str, object]:
     request = validate_input(planner_input)
     validated_plan = validate_plan(request, plan)
     if validated_plan["status"] != "proposed" or validated_plan["ambiguities"]:
-        if request["schema_version"] == 2:
-            raise PlanNeedsClarification("plan needs clarification")
-        raise PlanNeedsHuman("plan needs human interpretation")
+        raise PlanNeedsClarification("plan needs clarification")
     body = {
         "schema_version": request["schema_version"],
         "status": "accepted",
@@ -84,28 +76,25 @@ def accept_direct(planner_input: object, routing: object) -> dict[str, object]:
     request = validate_input(planner_input)
     validated = validate_direct_routing(request, routing)
     if validated["status"] != "proposed" or validated["ambiguities"]:
-        if request["schema_version"] == 2:
-            raise PlanNeedsClarification("routing needs clarification")
-        raise RoutingNeedsHuman("routing cannot use the direct pipeline path")
-    if request["schema_version"] == 2:
-        executors = {route["executor"] for route in validated["routes"]}
-        if "outside_help" in executors:
-            reasons = {
-                route["outside_help_reason"]
-                for route in validated["routes"]
-                if route["executor"] == "outside_help"
-            }
-            if len(reasons) != 1:
-                raise ValueError(
-                    "direct outside_help routes must use one reason or decompose"
-                )
-            raise RoutingNeedsOutsideHelp(reasons.pop())
-        if "caller_agent" in executors:
-            raise RoutingNeedsCallerAgent(
-                "caller-agent work must be represented as an accepted child Plan"
+        raise PlanNeedsClarification("routing needs clarification")
+    executors = {route["executor"] for route in validated["routes"]}
+    if "outside_help" in executors:
+        reasons = {
+            route["outside_help_reason"]
+            for route in validated["routes"]
+            if route["executor"] == "outside_help"
+        }
+        if len(reasons) != 1:
+            raise ValueError(
+                "direct outside_help routes must use one reason or decompose"
             )
-    if not direct_pipeline_compatible(request, validated["routes"]):
-        raise RoutingNeedsHuman("routing cannot use the direct pipeline path")
+        raise RoutingNeedsOutsideHelp(reasons.pop())
+    if "caller_agent" in executors or not direct_pipeline_compatible(
+        request, validated["routes"]
+    ):
+        raise RoutingNeedsCallerAgent(
+            "non-pipeline work must be represented as an accepted child Plan"
+        )
     body = {
         "schema_version": request["schema_version"],
         "status": "accepted",
@@ -192,8 +181,6 @@ def validate_policy_output(
                 "Acceptance Routing policy output is not bound to its input"
             )
         return output
-    if request["schema_version"] != 2:
-        raise ValueError("unaccepted capability routing requires schema version 2")
     expected_policy = direct_policy(2) if "routing" in policy_input else plan_policy(2)
     try:
         if "routing" in policy_input:

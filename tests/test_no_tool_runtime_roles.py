@@ -15,7 +15,7 @@ from tests.test_pi_inference_adapter import FakeProcess
 
 def direct_proposal():
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "decision": "direct",
         "criteria": [
             {
@@ -28,9 +28,9 @@ def direct_proposal():
             {
                 "criterion": "criterion-1",
                 "project": "afk-pipeline",
-                "owner": "AFK implementation agent",
+                "owner": "AFK Run",
                 "phase": "implementation",
-                "execution": "agent",
+                "executor": "afk_run",
                 "evidence_route": "pipeline_run",
             }
         ],
@@ -47,7 +47,7 @@ class NoToolRuntimeRoleTest(unittest.TestCase):
         self.input = self.root / "planner.json"
         self.result = self.root / "result"
         self.request = {
-            "schema_version": 1,
+            "schema_version": 2,
             "parent": {
                 "id": "central-example",
                 "title": "Route work",
@@ -56,14 +56,14 @@ class NoToolRuntimeRoleTest(unittest.TestCase):
                 "labels": ["project:afk-pipeline"],
             },
             "catalog": {
-                "schema_version": 1,
+                "schema_version": 2,
                 "projects": [
                     {
                         "slug": "afk-pipeline",
                         "routes": [
                             {
-                                "owner": "AFK implementation agent",
-                                "execution": "agent",
+                                "owner": "AFK Run",
+                                "executor": "afk_run",
                                 "evidence_route": "pipeline_run",
                                 "phases": ["implementation"],
                             }

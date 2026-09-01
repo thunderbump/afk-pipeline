@@ -37,7 +37,7 @@ class CompletionRecordCliTest(unittest.TestCase):
         (acceptance_directory / "input.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "planner_input": request,
                     "plan": plan,
                 }
@@ -234,14 +234,14 @@ class PublicCompletionRecordCliTest(unittest.TestCase):
 
 def acceptance_output(request, acceptance):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "outcome": "completed",
         "decision": "accepted",
         "source": {"kind": "bead", "id": request["parent"]["id"]},
         "started_at": "2026-08-22T00:00:00Z",
         "finished_at": "2026-08-22T00:00:01Z",
         "duration_seconds": 1,
-        "policy": "contract-valid-proposed-v1",
+        "policy": "contract-valid-capability-plan-v2",
         "acceptance": acceptance,
         "error_category": None,
         "artifacts": {"input": "input.json"},
@@ -251,12 +251,13 @@ def acceptance_output(request, acceptance):
 def external_plan():
     request = planner_input()
     owner = "Deployment verifier"
-    execution = "external"
+    executor = "outside_help"
     evidence_route = "external_check"
     request["catalog"]["projects"][0]["routes"].append(
         {
             "owner": owner,
-            "execution": execution,
+            "executor": executor,
+            "outside_help_reason": "unavailable_system",
             "evidence_route": evidence_route,
             "phases": ["closure"],
         }
@@ -265,7 +266,7 @@ def external_plan():
     plan = build_plan(
         request,
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "criteria": [
                 {
                     "id": "criterion-1",
@@ -285,9 +286,9 @@ def external_plan():
                     "objective": "Implement the requested behavior.",
                     "criteria": ["criterion-1"],
                     "project": "example",
-                    "owner": "Example agent",
+                    "owner": "AFK Run",
                     "phase": "implementation",
-                    "execution": "agent",
+                    "executor": "afk_run",
                     "evidence_route": "pipeline_run",
                     "depends_on": [],
                 },
@@ -299,14 +300,10 @@ def external_plan():
                     "project": "example",
                     "owner": owner,
                     "phase": "closure",
-                    "execution": execution,
+                    "executor": executor,
+                    "outside_help_reason": "unavailable_system",
                     "evidence_route": evidence_route,
                     "depends_on": ["implementation"],
-                    "handoff": {
-                        "authority": owner,
-                        "subject_fields": ["commit", "environment"],
-                        "completion_record": evidence_route,
-                    },
                 },
             ],
             "ambiguities": [],

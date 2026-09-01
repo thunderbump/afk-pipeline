@@ -8,7 +8,6 @@ import time
 import unittest
 from pathlib import Path
 
-from afk_plan.contract import build_plan, validate_input
 from afk_plan_accept.contract import accept_plan
 from tests.test_plan_accept_contract import (
     capability_input,
@@ -118,72 +117,6 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
         retried = self.invoke(retry_result)
         self.assertEqual(retried.returncode, 0, retried.stderr)
         self.assertEqual(len(json.loads(self.state.read_text())["children"]), 2)
-
-    def test_external_child_contains_the_fixed_completion_handoff(self):
-        request, plan = self.external_plan()
-        self.replace_acceptance(request, plan)
-        state = json.loads(self.state.read_text())
-        state["parent"] = {
-            **request["parent"],
-            "status": "in_progress",
-            "issue_type": "task",
-            "priority": 2,
-            "dependencies": [],
-        }
-        self.state.write_text(json.dumps(state))
-
-        completed = self.invoke(self.result)
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        human = json.loads(self.state.read_text())["children"][1]
-        self.assertEqual(human["labels"], ["project:example", "ready-for-human"])
-        self.assertIn("## External completion handoff", human["description"])
-        self.assertIn("`central-child-2`", human["description"])
-        self.assertIn("`Brian`", human["description"])
-        self.assertIn('"parent_plan":', human["description"])
-        self.assertIn('"outcome": "satisfied"', human["description"])
-        self.assertIn('"producer":', human["description"])
-        self.assertIn('"kind": "external_check"', human["description"])
-        self.assertIn("changed parent plan", human["description"])
-        self.assertIn(
-            "Valid external-check evidence must be attached before this child closes.",
-            human["acceptance_criteria"],
-        )
-        state = json.loads(self.state.read_text())
-        state["children"][1]["title"] = "Conflicting title"
-        state["children"][1]["description"] = "Do not overwrite this conflict."
-        self.state.write_text(json.dumps(state))
-
-        replay = self.invoke(self.root / "conflicting-human-replay")
-
-        self.assertEqual(replay.returncode, 1)
-        self.assertEqual(
-            json.loads(self.state.read_text())["children"][1]["description"],
-            "Do not overwrite this conflict.",
-        )
-
-    def test_retry_repairs_only_the_known_human_description_placeholder(self):
-        request, plan = self.external_plan()
-        self.replace_acceptance(request, plan)
-        state = json.loads(self.state.read_text())
-        state["parent"] = {
-            **request["parent"],
-            "status": "in_progress",
-            "issue_type": "task",
-            "priority": 2,
-            "dependencies": [],
-        }
-        state["fail_next_update"] = True
-        self.state.write_text(json.dumps(state))
-
-        failed = self.invoke(self.result)
-        retried = self.invoke(self.root / "human-retry")
-
-        self.assertEqual(failed.returncode, 1)
-        self.assertEqual(retried.returncode, 0, retried.stderr)
-        human = json.loads(self.state.read_text())["children"][1]
-        self.assertIn("`central-child-2`", human["description"])
-        self.assertIn("## External completion handoff", human["description"])
 
     def test_interrupt_seals_the_known_partial_mapping(self):
         state = json.loads(self.state.read_text())
@@ -316,66 +249,6 @@ class ChildGraphPublisherCliTest(unittest.TestCase):
                 }
             )
         )
-
-    def external_plan(self):
-        request = planner_input()
-        request["catalog"]["projects"][0]["routes"].append(
-            {
-                "owner": "Brian",
-                "execution": "external",
-                "evidence_route": "external_check",
-                "phases": ["closure"],
-            }
-        )
-        request = validate_input(request)
-        proposal = {
-            "schema_version": 1,
-            "criteria": [
-                {
-                    "id": "criterion-1",
-                    "source_text": "The change is implemented.",
-                    "statement": "Implement the change.",
-                },
-                {
-                    "id": "criterion-2",
-                    "source_text": "The current documentation is updated.",
-                    "statement": "Approve the current documentation.",
-                },
-            ],
-            "children": [
-                {
-                    "local_id": "implementation",
-                    "title": "Implement the change",
-                    "objective": "Implement the requested behavior.",
-                    "criteria": ["criterion-1"],
-                    "project": "example",
-                    "owner": "Example agent",
-                    "phase": "implementation",
-                    "execution": "agent",
-                    "evidence_route": "pipeline_run",
-                    "depends_on": [],
-                },
-                {
-                    "local_id": "approval",
-                    "title": "Approve the documentation",
-                    "objective": "Approve the published documentation.",
-                    "criteria": ["criterion-2"],
-                    "project": "example",
-                    "owner": "Brian",
-                    "phase": "closure",
-                    "execution": "external",
-                    "evidence_route": "external_check",
-                    "depends_on": ["implementation"],
-                    "handoff": {
-                        "authority": "Brian",
-                        "subject_fields": ["commit", "environment"],
-                        "completion_record": "external_check",
-                    },
-                },
-            ],
-            "ambiguities": [],
-        }
-        return request, build_plan(request, proposal)
 
     def invoke(self, result):
         return subprocess.run(

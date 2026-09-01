@@ -6,11 +6,9 @@ from pathlib import Path
 from afk_assess.task import ASSESSMENT_INSTRUCTIONS
 from afk_assess.task import build_task as build_assessment_task
 from afk_inference import Capability, ResponseRejected
-from afk_parent_review.task import CAPABILITY_SYSTEM_PROMPT as PARENT_V2_PROMPT
-from afk_parent_review.task import SYSTEM_PROMPT as PARENT_V1_PROMPT
+from afk_parent_review.task import SYSTEM_PROMPT as PARENT_PROMPT
 from afk_parent_review.task import build_task as build_parent_review_task
-from afk_plan.task import CAPABILITY_SYSTEM_PROMPT as PLAN_V2_PROMPT
-from afk_plan.task import SYSTEM_PROMPT as PLAN_V1_PROMPT
+from afk_plan.task import SYSTEM_PROMPT as PLAN_PROMPT
 from afk_plan.task import build_task as build_plan_task
 from afk_respond.task import REPAIR_INSTRUCTIONS, RESPONSE_INSTRUCTIONS
 from afk_respond.task import build_task as build_response_task
@@ -22,10 +20,8 @@ from tests.test_plan_contract import planner_input
 class RoleLocalInferenceTaskContractTest(unittest.TestCase):
     def test_trusted_task_renderers_have_explicit_snapshots(self):
         prompts = (
-            PLAN_V1_PROMPT,
-            PLAN_V2_PROMPT,
-            PARENT_V1_PROMPT,
-            PARENT_V2_PROMPT,
+            PLAN_PROMPT,
+            PARENT_PROMPT,
             REVIEW_INSTRUCTIONS,
             ASSESSMENT_INSTRUCTIONS,
             RESPONSE_INSTRUCTIONS,
@@ -34,9 +30,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         self.assertEqual(
             [hashlib.sha256(prompt.encode()).hexdigest() for prompt in prompts],
             [
-                "36e355ec9444e97ba47b2838f3926274b9c537bd482796c3687cdaa44980bc3c",
                 "bf02719b2b2fedb0d14c1cd5f611ef712a0c06dec82b11fe1339c8b8855b84b3",
-                "213f00250cd1ee54436689e0ecccecb17fb4914c1ba369f4f20e5b364f2ff837",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "f56ac9a3e09acaa3f686df68b6fe08fd4f73a30a282b72f75b9b07a4651371a7",
                 "768cf586297200e617961dbbb60f365b605753adf4a8bcc6639adabe93d41666",
@@ -59,28 +53,16 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 self.assertIn("contract_version=", task_source)
                 self.assertIn("validator=", task_source)
 
-    def test_versioned_roles_select_prompt_data_capability_and_validator_together(self):
+    def test_routing_roles_bind_current_prompt_data_capability_and_validator(self):
         request = planner_input()
-        v1 = build_plan_task(request)
-        request_v2 = {**request, "schema_version": 2}
-        v2 = build_plan_task(request_v2)
-        self.assertEqual((v1.contract_version, v2.contract_version), (1, 2))
-        self.assertIs(v1.untrusted_data, request)
-        self.assertIs(v2.untrusted_data, request_v2)
-        self.assertEqual(v1.capability, Capability.NO_TOOLS)
-        self.assertNotEqual(v1.trusted_instructions, v2.trusted_instructions)
-
-        fan_in_v1 = {"schema_version": 1}
-        fan_in_v2 = {"schema_version": 2}
-        parent_v1 = build_parent_review_task(fan_in_v1)
-        parent_v2 = build_parent_review_task(fan_in_v2)
-        self.assertEqual(
-            (parent_v1.contract_version, parent_v2.contract_version), (1, 2)
-        )
-        self.assertNotEqual(
-            parent_v1.trusted_instructions, parent_v2.trusted_instructions
-        )
-        for task in (v1, v2, parent_v1, parent_v2):
+        planner = build_plan_task(request)
+        fan_in = {"schema_version": 2}
+        parent = build_parent_review_task(fan_in)
+        self.assertEqual((planner.contract_version, parent.contract_version), (2, 2))
+        self.assertIs(planner.untrusted_data, request)
+        self.assertIs(parent.untrusted_data, fan_in)
+        for task in (planner, parent):
+            self.assertEqual(task.capability, Capability.NO_TOOLS)
             with self.assertRaises(ResponseRejected):
                 task.validator({})
 

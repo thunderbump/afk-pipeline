@@ -7,9 +7,7 @@ from pathlib import Path
 
 from afk_plan_accept.contract import (
     PlanNeedsClarification,
-    PlanNeedsHuman,
     RoutingNeedsCallerAgent,
-    RoutingNeedsHuman,
     RoutingNeedsOutsideHelp,
     accept_direct,
     accept_plan,
@@ -52,11 +50,6 @@ def main() -> int:
         else:
             acceptance = accept_plan(request["planner_input"], request["plan"])
             accepted_decision = "accepted"
-    except PlanNeedsHuman:
-        acceptance = None
-        outcome = "unaccepted"
-        decision = "needs_human"
-        error_category = "plan_ambiguity"
     except PlanNeedsClarification:
         acceptance = None
         outcome = "unaccepted"
@@ -72,11 +65,6 @@ def main() -> int:
         outcome = "unaccepted"
         decision = "outside_help"
         error_category = error.reason
-    except RoutingNeedsHuman:
-        acceptance = None
-        outcome = "unaccepted"
-        decision = "needs_human"
-        error_category = "direct_incompatible"
     else:
         outcome = "completed"
         decision = accepted_decision
@@ -113,8 +101,8 @@ def acceptance_request(value: object) -> dict[str, object]:
         {"schema_version", "planner_input", "routing"},
     ):
         raise ValueError("acceptance input has an invalid shape")
-    if value["schema_version"] not in {1, 2}:
-        raise ValueError("acceptance input schema_version must be 1 or 2")
+    if value["schema_version"] != 2:
+        raise ValueError("acceptance input schema_version must be 2")
     planner_input = value["planner_input"]
     if not isinstance(planner_input, dict) or value[
         "schema_version"

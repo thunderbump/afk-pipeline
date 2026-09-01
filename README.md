@@ -51,15 +51,15 @@ child-work graph without changing Beads:
 python3 -m afk_plan planner.json /new/result-directory
 ```
 
-The input contains `schema_version: 1`, a frozen `parent` with `id`, `title`,
-`description`, `acceptance_criteria`, and `labels`, a trusted `catalog`, and a
-`timeout_seconds` value from 1 through 3600. The catalog lists allowed Project
-slugs and their allowed combinations of `execution`, `evidence_route`, and
+The input contains `schema_version: 2`, a frozen `parent` with `id`, `title`,
+`description`, `acceptance_criteria`, and `labels`, a trusted capability
+`catalog`, and a `timeout_seconds` value from 1 through 3600. The catalog lists
+allowed Project slugs and combinations of `executor`, `evidence_route`, and
 `phase`:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "parent": {
     "id": "central-123",
     "title": "Implement and verify the change",
@@ -68,20 +68,21 @@ slugs and their allowed combinations of `execution`, `evidence_route`, and
     "labels": ["project:example"]
   },
   "catalog": {
-    "schema_version": 1,
+    "schema_version": 2,
     "projects": [
       {
         "slug": "example",
         "routes": [
           {
-            "owner": "Example implementation agent",
-            "execution": "agent",
+            "owner": "AFK Run",
+            "executor": "afk_run",
             "evidence_route": "pipeline_run",
             "phases": ["implementation"]
           },
           {
             "owner": "Example operations service",
-            "execution": "external",
+            "executor": "outside_help",
+            "outside_help_reason": "unavailable_system",
             "evidence_route": "external_check",
             "phases": ["closure"]
           }
@@ -104,10 +105,9 @@ A direct proposal assigns every criterion to the unchanged source Bead and
 contains no children. Its routes may use catalog-defined ownership and evidence
 so the deterministic policy can visibly reject an incompatible proposal. A
 decomposed proposal assigns every criterion to one child and retains the
-existing project, owner, execution, evidence, phase, handoff, and dependency
-contract. The Routing Contract rejects decomposition when every proposed child
-route could instead use the source Project's existing agent implementation
-pipeline.
+project, owner, executor, evidence, phase, and dependency contract. The Routing
+Contract rejects decomposition when every proposed child route could instead
+use the source Project's existing `afk_run` implementation pipeline.
 
 The deterministic Routing Contract requires ordered criterion source chunks whose
 whitespace-normalized concatenation exactly reproduces the parent acceptance
@@ -118,13 +118,11 @@ digests.
 
 For decompose, the existing Plan Contract also requires every criterion to
 belong to exactly one child. Child Projects, owners, and
-execution/evidence/phase combinations must exist in the trusted catalog;
-dependencies must form a DAG; and closure children must follow implementation
-when implementation work exists. External work must include a handoff whose
-authority matches the trusted owner, commit and/or environment subject, and an
-`external_check` completion-record
-type. Legacy v1 human handoffs are rejected by the current contract. The Plan
-Contract still derives
+executor/evidence/phase combinations must exist in the trusted catalog;
+dependencies must form a DAG; and closure children must
+follow implementation when implementation work exists. `outside_help` routes
+must carry a cataloged reason and use `external_check` evidence. The Plan
+Contract derives
 `ready-for-agent`/`ready-for-human` and computes the canonical plan digest used
 by the Child Graph Publisher.
 
@@ -148,17 +146,17 @@ without writing Beads:
 python3 -m afk_plan_accept acceptance.json /new/result-directory
 ```
 
-Input contains exactly `schema_version: 1`, the original validated
+Input contains exactly `schema_version: 2`, the original validated
 `planner_input`, and either its canonical `routing` for direct work or canonical
 `plan` for decomposed work. The pure policy reruns the corresponding contract.
 
 A direct record is accepted only when every route targets the unchanged source
-Bead in its source Project, uses agent execution in the implementation phase,
-and requests `pipeline_run` or `repository_check` evidence. External,
-cross-project, closure-phase, or ambiguous valid direct records seal
-`decision: needs_human` and cannot enter the pipeline. Accepted direct output
-uses policy `pipeline-compatible-direct-v1`, contains no Plan, and has no Child
-Graph Publisher authority.
+Bead in its source Project, uses `afk_run` in the implementation phase, and
+requests `pipeline_run` or `repository_check` evidence. Ambiguity produces
+`needs_clarification`; non-pipeline work requires decomposition; unavailable
+capability reports the cataloged `outside_help` reason. Accepted direct output
+uses policy `pipeline-compatible-capability-direct-v2`, contains no Plan, and
+has no Child Graph Publisher authority.
 
 The decomposed path retains the existing behavior. It accepts any Plan with
 `status: proposed`, an empty ambiguity list, and contract-derived
@@ -166,10 +164,10 @@ The decomposed path retains the existing behavior. It accepts any Plan with
 better than another. Split quality remains a Planner prompt concern.
 
 An accepted decomposed record wraps the unchanged Plan and repeats its parent,
-catalog, and Plan identities. It keeps policy `contract-valid-proposed-v1` and
-`basis: structural_validity_only`, then computes the same canonical acceptance
-digest used by the Child Graph Publisher. The component does not itself create
-children or start work. An unaccepted routing or Plan exits `1`. Malformed or
+catalog, and Plan identities. It keeps policy
+`contract-valid-capability-plan-v2` and `basis: structural_validity_only`, then
+computes the same canonical acceptance digest used by the Child Graph
+Publisher. The component does not itself create children or start work. An unaccepted routing or Plan exits `1`. Malformed or
 tampered evidence exits `2` before creating a result. Accepted input is copied
 to `input.json`, and `output.json` is sealed last. The component performs no
 inference, process launch, Git work, or Beads access.
@@ -1156,9 +1154,8 @@ typed terminal evidence, and a timeout. Every child must be closed. Its
 `parent-child` and `blocks` relationships must exactly match the accepted Plan.
 Completion results must cover every published child exactly once and retain the
 accepted Plan, child, criteria, producer, current subject, evidence references,
-and satisfaction state. The deterministic fan-in preserves each accepted
-child's versioned routing field: v1 uses `execution`, while capability-routing
-v2 uses `executor` without adding a legacy `execution` alias.
+and satisfaction state. The deterministic fan-in preserves each accepted child's `executor` routing
+field without adding aliases.
 
 Pipeline terminal evidence is a prepared Run that must belong to the published
 child, end at Coordinator `completed/stop`, contain a valid Committed Change,
@@ -1179,9 +1176,8 @@ runtime-owned `inference/` evidence and receipt, and an atomically sealed
 `output.json`. A completed result decides `accepted` or `incomplete`, gives one
 decision per canonical parent criterion, and lists exactly one gap per
 incomplete criterion. An incomplete result also proposes one advisory follow-up
-child using the matching Plan child shape. Project, owner, phase, versioned
-executor, evidence route, and dependencies (plus the v1 handoff when required)
-are checked against the trusted catalog before sealing. That proposal has no
+child using the matching Plan child shape. Project, owner, phase, executor, evidence route, outside-help reason, and
+dependencies are checked against the trusted catalog before sealing. That proposal has no
 publication or work authority.
 
 Exit status is `0` only for an accepted parent, `1` for incomplete or sealed

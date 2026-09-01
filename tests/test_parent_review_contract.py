@@ -1,7 +1,7 @@
 import unittest
 
 from afk_parent_review.contract import validate_follow_up
-from afk_parent_review.task import CAPABILITY_SYSTEM_PROMPT
+from afk_parent_review.task import SYSTEM_PROMPT
 
 
 class ParentReviewCapabilityContractTest(unittest.TestCase):
@@ -64,7 +64,7 @@ class ParentReviewCapabilityContractTest(unittest.TestCase):
             )
 
     def test_capability_prompt_has_only_capability_and_performed_work_semantics(self):
-        prompt = CAPABILITY_SYSTEM_PROMPT.lower()
+        prompt = SYSTEM_PROMPT.lower()
         self.assertIn("unavailable", prompt)
         self.assertIn("work performed", prompt)
         self.assertIn("external_check", prompt)

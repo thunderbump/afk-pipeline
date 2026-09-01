@@ -13,7 +13,7 @@ def load_accepted_plan(directory: Path) -> tuple[dict[str, object], dict[str, ob
     if (
         not isinstance(request, dict)
         or set(request) != {"schema_version", "planner_input", "plan"}
-        or request["schema_version"] not in {1, 2}
+        or request["schema_version"] != 2
         or not isinstance(request["planner_input"], dict)
         or request["schema_version"] != request["planner_input"].get("schema_version")
     ):
@@ -102,11 +102,7 @@ def external_reference(plan_sha256: str, local_id: str) -> str:
 def child_acceptance(plan: dict[str, object], child: dict[str, object]) -> str:
     criteria = {item["id"]: item for item in plan["criteria"]}
     statements = [f"- {criteria[item]['statement']}" for item in child["criteria"]]
-    if child.get("execution") == "external":
-        statements.append(
-            "- Valid external-check evidence must be attached before this child closes."
-        )
-    if child.get("executor") == "outside_help":
+    if child["executor"] == "outside_help":
         statements.append(
             "- external_check evidence of the work performed by the named outside source must be attached before this child closes."
         )
@@ -126,7 +122,7 @@ def child_description(
         "## Parent acceptance criteria",
         *[f"- {criteria[item]['source_text']}" for item in child["criteria"]],
     ]
-    if plan["schema_version"] == 2 and child["executor"] == "outside_help":
+    if child["executor"] == "outside_help":
         lines.extend(
             [
                 "",
@@ -141,51 +137,6 @@ def child_description(
                 *([f"- Child Bead: `{bead_id}`"] if bead_id is not None else []),
                 "",
                 "Attach external_check evidence of the work performed before closing this child.",
-            ]
-        )
-    if (
-        plan["schema_version"] == 1
-        and child["execution"] != "agent"
-        and bead_id is not None
-    ):
-        handoff = child["handoff"]
-        heading = "External completion handoff"
-        ownership = "This child is completed by the named external authority."
-        subject = {field: f"<{field}>" for field in handoff["subject_fields"]}
-        record = {
-            "schema_version": 1,
-            "child": bead_id,
-            "parent_plan": plan["plan_sha256"],
-            "outcome": "satisfied",
-            "producer": {
-                "kind": handoff["completion_record"],
-                "identity": handoff["authority"],
-            },
-            "criteria": child["criteria"],
-            "subject": subject,
-            "evidence": [f"<{handoff['completion_record']}-evidence>"],
-            "accepted_at": "<timestamp>",
-        }
-        lines.extend(
-            [
-                "",
-                f"## {heading}",
-                "",
-                ownership,
-                f"- Parent Bead: `{parent_id}`",
-                f"- Parent plan: `{plan['plan_sha256']}`",
-                f"- Child Bead: `{bead_id}`",
-                f"- Expected authority: `{handoff['authority']}`",
-                f"- Required subject fields: `{', '.join(handoff['subject_fields'])}`",
-                f"- Completion record kind: `{handoff['completion_record']}`",
-                "",
-                "Attach this structured Completion Record before closing the child:",
-                "",
-                "```json",
-                json.dumps(record, indent=2),
-                "```",
-                "",
-                "A changed parent plan or referenced subject requires new evidence.",
             ]
         )
     return "\n".join(lines)

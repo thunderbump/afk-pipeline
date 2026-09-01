@@ -462,7 +462,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         (self.acceptance / "input.json").write_text(
             json.dumps(
                 {
-                    "schema_version": 1,
+                    "schema_version": 2,
                     "planner_input": self.request,
                     "plan": self.plan,
                 }
@@ -481,7 +481,7 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
                 (
                     "implementation",
                     "pipeline_run",
-                    "Example agent",
+                    "AFK Run",
                     ["criterion-1"],
                 ),
                 ("approval", "external_check", "Brian", ["criterion-2"]),
@@ -769,7 +769,8 @@ def mixed_plan():
     request["catalog"]["projects"][0]["routes"].append(
         {
             "owner": "Brian",
-            "execution": "external",
+            "executor": "outside_help",
+            "outside_help_reason": "human_judgment",
             "evidence_route": "external_check",
             "phases": ["closure"],
         }
@@ -778,7 +779,7 @@ def mixed_plan():
     return request, build_plan(
         request,
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "criteria": [
                 {
                     "id": "criterion-1",
@@ -798,9 +799,9 @@ def mixed_plan():
                     "objective": "Implement the requested change.",
                     "criteria": ["criterion-1"],
                     "project": "example",
-                    "owner": "Example agent",
+                    "owner": "AFK Run",
                     "phase": "implementation",
-                    "execution": "agent",
+                    "executor": "afk_run",
                     "evidence_route": "pipeline_run",
                     "depends_on": [],
                 },
@@ -812,14 +813,10 @@ def mixed_plan():
                     "project": "example",
                     "owner": "Brian",
                     "phase": "closure",
-                    "execution": "external",
+                    "executor": "outside_help",
+                    "outside_help_reason": "human_judgment",
                     "evidence_route": "external_check",
                     "depends_on": ["implementation"],
-                    "handoff": {
-                        "authority": "Brian",
-                        "subject_fields": ["commit"],
-                        "completion_record": "external_check",
-                    },
                 },
             ],
             "ambiguities": [],

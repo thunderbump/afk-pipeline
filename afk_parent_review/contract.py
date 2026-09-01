@@ -7,7 +7,6 @@ from afk_complete.contract import load_result, validate_subject
 from afk_parent_review.evidence import validate_terminal_evidence
 from afk_plan.contract import (
     bounded_text,
-    execution_field,
     object_with_keys,
     validate_children,
 )
@@ -84,7 +83,6 @@ def load_fan_in(request: dict[str, object]) -> dict[str, object]:
         acceptance,
     )
     plan = acceptance["plan"]
-    executor_field = execution_field(plan["schema_version"])
     mappings = {item["local_id"]: item["bead_id"] for item in publication["children"]}
     validate_graph(
         request["child_graph"], planner_input["parent"]["id"], plan, mappings
@@ -117,7 +115,7 @@ def load_fan_in(request: dict[str, object]) -> dict[str, object]:
                 "local_id": child["local_id"],
                 "child_id": child_id,
                 "criteria": child["criteria"],
-                executor_field: child[executor_field],
+                "executor": child["executor"],
                 "evidence_basis": output["evidence_basis"],
                 "satisfies_criteria": output["satisfies_criteria"],
                 "subject": output["record"]["subject"],

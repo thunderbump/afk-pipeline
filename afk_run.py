@@ -1005,7 +1005,7 @@ def validate_acceptance_routing(value):
         raise PreparationError("configuration acceptance_routing is malformed")
     positive(value["timeout_seconds"], "acceptance_routing timeout_seconds")
     try:
-        value["catalog"] = validate_catalog(value["catalog"], 2)
+        value["catalog"] = validate_catalog(value["catalog"])
     except (TypeError, ValueError) as error:
         raise PreparationError(
             "configuration acceptance_routing catalog is malformed"
