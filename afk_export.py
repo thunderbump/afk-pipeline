@@ -1642,12 +1642,14 @@ def _receipt_bound_inference_artifacts(
 ):
     # prompt.json contains three independently limited public artifacts and is
     # repeated by invocation.json. Account for JSON escaping while retaining a
-    # finite private-envelope read bound. The receipt is only integrity metadata,
-    # so keep its substantially smaller structured-record admission limit.
+    # finite private-envelope read bound. A receipt likewise repeats the accepted
+    # response, whose independently bound artifact can legitimately exceed the
+    # ordinary structured-record limit.
     prompt_envelope_limit = V2_MAX_ARTIFACT_BYTES * 20 + 64 * 1024
+    receipt_envelope_limit = V2_MAX_ARTIFACT_BYTES * 20 + MAX_JSON_BYTES
     try:
         receipt_raw = read_bytes_at(
-            directory_descriptor, "receipt.json", MAX_JSON_BYTES
+            directory_descriptor, "receipt.json", receipt_envelope_limit
         )
         receipt = json.loads(decode_text(receipt_raw))
         invocation_raw = read_bytes_at(
@@ -1657,6 +1659,18 @@ def _receipt_bound_inference_artifacts(
         raise ExportError("invalid Inference Receipt evidence") from error
 
     if not isinstance(receipt, dict):
+        raise ExportError("invalid Inference Receipt evidence")
+    # Keep metadata bounded without charging the duplicated terminal response
+    # against that budget. The response is authenticated and admitted below
+    # through its own artifact and V2_MAX_ARTIFACT_BYTES limit.
+    metadata_only_receipt = {**receipt, "terminal_response": None}
+    try:
+        metadata_bytes = (
+            json.dumps(metadata_only_receipt, indent=2, ensure_ascii=False) + "\n"
+        ).encode()
+    except (TypeError, ValueError, UnicodeEncodeError) as error:
+        raise ExportError("invalid Inference Receipt evidence") from error
+    if len(metadata_bytes) > MAX_JSON_BYTES:
         raise ExportError("invalid Inference Receipt evidence")
     identity = receipt.get("identity")
     hashes = receipt.get("hashes")

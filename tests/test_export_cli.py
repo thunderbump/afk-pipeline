@@ -1695,6 +1695,41 @@ class ExportCliTests(unittest.TestCase):
             ):
                 afk_export.receipt_bound_inference_artifacts(root, relative, "review")
 
+    def test_large_terminal_response_does_not_suppress_prompt_sections(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            metadata_limit = 4 * 1024
+            response = {"answer": "x" * (metadata_limit + 1024)}
+            response_path = inference / "attempts/1/response.json"
+            response_path.write_text(json.dumps(response) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response_path.read_bytes()
+            ).hexdigest()
+            receipt["terminal_response"] = response
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            self.assertGreater(receipt_path.stat().st_size, metadata_limit)
+
+            with mock.patch("afk_export.MAX_JSON_BYTES", metadata_limit):
+                catalog = afk_export.receipt_bound_inference_artifacts(
+                    root, relative, "review"
+                )
+
+            kinds = {item["kind"] for item in catalog}
+            self.assertIn("inference_terminal_response_view", kinds)
+            self.assertTrue(
+                {
+                    "inference_system_instructions",
+                    "inference_task_instructions",
+                    "inference_task_data",
+                }.issubset(kinds)
+            )
+
     def test_unpaired_surrogate_marks_only_its_prompt_section_unsafe(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
