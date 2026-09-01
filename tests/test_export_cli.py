@@ -1637,8 +1637,7 @@ class ExportCliTests(unittest.TestCase):
             self.add_inference_receipt(inference)
             prompt_path = inference / "prompt.json"
             prompt = json.loads(prompt_path.read_text())
-            prompt["system"] = "x" * (afk_export.V2_MAX_ARTIFACT_BYTES + 1)
-            prompt["untrusted_task_data"] = None
+            prompt["untrusted_task_data"] = "x" * afk_export.V2_MAX_ARTIFACT_BYTES
             prompt_path.write_text(json.dumps(prompt) + "\n")
             invocation_path = inference / "invocation.json"
             invocation = json.loads(invocation_path.read_text())
@@ -1646,7 +1645,6 @@ class ExportCliTests(unittest.TestCase):
             invocation_path.write_text(json.dumps(invocation) + "\n")
             receipt_path = inference / "receipt.json"
             receipt = json.loads(receipt_path.read_text())
-            receipt["policy"]["system_instructions"] = prompt["system"]
             receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
                 prompt_path.read_bytes()
             ).hexdigest()
@@ -1672,15 +1670,30 @@ class ExportCliTests(unittest.TestCase):
                 )[0]
 
             self.assertEqual(
-                descriptors["inference_system_instructions"]["state"], "oversized"
+                descriptors["inference_system_instructions"]["state"], "downloadable"
             )
             self.assertEqual(
                 descriptors["inference_task_instructions"]["state"], "downloadable"
             )
-            self.assertEqual(
-                descriptors["inference_task_data"]["state"], "downloadable"
-            )
+            self.assertEqual(descriptors["inference_task_data"]["state"], "oversized")
             self.assertEqual(len(descriptors), 3)
+
+    def test_receipt_loading_rejects_oversized_integrity_metadata(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["ignored_padding"] = "x" * afk_export.MAX_JSON_BYTES
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            with self.assertRaisesRegex(
+                afk_export.ExportError, "invalid Inference Receipt evidence"
+            ):
+                afk_export.receipt_bound_inference_artifacts(root, relative, "review")
 
     def test_unpaired_surrogate_marks_only_its_prompt_section_unsafe(self):
         with tempfile.TemporaryDirectory() as temporary:
