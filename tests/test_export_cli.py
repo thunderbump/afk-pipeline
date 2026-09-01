@@ -533,6 +533,98 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(empty["state"], "empty")
             self.assertEqual(empty["unavailable_reason"], "empty")
 
+    def test_v2_sanitizes_only_the_validated_preflight_classifier_key(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(source, source / "preflight", stored_classifier=True)
+            output_path = source / "preflight/output.json"
+            private = output_path.read_bytes()
+            private_output = json.loads(private)
+            classifier_key = private_output["classifier"]["key"]
+            unrelated_hex = "b" * 64
+            private_output["classifier"]["policy"]["system_prompt_sha256"] = (
+                unrelated_hex
+            )
+            # Recompute the key after changing an inspectable policy field so the
+            # retained output remains a schema-valid Preflight record.
+            from afk_preflight.contract import classification_key as derive_key
+
+            classifier_key = derive_key(
+                json.loads((source / "preflight-input.json").read_text()),
+                private_output["classifier"]["policy"],
+            )
+            private_output["classifier"]["key"] = classifier_key
+            private_output["classifier"]["record"] = f"{classifier_key}.json"
+            output_path.write_text(json.dumps(private_output))
+            private = output_path.read_bytes()
+            destination = root / "v2-bundle"
+
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(output_path.read_bytes() == private)
+            workflow = json.loads((destination / "workflow-run.json").read_text())
+            descriptor = next(
+                item
+                for item in workflow["artifacts"]
+                if item["source"]["path"] == "preflight/output.json"
+            )
+            public_bytes = (destination / descriptor["path"]).read_bytes()
+            public = json.loads(public_bytes)
+            self.assertEqual(
+                public["classifier"]["key"],
+                afk_export.PUBLIC_PREFLIGHT_CLASSIFIER_KEY,
+            )
+            self.assertFalse(public["classifier"]["key"] == classifier_key)
+            self.assertTrue(
+                public["classifier"]["record"] == private_output["classifier"]["record"]
+            )
+            self.assertEqual(
+                public["classifier"]["policy"]["system_prompt_sha256"], unrelated_hex
+            )
+            self.assertEqual(descriptor["sanitization_status"], "sanitized")
+            self.assertEqual(descriptor["public_bytes"], len(public_bytes))
+            self.assertEqual(
+                descriptor["public_sha256"], hashlib.sha256(public_bytes).hexdigest()
+            )
+            manifest = json.loads((destination / "manifest.json").read_text())
+            inventory = {item["path"]: item for item in manifest["files"]}
+            self.assertEqual(inventory[descriptor["path"]]["bytes"], len(public_bytes))
+            self.assertEqual(
+                inventory[descriptor["path"]]["sha256"],
+                hashlib.sha256(public_bytes).hexdigest(),
+            )
+
+    def test_v2_does_not_sanitize_preflight_output_changed_after_validation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(source, source / "preflight", stored_classifier=True)
+            observed = afk_export.load_source_v2(source, None, None, None)
+            candidate = next(
+                item
+                for item in afk_export.artifact_candidates(observed)
+                if item["source"] == "preflight/output.json"
+            )
+
+            output_path = source / "preflight/output.json"
+            changed = json.loads(output_path.read_text())
+            validated_key = changed["classifier"]["key"]
+            changed["requests"] = "content that did not pass the contract"
+            output_path.write_text(json.dumps(changed))
+            self.assertEqual(changed["classifier"]["key"], validated_key)
+
+            descriptor, public = afk_export.derive_public_artifact(
+                candidate, observed["redactions"]
+            )
+
+            self.assertIsNone(public)
+            self.assertEqual(descriptor["state"], "unsafe")
+            self.assertEqual(descriptor["unavailable_reason"], "unsafe_or_invalid")
+            self.assertNotIn("path", descriptor)
+            self.assertEqual(json.loads(output_path.read_text()), changed)
+
     def test_v2_redacts_a_command_credential_value_from_assignment_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -826,6 +918,36 @@ class ExportCliTests(unittest.TestCase):
                 (destination / "workflow-run.json").stat().st_size,
                 afk_export.MAX_INCLUDED_BYTES,
             )
+
+    def test_v2_rejects_a_symlinked_preflight_invocation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            external = root / "external-preflight"
+            self.add_preflight(source, external)
+            (source / "preflight").symlink_to(external, target_is_directory=True)
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_v2_rejects_successful_preflight_evidence_for_another_bead(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_preflight(
+                source, source / "preflight", bead_id="central-unrelated"
+            )
+
+            destination = root / "v2-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_v2_applies_the_artifact_limit_after_canonicalization(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1780,6 +1902,182 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
             self.assertNotIn("Traceback", result.stderr)
 
+    def test_v2_exports_a_terminal_preflight_pause_without_coordinator_history(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preflight_input = {
+                "schema_version": 1,
+                "source": {"kind": "bead", "id": "central-example"},
+                "title": "Needs an operator",
+                "acceptance_criteria": "Deployment verification passes.",
+                "evidence_catalog": [
+                    {
+                        "category": "operator_external",
+                        "route": "operator handoff",
+                        "can_prove": "external deployment state",
+                    }
+                ],
+                "timeout_seconds": 60,
+            }
+            request = {
+                "index": 1,
+                "request": "Deployment verification passes.",
+                "category": "operator_external",
+                "route": "operator handoff",
+                "rationale": "An operator owns deployment.",
+            }
+            preflight_output = {
+                "schema_version": 1,
+                "outcome": "completed",
+                "source": preflight_input["source"],
+                "decision": "pause",
+                "started_at": "2026-08-19T00:00:00Z",
+                "finished_at": "2026-08-19T00:00:01Z",
+                "duration_seconds": 1,
+                "process": {"exit_code": 0, "signal": None},
+                "agent": {"status": "completed"},
+                "classifier": {
+                    "kind": "inference",
+                    "provider": "openai-codex",
+                    "model": "gpt-5.6-luna",
+                    "status": "completed",
+                },
+                "requests": [request],
+                "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+            }
+            preparation["preparation_status"] = "paused"
+            preparation["preflight"] = {
+                "command": ["private"],
+                "directory": "preflight",
+                "result": "preflight/output.json",
+                "status": "completed",
+                "exit_code": 0,
+                "outcome": "completed",
+                "decision": "pause",
+            }
+            preparation["coordinator"].update(
+                status="not_started", exit_code=None, outcome=None, decision=None
+            )
+            related_raw = (
+                b'{"description":"Document token=ghp_example_value literally.",'
+                b'"id":"central-example","relationship":"subject"}\n'
+            )
+            related_path = source / "related-work.jsonl"
+            related_path.write_bytes(related_raw)
+            related = {
+                "path": str(related_path),
+                "sha256": hashlib.sha256(related_raw).hexdigest(),
+                "media_type": "application/x-ndjson",
+                "record_count": 1,
+                "bytes": len(related_raw),
+            }
+            preparation["related_work"] = related
+            assignment_path = source / "assignment.json"
+            assignment = json.loads(assignment_path.read_text())
+            assignment.update(
+                related_work=related,
+                related_work_instructions="Assignment is authoritative.",
+            )
+            assignment_path.write_text(json.dumps(assignment))
+            request_path = source / "coordinator-request.json"
+            coordinator_request = json.loads(request_path.read_text())
+            coordinator_request["related_work"] = related
+            request_path.write_text(json.dumps(coordinator_request))
+            preparation_path.write_text(json.dumps(preparation))
+            (source / "preflight-input.json").write_text(json.dumps(preflight_input))
+            preflight = source / "preflight"
+            preflight.mkdir()
+            (preflight / "input.json").write_text(json.dumps(preflight_input))
+            (preflight / "output.json").write_text(json.dumps(preflight_output))
+            (preflight / "events.jsonl").write_text('{"type":"message_end"}\n')
+            (preflight / "stderr.log").write_text("")
+            for child in list((source / "coordinator").iterdir()):
+                if child.is_dir():
+                    import shutil
+
+                    shutil.rmtree(child)
+                else:
+                    child.unlink()
+
+            destination = root / "paused-bundle"
+            result = self.export_v2(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(record["status"], "paused")
+            self.assertEqual(record["history"], [])
+            self.assertEqual(
+                record["terminal"], {"stage": "preflight", "decision": "pause"}
+            )
+            self.assertEqual(record["preflight"]["requests"], [request])
+            descriptor = next(
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(descriptor["media_type"], "application/x-ndjson")
+            self.assertEqual(descriptor["public_sha256"], related["sha256"])
+            self.assertEqual(descriptor["sanitization_status"], "unchanged")
+            self.assertEqual(
+                (destination / descriptor["path"]).read_bytes(), related_raw
+            )
+
+            v3_destination = root / "paused-v3-bundle"
+            v3_result = self.export_v3(source, v3_destination)
+            self.assertEqual(v3_result.returncode, 0, v3_result.stderr)
+            v3_record = json.loads((v3_destination / "workflow-run.json").read_text())
+            v3_descriptor = next(
+                item
+                for item in v3_record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(v3_descriptor["sanitization_status"], "sanitized")
+            v3_public = (v3_destination / v3_descriptor["path"]).read_text()
+            self.assertNotIn("ghp_example_value", v3_public)
+            self.assertIn(afk_export.REDACTED_SECRET, v3_public)
+
+            unsafe_related = (
+                b'{"description":"-----BEGIN PRIVATE KEY-----",'
+                b'"id":"central-example","relationship":"subject"}\n'
+            )
+            related_path.write_bytes(unsafe_related)
+            related.update(
+                sha256=hashlib.sha256(unsafe_related).hexdigest(),
+                bytes=len(unsafe_related),
+            )
+            preparation["related_work"] = related
+            assignment["related_work"] = related
+            coordinator_request["related_work"] = related
+            preparation_path.write_text(json.dumps(preparation))
+            assignment_path.write_text(json.dumps(assignment))
+            request_path.write_text(json.dumps(coordinator_request))
+            unsafe_destination = root / "unsafe-related-v3-bundle"
+            unsafe_result = self.export_v3(source, unsafe_destination)
+            self.assertEqual(unsafe_result.returncode, 0, unsafe_result.stderr)
+            unsafe_record = json.loads(
+                (unsafe_destination / "workflow-run.json").read_text()
+            )
+            unsafe_descriptor = next(
+                item
+                for item in unsafe_record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(unsafe_descriptor["state"], "unsafe")
+            self.assertEqual(
+                unsafe_descriptor["unavailable_reason"], "unsafe_or_invalid"
+            )
+
+            invocation_input = {**preflight_input, "title": "Fabricated invocation"}
+            (preflight / "input.json").write_text(json.dumps(invocation_input))
+            rejected_destination = root / "inconsistent-paused-bundle"
+            rejected = self.export_v2(source, rejected_destination)
+            self.assertEqual(rejected.returncode, 1, rejected.stderr)
+            self.assertFalse(rejected_destination.exists())
+            self.assertEqual(json.loads(rejected.stdout)["error"], "invalid_run")
+
     def test_v2_exports_supported_acceptance_routing_scenarios_end_to_end(self):
         scenarios = (
             ("direct", "completed", "direct", None),
@@ -2296,6 +2594,87 @@ class ExportCliTests(unittest.TestCase):
                     child.unlink()
         preparation_path.write_text(json.dumps(preparation))
         return planner_raw, policy_raw
+
+    def add_preflight(
+        self, source, invocation, bead_id="central-example", stored_classifier=False
+    ):
+        preflight_input = {
+            "schema_version": 1,
+            "source": {"kind": "bead", "id": bead_id},
+            "title": "Portable publication",
+            "acceptance_criteria": "The export is safe.",
+            "evidence_catalog": [
+                {
+                    "category": "repository_validation",
+                    "route": "repository validation",
+                    "can_prove": "the export is safe",
+                }
+            ],
+            "timeout_seconds": 60,
+        }
+        requests = [
+            {
+                "index": 1,
+                "request": "The export is safe.",
+                "category": "repository_validation",
+                "route": "repository validation",
+                "rationale": "Repository validation proves this request.",
+            }
+        ]
+        classifier = {
+            "kind": "inference",
+            "provider": "openai-codex",
+            "model": "gpt-5.6-luna",
+            "status": "completed",
+        }
+        if stored_classifier:
+            from afk_preflight.contract import classification_key
+
+            policy = {
+                "input_contract": "afk-preflight-input-v1",
+                "classification_contract": "afk-preflight-classification-v1",
+                "provider": "openai-codex",
+                "model": "gpt-5.6-luna",
+                "thinking": "low",
+                "system_prompt_sha256": "1" * 64,
+                "adapter_command_sha256": "2" * 64,
+            }
+            key = classification_key(preflight_input, policy)
+            classifier.update(
+                source="inferred", key=key, record=f"{key}.json", policy=policy
+            )
+        preflight_output = {
+            "schema_version": 1,
+            "outcome": "completed",
+            "source": preflight_input["source"],
+            "decision": "proceed",
+            "started_at": "2026-08-19T00:00:00Z",
+            "finished_at": "2026-08-19T00:00:01Z",
+            "duration_seconds": 1,
+            "process": {"exit_code": 0, "signal": None},
+            "agent": {"status": "completed"},
+            "classifier": classifier,
+            "requests": requests,
+            "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
+        }
+        preparation_path = source / "preparation.json"
+        preparation = json.loads(preparation_path.read_text())
+        preparation["preflight"] = {
+            "command": ["private"],
+            "directory": "preflight",
+            "result": "preflight/output.json",
+            "status": "completed",
+            "exit_code": 0,
+            "outcome": "completed",
+            "decision": "proceed",
+        }
+        preparation_path.write_text(json.dumps(preparation))
+        (source / "preflight-input.json").write_text(json.dumps(preflight_input))
+        invocation.mkdir()
+        (invocation / "input.json").write_text(json.dumps(preflight_input))
+        (invocation / "output.json").write_text(json.dumps(preflight_output))
+        (invocation / "events.jsonl").write_text('{"type":"message_end"}\n')
+        (invocation / "stderr.log").write_text("")
 
     def add_inference_receipt(self, inference):
         inference.mkdir()

@@ -374,7 +374,9 @@ Preparer retains the exact
 Planner input/output and deterministic Policy input/output in the Run root.
 `acceptance_routing` is the only Run admission configuration. Run Preparer
 rejects unknown configuration fields. The retired `attestation` section is
-rejected with instructions to use capability-based `outside_help`.
+rejected with instructions to use capability-based `outside_help`. Historical
+v1 Run and Preflight evidence remains readable through the exporter, but no
+current Run path produces or admits it.
 
 Inference roles can be selected without rebuilding adapter commands. For example,
 `"inference_roles": {"review": {"model": "gpt-5.6-terra", "thinking": "low"}}`
@@ -502,15 +504,17 @@ caller must provide those facts explicitly:
 already carries the corresponding identity. The destination parent must exist
 and the destination itself must not. Source and destination may not overlap.
 
-The exporter validates terminal Coordinator evidence or sealed Acceptance
-Routing that intentionally stopped before Coordinator. A routing-only export has
-an empty history; it never invents Coordinator invocations.
+The exporter validates terminal Coordinator evidence, a retained terminal
+`pause` from historical Preflight, or sealed Acceptance Routing that
+intentionally stopped before Coordinator. A paused or routing-only export has an
+empty history; it never invents Coordinator invocations. Preflight support is a
+read-only retained-data compatibility path, not a current routing producer.
 
 Publication Bundle v3 is the default producer output. It retains the readable
-normalized Run fields, a bounded `acceptance_routing` stage, and a semantic
-`artifacts` inventory. The routing stage records Planner outcome, Policy outcome
-and decision, a direct-route or
-child-route summary, and the exact contract reason for outside help or
+normalized Run fields, a historical Preflight request ledger when present, a
+bounded `acceptance_routing` stage, and a semantic `artifacts` inventory. The
+routing stage records Planner outcome, Policy outcome and decision, a direct-route
+or child-route summary, and the exact contract reason for outside help or
 clarification. Each descriptor identifies one actual step object by its safe
 Run-relative source, scope, kind,
 media type, publication state, public size and SHA-256, sanitization status, and
@@ -527,14 +531,16 @@ an identity or hash disagreement rejects the Run. Invocation records, adapter
 contracts, task-prompt duplicates, and Receipts remain validation evidence and
 are not published as operator artifacts. A bounded inference-session summary
 retains receipt-authenticated adapter, retry, terminal-attempt, and validation
-status without copying prompt or response bodies into the Run record. Artifact
-state is `downloadable`,
+status without copying prompt or response bodies into the Run record. In a
+schema-validated historical Preflight output, the classifier `key` alone is
+replaced with an explicit public marker. Artifact state is `downloadable`,
 `empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
 carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
 optional sources remain explicit without public bytes. Structured payloads and
 logs are admitted before events. The allowlist covers the frozen Bead,
-Assignment, Coordinator request, Preparation record, Coordinator records, and
-each Component Invocation input, output, and declared artifact. The limits are
+Assignment, Coordinator request, Preparation record, retained Preflight records,
+Coordinator records, and each Component Invocation input, output, and declared
+artifact. The limits are
 25 MiB per uncompressed artifact, 32 MiB for the complete bundle, 128 payload
 files, and a 64 KiB manifest. This allows useful
 event streams above the old 8 MiB bundle limit.

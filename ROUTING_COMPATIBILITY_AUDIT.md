@@ -12,13 +12,17 @@ fixture producer now emits capability routes. Planner, policy, publisher, and
 fan-in loaders reject a routing or Plan input whose schema version is not `2`.
 The old `execution`, handoff, human-ambiguity, and v1 policy branches therefore
 had no current caller and were removed rather than moved to a compatibility
-module. The historical Acceptance Evidence classification package was also a v1
-routing producer. Its contract, store, exporter ingestion and publication path,
-tests, configuration tombstone, and documentation have now been deleted.
+module. The historical Acceptance Evidence classifier and store were also v1
+routing producers and have been deleted.
 
-No operational routing artifacts are stored in this repository. Run artifact
-and export directories are caller-owned external data; the repository has no
-retention or replay promise for obsolete routing/Plan evidence. Any externally
-retained obsolete artifact must be read with the historical revision that
-created it and cannot be admitted to a current Run. There is consequently no
-blocked removal condition or temporary compatibility layer.
+No operational routing artifacts are stored in this repository, and obsolete
+routing/Plan evidence cannot be admitted to a current Run. One retained-data
+dependency does remain: the documented exporter accepts caller-owned historical
+Run directories containing a completed v1 Preflight, including Runs that
+terminally paused before Coordinator. The exporter therefore keeps only the v1
+Preflight data contract, strict ingestion, sanitized publication, and regression
+tests; it cannot produce or store new Preflight evidence. This compatibility can
+be removed after the exporter API's historical-Run support is retired and all
+caller-owned Preflight Runs within its announced retention window have been
+exported or migrated. Until then, callers do not need the removed routing v1
+producer or any compatibility path into current Run admission.
