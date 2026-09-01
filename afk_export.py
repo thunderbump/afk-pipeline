@@ -2426,6 +2426,48 @@ def component_contract_allows_null_agent(component, value):
     )
 
 
+def normalize_component_agent(component, value, redactions):
+    """Validate and normalize an agent envelope produced by a component."""
+    agent = value["agent"]
+    if agent is None:
+        if not component_contract_allows_null_agent(component, value):
+            raise ExportError("component contract does not permit a null agent")
+        return None
+
+    if component not in {"attempt", "review", "assessment", "response"}:
+        raise ExportError("component contract does not permit agent facts")
+    if not isinstance(agent, dict):
+        raise ExportError("invalid agent facts")
+
+    status = agent.get("status")
+    if status == "error":
+        if set(agent) != {"status", "error"} or not agent["error"]:
+            raise ExportError("invalid agent facts")
+        # Validate private error text even though the public representation only
+        # exposes its category.
+        bounded_text(agent["error"], redactions)
+    elif status in {"completed", "aborted"}:
+        if set(agent) != {"status"}:
+            raise ExportError("invalid agent facts")
+    else:
+        raise ExportError("invalid agent facts")
+
+    # Inference-backed components only record an agent after accepting its
+    # response. Attempt additionally exposes aborted and error adapter states.
+    if component != "attempt" and status != "completed":
+        raise ExportError("invalid agent facts")
+    if (
+        value["outcome"] == COMPONENT_TOPOLOGY[component]["success"]
+        and status != "completed"
+    ):
+        raise ExportError("successful component must have a completed agent")
+
+    return {
+        "status": status,
+        **({"error_category": "protocol_error"} if status == "error" else {}),
+    }
+
+
 def normalize_component_output(component, value, redactions):
     result = {"outcome": value["outcome"]}
     for field in ("started_at", "finished_at"):
@@ -2450,21 +2492,10 @@ def normalize_component_output(component, value, redactions):
             **({"error_category": "execution_error"} if process.get("error") else {}),
         }
     if "agent" in value:
-        agent = value["agent"]
-        if agent is None:
-            if not component_contract_allows_null_agent(component, value):
-                raise ExportError("component contract does not permit a null agent")
-            # A permitted null agent is an observed fact: no response was
-            # accepted (or required for the no-action Response path). Preserve
-            # that absence rather than fabricating a terminal agent status.
-            result["agent"] = None
-        else:
-            if not isinstance(agent, dict) or not isinstance(agent.get("status"), str):
-                raise ExportError("invalid agent facts")
-            result["agent"] = {
-                "status": bounded_text(agent["status"], redactions),
-                **({"error_category": "protocol_error"} if agent.get("error") else {}),
-            }
+        # A permitted null agent is an observed fact: no response was accepted
+        # (or required for the no-action Response path). Preserve that absence
+        # rather than fabricating a terminal agent status.
+        result["agent"] = normalize_component_agent(component, value, redactions)
     if "repository" in value:
         result["repository"] = normalize_repository(value["repository"], redactions)
     if value["outcome"] == COMPONENT_TOPOLOGY[component]["success"]:

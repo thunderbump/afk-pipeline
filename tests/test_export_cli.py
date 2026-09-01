@@ -473,18 +473,27 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_rejects_malformed_non_null_component_agent(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source = self.sealed_preparer(root)
-            output_path = source / "coordinator/04-review/output.json"
-            output = json.loads(output_path.read_text())
-            output["agent"] = "completed"
-            output_path.write_text(json.dumps(output))
+        malformed_agents = (
+            "completed",
+            {"status": "garbage"},
+            {"status": ""},
+            {"status": "completed", "error": "contradictory error"},
+            {"status": "error"},
+            {"status": "error", "error": ""},
+        )
+        for agent in malformed_agents:
+            with self.subTest(agent=agent), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                source = self.sealed_preparer(root)
+                output_path = source / "coordinator/04-review/output.json"
+                output = json.loads(output_path.read_text())
+                output["agent"] = agent
+                output_path.write_text(json.dumps(output))
 
-            result = self.export(source, root / "bundle")
+                result = self.export(source, root / "bundle")
 
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_v2_publishes_semantic_artifacts_and_large_events_without_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
