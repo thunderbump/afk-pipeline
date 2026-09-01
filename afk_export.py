@@ -172,7 +172,7 @@ INFERENCE_JSON_KINDS = {
     "inference_prompt",
     "inference_contract",
     "inference_response",
-    "inference_prompt_view",
+    "inference_task_data",
     "inference_response_view",
     "inference_terminal_response_view",
 }
@@ -1533,7 +1533,17 @@ def artifact_candidates_v3(observed, originals=None):
             )
             transcript.pop("destination", None)
             selected.append(transcript)
-        elif candidate["kind"] in {"inference_prompt", "inference_response"}:
+        elif candidate["kind"] == "inference_prompt":
+            # The Receipt-bound prompt remains integrity evidence.  Operators
+            # receive only the independently sanitized section artifacts below.
+            candidate.update(
+                private_source=True,
+                inference_view=False,
+                generated_raw=None,
+            )
+            candidate.pop("destination", None)
+            selected.append(candidate)
+        elif candidate["kind"] == "inference_response":
             candidate.update(
                 kind="json",
                 media_type="application/json",
@@ -1543,6 +1553,16 @@ def artifact_candidates_v3(observed, originals=None):
                 expected_sha256=None,
             )
             candidate.pop("destination", None)
+            selected.append(candidate)
+        elif candidate["kind"] in {
+            "inference_system_instructions",
+            "inference_task_instructions",
+            "inference_task_data",
+        }:
+            # Prompt sections are separate operator-owned objects.  Do not let
+            # v3's ordinary shape-preserving secret-only policy bypass their
+            # stricter host-path sanitation.
+            candidate["secrets_only"] = False
             selected.append(candidate)
         elif (
             candidate["kind"].startswith("inference_")
@@ -1586,7 +1606,7 @@ def artifact_candidates_v3(observed, originals=None):
     for candidate in selected:
         if candidate["unsafe_path"]:
             continue
-        desired = (
+        desired = candidate.get("destination") or (
             f"artifacts/{candidate['source'].removesuffix('events.jsonl')}session-transcript.json"
             if candidate["kind"] == "attempt_session_transcript"
             else f"artifacts/{candidate['source']}"
@@ -1779,29 +1799,44 @@ def _receipt_bound_inference_artifacts(
         or policy.get("requested_capability") != invocation.get("requested_capability")
     ):
         raise ExportError("Inference Receipt prompt identity disagrees")
-    prompt_view = encode_json(
-        {
-            "schema_version": 1,
-            "kind": "inference_prompt_view",
-            "system_instructions": system_instructions,
-            "task_instructions": task_instructions,
-            "task_data": prompt.get("untrusted_task_data"),
-        }
-    )
-    catalog.append(
-        {
-            "relative": f"{relative}/prompt.json",
-            "scope": f"inference:{purpose}",
-            "kind": "inference_prompt_view",
-            "media_type": "application/json",
-            "priority": 0,
-            "validated_raw": prompt_raw,
-            "expected_sha256": hashes["prompt_sha256"],
-            "generated_raw": prompt_view,
-            "inference_view": True,
-            "destination": f"artifacts/{relative}/views/prompt.json",
-        }
-    )
+    # A prompt is one private integrity object but three independently useful
+    # operator objects.  Give every section its own identity and sanitation
+    # decision so an unsafe or oversized section cannot suppress, expose, or
+    # mislabel either of its siblings.
+    for kind, media_type, public_raw, filename in (
+        (
+            "inference_system_instructions",
+            "text/plain; charset=utf-8",
+            system_instructions.encode(),
+            "system-instructions.txt",
+        ),
+        (
+            "inference_task_instructions",
+            "text/plain; charset=utf-8",
+            task_instructions.encode(),
+            "task-instructions.txt",
+        ),
+        (
+            "inference_task_data",
+            "application/json",
+            encode_json(prompt.get("untrusted_task_data")),
+            "task-data.json",
+        ),
+    ):
+        catalog.append(
+            {
+                "relative": f"{relative}/prompt.json",
+                "scope": f"inference:{purpose}",
+                "kind": kind,
+                "media_type": media_type,
+                "priority": 0,
+                "validated_raw": prompt_raw,
+                "expected_sha256": hashes["prompt_sha256"],
+                "generated_raw": public_raw,
+                "inference_view": True,
+                "destination": f"artifacts/{relative}/views/{filename}",
+            }
+        )
     contract_name = "adapter-contract.json"
     contract_hash = hashes.get("adapter_contract_sha256")
     if "adapter_script_sha256" in hashes:
@@ -2200,7 +2235,11 @@ def derive_public_artifact(candidate, redactions):
             public = encode_attempt_transcript(value)
             changed = True
         elif candidate.get("inference_view"):
-            view = json.loads(text)
+            view = (
+                json.loads(text)
+                if candidate["media_type"] == "application/json"
+                else text
+            )
             if inference_view_contains_host_reference(view, redactions):
                 raise ExportError("inference view contains an unknown host path")
         if candidate["kind"] == "attempt_session_transcript":

@@ -526,9 +526,13 @@ media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
 UTF-8 logs, and diffs are written as shape-preserving copies below `artifacts/`;
 source files are never rewritten. The copies retain ordinary paths and prose
-and replace only recognized credentials and secret fields. Inference Runtime
-prompt and attempted-response objects are admitted from a closed Receipt catalog.
-The exporter verifies
+and replace only recognized credentials and secret fields. Inference Runtime prompt and attempted-response objects are admitted from a
+closed Receipt catalog. The private prompt stays a nondownloadable integrity
+source. Its system instructions, task instructions, and task data are published
+as three independently named artifacts with distinct media types, public sizes,
+hashes, sanitization states, availability decisions, and View/Download paths.
+Unsafe, redacted, or oversized content in one section cannot change either
+sibling's identity or availability. The exporter verifies
 the `afk-inference-v1`/Pi adapter identity, the canonical private evidence
 directory recorded by the invocation, runtime-owned attempt paths, and every
 non-null Receipt SHA-256 before deriving bytes. Unclaimed files are ignored and
@@ -565,8 +569,9 @@ event streams above the old 8 MiB bundle limit.
 
 Pass `--schema-version 2` only for compatibility with the older
 raw-source-plus-derived-view artifact contract. V2 keeps private-source
-descriptors, derived inference views, and host-path redaction. Existing readers
-continue to accept retained v2 bundles, while projection prefers a v3 bundle
+descriptors, independently derived inference section and response views, and
+host-path redaction. Existing readers continue to accept retained v2 bundles,
+while projection prefers a v3 bundle
 for the same Run when both versions exist.
 
 Pass `--schema-version 1` only when a producer must emit the legacy v1

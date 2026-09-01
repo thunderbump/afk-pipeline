@@ -37,7 +37,7 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(manifest["schema_version"], 3)
             self.assertIn("artifacts", record)
 
-    def test_v3_publishes_shape_preserving_inference_objects_without_private_catalog(
+    def test_v3_publishes_prompt_sections_and_preserves_private_prompt_authority(
         self,
     ):
         with tempfile.TemporaryDirectory() as temporary:
@@ -86,14 +86,6 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(session["validation_status"], "accepted")
             self.assertTrue(session["attempts"][0]["terminal"])
             artifacts = record["artifacts"]
-            self.assertFalse(
-                any(
-                    item["unavailable_reason"] == "private_source" for item in artifacts
-                )
-            )
-            self.assertFalse(
-                any(item["kind"].startswith("inference_") for item in artifacts)
-            )
             sources = [item["source"]["path"] for item in artifacts]
             for omitted in (
                 "invocation.json",
@@ -111,21 +103,36 @@ class ExportCliTests(unittest.TestCase):
                 any("/inference/attempts/1/stderr.log" in path for path in sources)
             )
 
-            by_source = {item["source"]["path"]: item for item in artifacts}
             prompt_source = "coordinator/04-review/inference/prompt.json"
             response_source = "coordinator/04-review/inference/attempts/1/response.json"
-            self.assertEqual(sources.count(prompt_source), 1)
-            self.assertEqual(sources.count(response_source), 1)
-            public_prompt = json.loads(
-                (destination / by_source[prompt_source]["path"]).read_text()
+            prompt_artifacts = [
+                item for item in artifacts if item["source"]["path"] == prompt_source
+            ]
+            self.assertEqual(len(prompt_artifacts), 4)
+            by_kind = {item["kind"]: item for item in prompt_artifacts}
+            self.assertEqual(by_kind["inference_prompt"]["state"], "unavailable")
+            self.assertEqual(
+                by_kind["inference_prompt"]["unavailable_reason"], "private_source"
+            )
+            self.assertEqual(
+                by_kind["inference_system_instructions"]["state"], "downloadable"
+            )
+            self.assertEqual(
+                by_kind["inference_task_instructions"]["state"], "downloadable"
+            )
+            # The unknown path belongs only to task data; its sibling sections
+            # retain their own availability decisions.
+            self.assertEqual(by_kind["inference_task_data"]["state"], "unsafe")
+            self.assertNotIn("path", by_kind["inference_task_data"])
+
+            response_artifact = next(
+                item for item in artifacts if item["source"]["path"] == response_source
             )
             public_response = json.loads(
-                (destination / by_source[response_source]["path"]).read_text()
+                (destination / response_artifact["path"]).read_text()
             )
-            self.assertEqual(set(public_prompt), set(prompt))
             self.assertEqual(set(public_response), set(response))
-            rendered = json.dumps([public_prompt, public_response])
-            self.assertNotIn("do-not-publish", rendered)
+            rendered = json.dumps(public_response)
             self.assertNotIn("hidden", rendered)
             self.assertIn("/tmp/worktree/file.py", rendered)
             self.assertIn(afk_export.REDACTED_SECRET, rendered)
@@ -1362,7 +1369,10 @@ class ExportCliTests(unittest.TestCase):
             by_kind = {}
             for item in artifacts:
                 by_kind.setdefault(item["kind"], []).append(item)
-            self.assertEqual(len(by_kind["inference_prompt_view"]), 1)
+            self.assertNotIn("inference_prompt_view", by_kind)
+            self.assertEqual(len(by_kind["inference_system_instructions"]), 1)
+            self.assertEqual(len(by_kind["inference_task_instructions"]), 1)
+            self.assertEqual(len(by_kind["inference_task_data"]), 1)
             self.assertEqual(len(by_kind["inference_response_view"]), 1)
             self.assertEqual(len(by_kind["inference_terminal_response_view"]), 1)
             self.assertEqual(len(by_kind["inference_receipt_view"]), 1)
@@ -1384,12 +1394,21 @@ class ExportCliTests(unittest.TestCase):
             )
             self.assertNotIn("hashes", receipt_view)
             self.assertNotIn("terminal_response", receipt_view)
-            prompt = json.loads(
-                (destination / by_kind["inference_prompt_view"][0]["path"]).read_text()
-            )
-            self.assertEqual(prompt["system_instructions"], "read only")
-            self.assertEqual(prompt["task_instructions"], "inspect")
-            self.assertIsNone(prompt["task_data"])
+            system = by_kind["inference_system_instructions"][0]
+            task = by_kind["inference_task_instructions"][0]
+            data = by_kind["inference_task_data"][0]
+            self.assertEqual(system["media_type"], "text/plain; charset=utf-8")
+            self.assertEqual(task["media_type"], "text/plain; charset=utf-8")
+            self.assertEqual(data["media_type"], "application/json")
+            self.assertEqual((destination / system["path"]).read_text(), "read only")
+            self.assertEqual((destination / task["path"]).read_text(), "inspect")
+            self.assertIsNone(json.loads((destination / data["path"]).read_text()))
+            for section in (system, task, data):
+                payload = (destination / section["path"]).read_bytes()
+                self.assertEqual(section["public_bytes"], len(payload))
+                self.assertEqual(
+                    section["public_sha256"], hashlib.sha256(payload).hexdigest()
+                )
             response = json.loads(
                 (
                     destination / by_kind["inference_response_view"][0]["path"]
@@ -1519,7 +1538,7 @@ class ExportCliTests(unittest.TestCase):
             views = [
                 json.loads((destination / item["path"]).read_text())
                 for item in record["artifacts"]
-                if item["kind"] in {"inference_prompt_view", "inference_response_view"}
+                if item["kind"] in {"inference_task_data", "inference_response_view"}
             ]
             rendered = json.dumps(views)
             for private in (
@@ -1539,6 +1558,97 @@ class ExportCliTests(unittest.TestCase):
             ):
                 self.assertNotIn(private, rendered)
             self.assertGreaterEqual(rendered.count(afk_export.REDACTED_SECRET), 13)
+
+    def test_prompt_sections_have_independent_safety_and_v3_ownership(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["system"] = "unsafe file://private-host/system.txt"
+            prompt["trusted_task_instructions"] = "use --token=task-secret safely"
+            prompt["untrusted_task_data"] = {
+                "answer": "public",
+                "password": "data-secret",
+            }
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["policy"]["system_instructions"] = prompt["system"]
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            destination = root / "bundle"
+            result = self.export_v3(source, destination)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            artifacts = json.loads((destination / "workflow-run.json").read_text())[
+                "artifacts"
+            ]
+            sections = {
+                item["kind"]: item
+                for item in artifacts
+                if item["kind"].startswith("inference_")
+            }
+            private_prompt = sections["inference_prompt"]
+            self.assertEqual(private_prompt["state"], "unavailable")
+            self.assertEqual(private_prompt["unavailable_reason"], "private_source")
+            self.assertNotIn("path", private_prompt)
+
+            unsafe = sections["inference_system_instructions"]
+            self.assertEqual(unsafe["state"], "unsafe")
+            self.assertNotIn("path", unsafe)
+            task = sections["inference_task_instructions"]
+            data = sections["inference_task_data"]
+            self.assertEqual(task["state"], "downloadable")
+            self.assertEqual(data["state"], "downloadable")
+            self.assertEqual(
+                unsafe["source"]["path"], "coordinator/04-review/inference/prompt.json"
+            )
+            self.assertEqual(unsafe["scope"], "inference:review")
+            self.assertEqual(
+                (destination / task["path"]).read_text(),
+                "use --[redacted-secret] safely",
+            )
+            self.assertEqual(
+                json.loads((destination / data["path"]).read_text()),
+                {"answer": "public", "password": "[redacted-secret]"},
+            )
+            self.assertEqual(task["sanitization_status"], "sanitized")
+            self.assertEqual(data["sanitization_status"], "sanitized")
+
+    def test_prompt_section_reports_its_own_oversized_decision(self):
+        candidate = {
+            "root": Path("."),
+            "source": "inference/prompt.json",
+            "scope": "inference:review",
+            "kind": "inference_system_instructions",
+            "media_type": "text/plain; charset=utf-8",
+            "priority": 0,
+            "unsafe_path": False,
+            "private_source": False,
+            "generated_raw": b"large section",
+            "inference_view": True,
+            "destination": "artifacts/inference/views/system-instructions.txt",
+        }
+        with mock.patch("afk_export.V2_MAX_ARTIFACT_BYTES", 4):
+            descriptor, payload = afk_export.derive_public_artifact(candidate, [])
+        self.assertIsNone(payload)
+        self.assertEqual(descriptor["state"], "oversized")
+        self.assertEqual(descriptor["unavailable_reason"], "artifact_limit")
+        self.assertEqual(descriptor["public_bytes"], 0)
+        self.assertIsNone(descriptor["public_sha256"])
 
     def test_v2_omits_complete_views_containing_unknown_host_paths(self):
         for private in (
