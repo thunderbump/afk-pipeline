@@ -22,7 +22,7 @@ ROOT = Path(__file__).parents[1]
 
 
 class ExportCliTests(unittest.TestCase):
-    def test_export_defaults_to_publication_bundle_v2(self):
+    def test_export_defaults_to_publication_bundle_v3(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -31,11 +31,104 @@ class ExportCliTests(unittest.TestCase):
             result = self.export(source, destination)
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(json.loads(result.stdout)["schema_version"], 2)
+            self.assertEqual(json.loads(result.stdout)["schema_version"], 3)
             manifest = json.loads((destination / "manifest.json").read_text())
             record = json.loads((destination / "workflow-run.json").read_text())
-            self.assertEqual(manifest["schema_version"], 2)
+            self.assertEqual(manifest["schema_version"], 3)
             self.assertIn("artifacts", record)
+
+    def test_v3_publishes_shape_preserving_inference_objects_without_private_catalog(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["untrusted_task_data"] = {
+                "token": "do-not-publish",
+                "request": "Inspect /tmp/worktree/file.py",
+            }
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            response_path = inference / "attempts/1/response.json"
+            response = {"answer": "Read /tmp/worktree/file.py", "apiKey": "hidden"}
+            response_path.write_text(json.dumps(response) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response_path.read_bytes()
+            ).hexdigest()
+            receipt["terminal_response"] = response
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            destination = root / "bundle"
+            result = self.export_v3(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(record["schema_version"], 3)
+            self.assertEqual(len(record["inference_sessions"]), 1)
+            session = record["inference_sessions"][0]
+            self.assertEqual(session["scope"], "inference:review")
+            self.assertEqual(session["validation_status"], "accepted")
+            self.assertTrue(session["attempts"][0]["terminal"])
+            artifacts = record["artifacts"]
+            self.assertFalse(
+                any(
+                    item["unavailable_reason"] == "private_source" for item in artifacts
+                )
+            )
+            self.assertFalse(
+                any(item["kind"].startswith("inference_") for item in artifacts)
+            )
+            sources = [item["source"]["path"] for item in artifacts]
+            for omitted in (
+                "invocation.json",
+                "adapter-contract.json",
+                "task-prompt.txt",
+                "receipt.json",
+            ):
+                self.assertFalse(
+                    any(path.endswith("/inference/" + omitted) for path in sources)
+                )
+            self.assertFalse(
+                any("/inference/attempts/1/events.jsonl" in path for path in sources)
+            )
+            self.assertFalse(
+                any("/inference/attempts/1/stderr.log" in path for path in sources)
+            )
+
+            by_source = {item["source"]["path"]: item for item in artifacts}
+            prompt_source = "coordinator/04-review/inference/prompt.json"
+            response_source = "coordinator/04-review/inference/attempts/1/response.json"
+            self.assertEqual(sources.count(prompt_source), 1)
+            self.assertEqual(sources.count(response_source), 1)
+            public_prompt = json.loads(
+                (destination / by_source[prompt_source]["path"]).read_text()
+            )
+            public_response = json.loads(
+                (destination / by_source[response_source]["path"]).read_text()
+            )
+            self.assertEqual(set(public_prompt), set(prompt))
+            self.assertEqual(set(public_response), set(response))
+            rendered = json.dumps([public_prompt, public_response])
+            self.assertNotIn("do-not-publish", rendered)
+            self.assertNotIn("hidden", rendered)
+            self.assertIn("/tmp/worktree/file.py", rendered)
+            self.assertIn(afk_export.REDACTED_SECRET, rendered)
 
     def test_explicit_v1_exports_the_legacy_portable_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -1899,7 +1992,7 @@ class ExportCliTests(unittest.TestCase):
             source = self.sealed_preparer(root)
             destination = root / "bundle"
 
-            result = self.export(source, destination, "--schema-version", "3")
+            result = self.export(source, destination, "--schema-version", "4")
 
             self.assertEqual(result.returncode, 2)
             self.assertFalse(destination.exists())
@@ -1951,6 +2044,23 @@ class ExportCliTests(unittest.TestCase):
                 str(destination),
                 "--schema-version",
                 "2",
+                *arguments,
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+
+    def export_v3(self, source, destination, *arguments):
+        return subprocess.run(
+            [
+                str(ROOT / "afk"),
+                "export",
+                str(source),
+                str(destination),
+                "--schema-version",
+                "3",
                 *arguments,
             ],
             cwd=ROOT,

@@ -190,10 +190,10 @@ def export_run(
     project=None,
     run_id=None,
     bead_id=None,
-    schema_version=2,
+    schema_version=3,
     terminal_continuation=None,
 ):
-    if schema_version not in {1, 2}:
+    if schema_version not in {1, 2, 3}:
         raise ExportUsageError("unsupported Publication Bundle schema")
     source_input = Path(source_path).absolute()
     destination_input = Path(destination_path).absolute()
@@ -246,9 +246,12 @@ def export_run(
         )
     finally:
         os.close(source_descriptor)
-    record, payloads = (
-        normalize_run(observed) if schema_version == 1 else normalize_run_v2(observed)
-    )
+    if schema_version == 1:
+        record, payloads = normalize_run(observed)
+    elif schema_version == 2:
+        record, payloads = normalize_run_v2(observed)
+    else:
+        record, payloads = normalize_run_v3(observed)
     workflow = encode_json(record)
     if len(workflow) > MAX_INCLUDED_BYTES:
         raise ExportError("normalized Run exceeds bundle limits")
@@ -1044,6 +1047,63 @@ def normalize_run_v2(observed):
     return record, payloads
 
 
+def normalize_run_v3(observed):
+    """Create the v3 Run record with one sanitized copy per step object."""
+    record, _ = normalize_run_v2(observed)
+    candidates = artifact_candidates(observed)
+    descriptors, payloads = public_artifacts(
+        observed, candidates=artifact_candidates_v3(observed, candidates)
+    )
+    record["schema_version"] = 3
+    record["artifacts"] = descriptors
+    sessions = inference_sessions_v3(candidates)
+    if sessions:
+        record["inference_sessions"] = sessions
+    return record, payloads
+
+
+def inference_sessions_v3(candidates):
+    """Keep receipt-authenticated status metadata out of the Artifact catalog."""
+    terminal_attempts = {}
+    for candidate in candidates:
+        if candidate["kind"] != "inference_terminal_response_view":
+            continue
+        value = json.loads(decode_text(candidate["generated_raw"]))
+        directory = (
+            candidate["destination"]
+            .removesuffix("/views/terminal-response.json")
+            .removeprefix("artifacts/")
+        )
+        terminal_attempts[(candidate["scope"], directory)] = value["attempt_number"]
+
+    sessions = []
+    for candidate in candidates:
+        if candidate["kind"] != "inference_receipt_view":
+            continue
+        value = json.loads(decode_text(candidate["generated_raw"]))
+        directory = candidate["source"].removesuffix("/receipt.json")
+        terminal_attempt = terminal_attempts.get((candidate["scope"], directory))
+        attempts = [
+            {
+                **attempt,
+                "terminal": attempt["attempt_number"] == terminal_attempt,
+            }
+            for attempt in value["attempts"]
+        ]
+        session = {
+            "scope": candidate["scope"],
+            "directory": directory,
+            "identity": value["identity"],
+            "requested_capability": value["requested_capability"],
+            "duration_seconds": value["duration_seconds"],
+            "attempt_count": value["attempt_count"],
+            "attempts": attempts,
+            "validation_status": value["validation_status"],
+        }
+        sessions.append(sanitize_secret_json_value(session, frozenset())[0])
+    return sessions
+
+
 def normalize_acceptance_routing(value, redactions=frozenset()):
     """Reduce validated routing envelopes to bounded public semantic facts."""
     planner, policy = value["planner"], value["policy"]
@@ -1119,8 +1179,8 @@ def normalize_child(child):
     return {field: child[field] for field in fields if field in child}
 
 
-def public_artifacts(observed):
-    candidates = artifact_candidates(observed)
+def public_artifacts(observed, candidates=None):
+    candidates = artifact_candidates(observed) if candidates is None else candidates
     descriptors = []
     payloads = {}
     # Structured records and human-readable logs are admitted before event
@@ -1406,6 +1466,78 @@ def artifact_candidates(observed):
         candidate["destination"] = destination
         destinations.add(destination)
     return result
+
+
+def artifact_candidates_v3(observed, originals=None):
+    """Select inspectable step objects without v2 private/view descriptor pairs."""
+    selected = []
+    for original in (
+        originals if originals is not None else artifact_candidates(observed)
+    ):
+        candidate = original.copy()
+        candidate["secrets_only"] = True
+        if candidate["kind"] in {"inference_prompt", "inference_response"}:
+            candidate.update(
+                kind="json",
+                media_type="application/json",
+                private_source=False,
+                inference_view=False,
+                generated_raw=None,
+                expected_sha256=None,
+            )
+            candidate.pop("destination", None)
+            selected.append(candidate)
+        elif (
+            candidate["kind"].startswith("inference_")
+            or candidate["source"] == "preflight-input.json"
+        ):
+            continue
+        else:
+            candidate.pop("destination", None)
+            selected.append(candidate)
+
+    root = observed["run_root"]
+    if observed.get("acceptance_routing"):
+        for source, kind, media_type, priority in (
+            ("planner-input.json", "json", "application/json", 0),
+            ("policy-input.json", "json", "application/json", 0),
+            ("planner/stderr.log", "log", "text/plain; charset=utf-8", 1),
+            ("planner/events.jsonl", "events", "application/x-ndjson", 2),
+        ):
+            selected.append(
+                {
+                    "root": root,
+                    "source": source,
+                    "scope": "acceptance_routing",
+                    "kind": kind,
+                    "media_type": media_type,
+                    "priority": priority,
+                    "unsafe_path": False,
+                    "declaration": None,
+                    "validated_preflight_classifier_key": None,
+                    "validated_preflight_output_raw": None,
+                    "validated_raw": None,
+                    "expected_sha256": None,
+                    "inference_view": False,
+                    "private_source": False,
+                    "generated_raw": None,
+                    "secrets_only": True,
+                }
+            )
+
+    destinations = set()
+    for candidate in selected:
+        if candidate["unsafe_path"]:
+            continue
+        desired = f"artifacts/{candidate['source']}"
+        destination = desired
+        duplicate = 2
+        while destination in destinations:
+            destination = f"{desired}.duplicate-{duplicate}"
+            duplicate += 1
+        candidate["destination"] = destination
+        destinations.add(destination)
+    return selected
 
 
 def receipt_bound_inference_artifacts(root, relative, purpose, expected_setting=None):
@@ -1938,7 +2070,7 @@ def derive_public_artifact(candidate, redactions):
         # Unlike ordinary evidence, the frozen related-work snapshot is a
         # required, already-validated Run artifact.  Publication must fail
         # closed if a race prevents emitting those exact bytes.
-        if candidate["kind"] == "related_work":
+        if candidate["kind"] == "related_work" and not candidate.get("secrets_only"):
             raise ExportError(
                 f"validated related-work snapshot cannot be published: {reason}"
             )
@@ -2001,24 +2133,40 @@ def derive_public_artifact(candidate, redactions):
             changed = sanitize_validated_preflight_classifier_key(
                 value, candidate.get("validated_preflight_classifier_key")
             )
-            value, generally_changed = sanitize_json_value(value, redactions)
+            sanitizer = (
+                sanitize_secret_json_value
+                if candidate.get("secrets_only")
+                else sanitize_json_value
+            )
+            value, generally_changed = sanitizer(value, redactions)
             changed = changed or generally_changed
             public = encode_json(value)
-        elif candidate["kind"] in {"events", "inference_events"}:
+        elif candidate["kind"] in {"events", "inference_events"} or (
+            candidate["kind"] == "related_work" and candidate.get("secrets_only")
+        ):
             lines = []
             changed = False
             for line in text.splitlines():
                 if not line.strip():
                     continue
                 value = json.loads(line)
-                value, item_changed = sanitize_json_value(value, redactions)
+                sanitizer = (
+                    sanitize_secret_json_value
+                    if candidate.get("secrets_only")
+                    else sanitize_json_value
+                )
+                value, item_changed = sanitizer(value, redactions)
                 changed = changed or item_changed
                 lines.append(json.dumps(value, sort_keys=True, separators=(",", ":")))
             if not lines:
                 return nondownloadable_descriptor(base, "empty", "empty"), None
             public = ("\n".join(lines) + "\n").encode()
         else:
-            sanitized = sanitize_public_artifact_text(text, redactions)
+            sanitized = (
+                sanitize_secret_text(text)
+                if candidate.get("secrets_only")
+                else sanitize_public_artifact_text(text, redactions)
+            )
             changed = sanitized != text
             public = sanitized.encode()
     except ExportError:
@@ -2118,6 +2266,61 @@ def sanitize_json_value(value, redactions):
             raise ExportError("non-finite JSON number")
         return value, False
     raise ExportError("unsupported JSON value")
+
+
+def sanitize_secret_json_value(value, _redactions):
+    """Preserve v3 JSON shape and content except recognized secret material."""
+    if isinstance(value, str):
+        option = CREDENTIAL_OPTION_VALUE.fullmatch(value)
+        if option:
+            return f"{option.group(1)}={REDACTED_SECRET}", True
+        public = sanitize_secret_text(value)
+        return public, public != value
+    if isinstance(value, list):
+        result, changed = [], False
+        redact_next = False
+        for item in value:
+            if redact_next and isinstance(item, str):
+                public, item_changed = REDACTED_SECRET, item != REDACTED_SECRET
+            else:
+                public, item_changed = sanitize_secret_json_value(item, _redactions)
+            result.append(public)
+            changed = changed or item_changed
+            redact_next = isinstance(item, str) and bool(
+                CREDENTIAL_OPTION.fullmatch(item)
+            )
+        return result, changed
+    if isinstance(value, dict):
+        result, changed = {}, False
+        for key in sorted(value):
+            if not isinstance(key, str):
+                raise ExportError("JSON object key is not text")
+            if sensitive_json_key(key) and value[key] is not None:
+                public = REDACTED_SECRET
+                item_changed = value[key] != REDACTED_SECRET
+            else:
+                public, item_changed = sanitize_secret_json_value(
+                    value[key], _redactions
+                )
+            result[key] = public
+            changed = changed or item_changed
+        return result, changed
+    if value is None or isinstance(value, (bool, int)):
+        return value, False
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ExportError("non-finite JSON number")
+        return value, False
+    raise ExportError("unsupported JSON value")
+
+
+def sanitize_secret_text(text):
+    """Remove recognized credentials from v3 text without rewriting other prose."""
+    if PRIVATE_KEY_TEXT.search(text):
+        raise ExportError("artifact contains unsafe private key material")
+    for pattern in REDACTABLE_CREDENTIAL_TEXT:
+        text = pattern.sub(REDACTED_SECRET, text)
+    return text
 
 
 def inference_view_contains_host_reference(value, redactions):

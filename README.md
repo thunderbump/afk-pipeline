@@ -593,26 +593,28 @@ Coordinator. A paused or routing-only export has an empty history; it never
 invents Coordinator invocations. Legacy Runs without Preflight remain
 exportable.
 
-Publication Bundle v2 is the default producer output. It retains the readable
-normalized Run fields and adds the Preflight request ledger, a bounded
+Publication Bundle v3 is the default producer output. It retains the readable
+normalized Run fields, the Preflight request ledger, a bounded
 `acceptance_routing` stage, and a semantic `artifacts` inventory. The routing
 stage records Planner outcome, Policy outcome and decision, a direct-route or
 child-route summary, and the exact contract reason for outside help or
-clarification. Typed `planner` and `policy` artifacts retain only the validated
-output envelopes; model event streams and policy inputs are deliberately not
-published. Each descriptor identifies a safe Run-relative source, scope, kind,
+clarification. Each descriptor identifies one actual step object by its safe
+Run-relative source, scope, kind,
 media type, publication state, public size and SHA-256, sanitization status, and
 an explicit fixed reason when bytes are unavailable. Accepted JSON, JSONL,
-UTF-8 logs, and diffs are written only as deterministic derived copies below
-`artifacts/`; private source files are never rewritten. Inference Runtime
-artifacts are admitted from a closed Receipt catalog only. The exporter verifies
+UTF-8 logs, and diffs are written as shape-preserving copies below `artifacts/`;
+source files are never rewritten. The copies retain ordinary paths and prose
+and replace only recognized credentials and secret fields. Inference Runtime
+prompt and attempted-response objects are admitted from a closed Receipt catalog.
+The exporter verifies
 the `afk-inference-v1`/Pi adapter identity, the canonical private evidence
 directory recorded by the invocation, runtime-owned attempt paths, and every
 non-null Receipt SHA-256 before deriving bytes. Unclaimed files are ignored and
-an identity or hash disagreement rejects the Run. Inference descriptors retain
-the verified private byte count and hash separately from their derived public
-byte count and hash. Known host paths are
-redacted, as are recognized credential forms. In a schema-validated Preflight
+an identity or hash disagreement rejects the Run. Invocation records, adapter
+contracts, task-prompt duplicates, and Receipts remain validation evidence and
+are not published as operator artifacts. A bounded inference-session summary
+retains receipt-authenticated adapter, retry, terminal-attempt, and validation
+status without copying prompt or response bodies into the Run record. In a schema-validated Preflight
 output, the classifier `key` field alone is replaced with an explicit public
 marker; the remaining Preflight fields and the private source record are
 preserved. Artifact state is `downloadable`,
@@ -626,6 +628,12 @@ artifact. The limits are 25 MiB per uncompressed artifact, 32 MiB for the
 complete bundle, 128 payload files, and a 64 KiB manifest. This allows useful
 event streams above the old 8 MiB bundle limit.
 
+Pass `--schema-version 2` only for compatibility with the older
+raw-source-plus-derived-view artifact contract. V2 keeps private-source
+descriptors, derived inference views, and host-path redaction. Existing readers
+continue to accept retained v2 bundles, while projection prefers a v3 bundle
+for the same Run when both versions exist.
+
 Pass `--schema-version 1` only when a producer must emit the legacy v1
 contract. It writes `manifest.json`, one `workflow-run.json`, and only
 inventoried, nonempty UTF-8 `stdout`, `stderr`, and Review `diff` files. Raw Pi
@@ -633,7 +641,7 @@ inventoried, nonempty UTF-8 `stdout`, `stderr`, and Review `diff` files. Raw Pi
 is not copied. Its limits remain 1 MiB per included file and 8 MiB total.
 Existing datastore readers continue to accept v1 bundles.
 
-Both formats reject private-key headers, URL credentials, and common
+All formats reject private-key headers, URL credentials, and common
 authorization, cloud-secret, token, password, and API-key forms. Export is
 deterministic for unchanged evidence. It stages beside the destination and
 atomically renames the complete directory; refusal leaves no destination.

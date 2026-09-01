@@ -76,9 +76,9 @@ def main(argv=None):
     export_parser.add_argument(
         "--schema-version",
         type=int,
-        choices=(1, 2),
-        default=2,
-        help="Publication Bundle schema (default: 2)",
+        choices=(1, 2, 3),
+        default=3,
+        help="Publication Bundle schema (default: 3)",
     )
     arguments = parser.parse_args(argv)
     if arguments.operation == "run":
