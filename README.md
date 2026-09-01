@@ -373,10 +373,8 @@ the work performed outside that system; it is not an attestation route. The Run
 Preparer retains the exact
 Planner input/output and deterministic Policy input/output in the Run root.
 `acceptance_routing` is the only Run admission configuration. Run Preparer
-rejects the retired `classification_store` field. The retired `attestation`
-section is also rejected with instructions to use capability-based
-`outside_help`. Historical v1 Run and
-Preflight evidence remains readable through the exporter and Operations WebUI.
+rejects unknown configuration fields. The retired `attestation` section is
+rejected with instructions to use capability-based `outside_help`.
 
 Inference roles can be selected without rebuilding adapter commands. For example,
 `"inference_roles": {"review": {"model": "gpt-5.6-terra", "thinking": "low"}}`
@@ -395,17 +393,17 @@ bypass flag. This is the readiness gate for Runs later exposed through the
 current Operations WebUI publication interface.
 
 For capability routing, Acceptance Planner runs after the isolated worktree is
-prepared. An accepted direct `afk_run` route starts Coordinator immediately;
-Acceptance Evidence Preflight is not invoked or written. An accepted child Plan,
-`outside_help`, or `needs_clarification` seals its exact routing evidence and
-returns before Coordinator. Planner, policy, protocol, launch, and interruption
-failures also stop before Coordinator and seal a failed preparation.
+prepared. An accepted direct `afk_run` route starts Coordinator immediately. An
+accepted child Plan, `outside_help`, or `needs_clarification` seals its exact
+routing evidence and returns before Coordinator. Planner, policy, protocol,
+launch, and interruption failures also stop before Coordinator and seal a failed
+preparation.
 
 After readiness admission, the preparer requires exactly one `project:<slug>`
 label. It resolves that project locally, freezes the base ref to a commit, and
 creates a new flat `afk-<bead-id>-<run-id>` branch and isolated worktree. The
 flat name cannot conflict with a bootstrap branch such as `afk/<bead-id>`, and
-preparation preflights exact, ancestor, and descendant branch-ref namespace
+preparation checks exact, ancestor, and descendant branch-ref namespace
 collisions. It never fetches, clones, reuses, or replaces a destination. Beads
 connection settings remain in the preparer environment and are not forwarded to
 Coordinator workers or written to durable evidence.
@@ -439,8 +437,7 @@ inserted into prompts. Continuations revalidate and reuse the frozen reference.
 Runs also contain `planner-input.json`,
 `policy-input.json`, and complete `planner/` and `policy/` results. Run Preparer
 fails closed before Coordinator when that admission evidence is incomplete or
-malformed. Historical Runs may retain `preflight-input.json` and `preflight/`,
-but new Runs never create them.
+malformed.
 
 For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that
@@ -466,9 +463,7 @@ or export failure records categorized evidence without changing the Run's
 terminal facts. A publication failure changes an otherwise successful `afk run`
 exit to `1`; an already-unsuccessful Coordinator retains its existing exit
 behavior. Without `publication`, the command behaves exactly as before and
-creates no publication artifacts. The standalone exporter still accepts
-validated historical Runs that ended in a completed Preflight pause, preserving
-their empty Coordinator history without making that a new-Run production path.
+creates no publication artifacts.
 
 Run and worktree roots, their existing ancestors, and the repository are trusted
 local-host infrastructure. The preparer takes advisory directory locks to
@@ -486,86 +481,6 @@ created.
 The project mapping is the trusted local resolver seam. A future resolver may
 produce the same repository, canonical base commit, validation, and Coordinator
 selection without changing the Coordinator or worker contracts.
-
-## Historical Acceptance Evidence Preflight
-
-The standalone v1 producer remains available for retained fixtures and evidence
-compatibility. Run Preparer no longer invokes it. To reproduce a historical
-classification outside a Run:
-
-```sh
-python3 -m afk_preflight preflight.json /new/result-directory \
-  --classification-store /absolute/caller-owned/path/to/classifications
-```
-
-Input is one structured JSON object:
-
-```json
-{
-  "schema_version": 1,
-  "source": {"kind": "bead", "id": "central-123"},
-  "title": "Change the fixture",
-  "acceptance_criteria": "Tests pass and the deployment responds over HTTP.",
-  "evidence_catalog": [
-    {
-      "category": "repository_validation",
-      "route": "repository validation",
-      "can_prove": "Ruff and repository tests from ./scripts/validate."
-    },
-    {
-      "category": "pipeline_evidence",
-      "route": "AFK committed change and Review",
-      "can_prove": "Committed implementation and Review findings."
-    },
-    {
-      "category": "operator_external",
-      "route": "operator handoff",
-      "can_prove": "Deployment, live service, and HTTP behavior."
-    }
-  ],
-  "timeout_seconds": 900
-}
-```
-
-The default adapter invokes authenticated Pi with `gpt-5.6-luna`, low thinking,
-JSON event mode, and no tools, context files, extensions, skills, prompt
-templates, themes, or fallback model. A deterministic fixture may set
-`AFK_PREFLIGHT_AGENT_COMMAND` to an exact JSON argv array; Preflight appends its
-prompt as the final argument.
-
-The classifier splits free-form acceptance criteria into ordered requests. Each
-request contains bounded request text, one category, an exact catalog route or
-`human clarification`, and a rationale. Allowed categories are
-`repository_validation`, `pipeline_evidence`, `operator_external`,
-`unsupported`, and `ambiguous`. Inference cannot authorize execution: local
-contract validation derives `proceed` only when every request belongs to the
-first two categories. Every other valid classification returns `pause`.
-The prompt prefers a supplied repository or pipeline route when that route can
-prove evidence produced by the requested implementation; absence before work
-does not by itself make that evidence unsupported. A classification contains
-at most 256 requests.
-
-The caller-owned Classification Store must be an absolute path and must not
-overlap the new result directory. A per-key lock serializes concurrent first
-calls. Preflight atomically creates the first valid record and never replaces an
-existing record. A malformed existing record or unavailable store fails closed;
-Preflight does not invoke inference to repair or overwrite it. Lock files remain
-as small store-owned coordination records. Interruption while waiting for a
-lock seals an interrupted pause. A failed, timed-out, or interrupted classifier
-never publishes a reusable record. Retention is outside this component.
-
-The new result directory contains accepted `input.json`, raw `events.jsonl`, raw
-`stderr.log`, and an atomically sealed `output.json`. `classifier.source` says
-`inferred`, `reused`, or `unavailable` and includes the key, complete policy
-identity, and safe record name when a record exists. A reused result has no
-agent or process claim and empty raw streams. Valid `proceed` and `pause`
-classifications both have
-`outcome: completed` and exit zero because the standalone classification
-succeeded. Launch, process, event-protocol, structured-output, stored-record, or
-store failure seals a non-completed outcome with `decision: pause` and exits
-`1`. Invalid invocation, input, or overlapping paths exit `2` without replacing
-evidence. The component never accesses Beads, modifies a workspace, rewrites
-acceptance criteria, starts Coordinator, or runs validation.
 
 ## Workflow Run Exporter
 
@@ -587,16 +502,14 @@ caller must provide those facts explicitly:
 already carries the corresponding identity. The destination parent must exist
 and the destination itself must not. Source and destination may not overlap.
 
-The exporter validates terminal Coordinator evidence, a terminal `pause`
-from Preflight, or sealed Acceptance Routing that intentionally stopped before
-Coordinator. A paused or routing-only export has an empty history; it never
-invents Coordinator invocations. Legacy Runs without Preflight remain
-exportable.
+The exporter validates terminal Coordinator evidence or sealed Acceptance
+Routing that intentionally stopped before Coordinator. A routing-only export has
+an empty history; it never invents Coordinator invocations.
 
 Publication Bundle v3 is the default producer output. It retains the readable
-normalized Run fields, the Preflight request ledger, a bounded
-`acceptance_routing` stage, and a semantic `artifacts` inventory. The routing
-stage records Planner outcome, Policy outcome and decision, a direct-route or
+normalized Run fields, a bounded `acceptance_routing` stage, and a semantic
+`artifacts` inventory. The routing stage records Planner outcome, Policy outcome
+and decision, a direct-route or
 child-route summary, and the exact contract reason for outside help or
 clarification. Each descriptor identifies one actual step object by its safe
 Run-relative source, scope, kind,
@@ -614,18 +527,16 @@ an identity or hash disagreement rejects the Run. Invocation records, adapter
 contracts, task-prompt duplicates, and Receipts remain validation evidence and
 are not published as operator artifacts. A bounded inference-session summary
 retains receipt-authenticated adapter, retry, terminal-attempt, and validation
-status without copying prompt or response bodies into the Run record. In a schema-validated Preflight
-output, the classifier `key` field alone is replaced with an explicit public
-marker; the remaining Preflight fields and the private source record are
-preserved. Artifact state is `downloadable`,
+status without copying prompt or response bodies into the Run record. Artifact
+state is `downloadable`,
 `empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
 carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
 optional sources remain explicit without public bytes. Structured payloads and
 logs are admitted before events. The allowlist covers the frozen Bead,
-Assignment, Coordinator request, Preparation record, Preflight records,
-Coordinator records, and each Component Invocation input, output, and declared
-artifact. The limits are 25 MiB per uncompressed artifact, 32 MiB for the
-complete bundle, 128 payload files, and a 64 KiB manifest. This allows useful
+Assignment, Coordinator request, Preparation record, Coordinator records, and
+each Component Invocation input, output, and declared artifact. The limits are
+25 MiB per uncompressed artifact, 32 MiB for the complete bundle, 128 payload
+files, and a 64 KiB manifest. This allows useful
 event streams above the old 8 MiB bundle limit.
 
 Pass `--schema-version 2` only for compatibility with the older

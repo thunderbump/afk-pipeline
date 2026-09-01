@@ -367,8 +367,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(preparation["preparation_status"], "prepared")
         self.assertEqual(preparation["routing"]["planner"]["status"], "completed")
         self.assertEqual(preparation["routing"]["policy"]["decision"], "direct")
-        self.assertFalse((artifact / "preflight-input.json").exists())
-        self.assertFalse((artifact / "preflight").exists())
         self.assertEqual(planner_input["parent"]["id"], bead["source"]["id"])
         self.assertEqual(
             planner_input["parent"]["acceptance_criteria"], bead["acceptance_criteria"]
@@ -441,8 +439,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         artifact = self.artifact_from(result.stdout)
         preparation = json.loads((artifact / "preparation.json").read_text())
-        self.assertNotIn("preflight", preparation)
-        self.assertFalse((artifact / "preflight-input.json").exists())
         self.assertEqual(preparation["routing"]["planner"]["status"], "completed")
         self.assertEqual(preparation["routing"]["policy"]["decision"], "direct")
         self.assertNotEqual(preparation["coordinator"]["status"], "not_started")
@@ -461,7 +457,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertEqual(publication["status"], "succeeded")
         self.assertEqual(publication["admission_outcome"], "accepted")
-        self.assertFalse((artifact / "preflight-input.json").exists())
 
     def test_capability_publication_rejects_tampered_planner_envelope(self):
         receipt = self.root / "routing-publication-receipt.json"
@@ -804,16 +799,6 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIn("worktree_root", collision.stderr)
         self.assertFalse((self.root / "runs").exists())
 
-    def test_acceptance_routing_is_required_and_classification_store_is_retired(self):
-        config = json.loads(self.config.read_text())
-        config["classification_store"] = str(self.root / "classifications")
-        self.config.write_text(json.dumps(config))
-        retired = self.invoke("run", self.bead["id"], "--config", str(self.config))
-        self.assertEqual(retired.returncode, 2)
-        self.assertIn("classification_store", retired.stderr)
-        self.assertIn("retired", retired.stderr)
-        self.assertFalse((self.root / "runs").exists())
-
     def test_attestation_configuration_is_retired(self):
         config = json.loads(self.config.read_text())
         config["attestation"] = {"result_root": str(self.root / "attestations")}
@@ -858,7 +843,7 @@ class RunPreparerCliTest(unittest.TestCase):
             self.git("worktree", "list", "--porcelain").count("worktree "), 1
         )
 
-    def test_flat_branch_avoids_prefix_conflict_and_namespace_collisions_are_preflighted(
+    def test_flat_branch_avoids_prefix_conflict_and_checks_namespace_collisions(
         self,
     ):
         self.git("branch", f"afk/{self.bead['id']}")

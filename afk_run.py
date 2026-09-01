@@ -917,10 +917,6 @@ def load_config(path):
         "projects",
     }
     capability = core | {"acceptance_routing"}
-    if isinstance(value, dict) and "classification_store" in value:
-        raise PreparationError(
-            "configuration classification_store is retired; use acceptance_routing"
-        )
     if isinstance(value, dict) and "attestation" in value:
         raise PreparationError(
             "configuration attestation is retired; use capability-based outside_help"

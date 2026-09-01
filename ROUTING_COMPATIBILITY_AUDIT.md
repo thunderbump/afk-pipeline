@@ -12,7 +12,9 @@ fixture producer now emits capability routes. Planner, policy, publisher, and
 fan-in loaders reject a routing or Plan input whose schema version is not `2`.
 The old `execution`, handoff, human-ambiguity, and v1 policy branches therefore
 had no current caller and were removed rather than moved to a compatibility
-module.
+module. The historical Acceptance Evidence classification package was also a v1
+routing producer. Its contract, store, exporter ingestion and publication path,
+tests, configuration tombstone, and documentation have now been deleted.
 
 No operational routing artifacts are stored in this repository. Run artifact
 and export directories are caller-owned external data; the repository has no
