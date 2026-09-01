@@ -199,17 +199,16 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
         self.assertEqual(reviewed.returncode, 0, reviewed.stderr)
         fan_in = json.loads((self.result / "fan-in.json").read_text())
         self.assertEqual(
-            [child["execution"] for child in fan_in["children"]],
+            [child["executor"] for child in fan_in["children"]],
             ["caller_agent", "outside_help"],
         )
+        self.assertTrue(all("execution" not in child for child in fan_in["children"]))
         self.assertEqual(
             [child["terminal"]["status"] for child in fan_in["children"]],
             ["passed", "validated"],
         )
         outside = next(
-            child
-            for child in fan_in["children"]
-            if child["execution"] == "outside_help"
+            child for child in fan_in["children"] if child["executor"] == "outside_help"
         )
         self.assertEqual(outside["evidence_basis"], "external_check")
 

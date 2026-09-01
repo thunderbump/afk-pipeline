@@ -1156,7 +1156,9 @@ typed terminal evidence, and a timeout. Every child must be closed. Its
 `parent-child` and `blocks` relationships must exactly match the accepted Plan.
 Completion results must cover every published child exactly once and retain the
 accepted Plan, child, criteria, producer, current subject, evidence references,
-and satisfaction state.
+and satisfaction state. The deterministic fan-in preserves each accepted
+child's versioned routing field: v1 uses `execution`, while capability-routing
+v2 uses `executor` without adding a legacy `execution` alias.
 
 Pipeline terminal evidence is a prepared Run that must belong to the published
 child, end at Coordinator `completed/stop`, contain a valid Committed Change,
@@ -1177,9 +1179,10 @@ runtime-owned `inference/` evidence and receipt, and an atomically sealed
 `output.json`. A completed result decides `accepted` or `incomplete`, gives one
 decision per canonical parent criterion, and lists exactly one gap per
 incomplete criterion. An incomplete result also proposes one advisory follow-up
-child using the existing Plan child shape: project, owner, phase, execution,
-evidence route, dependencies, and handoff are checked against the trusted
-catalog before sealing. That proposal has no publication or work authority.
+child using the matching Plan child shape. Project, owner, phase, versioned
+executor, evidence route, and dependencies (plus the v1 handoff when required)
+are checked against the trusted catalog before sealing. That proposal has no
+publication or work authority.
 
 Exit status is `0` only for an accepted parent, `1` for incomplete or sealed
 agent failure, and `2` for invalid invocation, configuration, or evidence. A
