@@ -622,7 +622,7 @@ class RunPreparerCliTest(unittest.TestCase):
             {"project": "fixture", "run_id": artifact.name},
         )
         self.assertEqual(observed["bead"], "central-123")
-        self.assertEqual(observed["manifest_schema_version"], 2)
+        self.assertEqual(observed["manifest_schema_version"], 3)
         self.assertIn(
             "publication outcome for Bead central-123: accepted", result.stdout
         )

@@ -809,7 +809,7 @@ def publish_terminal_run(source, config, evidence_directory=None):
                 exported = export_run(
                     source,
                     bundle,
-                    schema_version=2,
+                    schema_version=3,
                     terminal_continuation=terminal_continuation,
                 )
             except (
