@@ -508,7 +508,11 @@ The exporter validates terminal Coordinator evidence, a retained terminal
 `pause` from historical Preflight, or sealed Acceptance Routing that
 intentionally stopped before Coordinator. A paused or routing-only export has an
 empty history; it never invents Coordinator invocations. Preflight support is a
-read-only retained-data compatibility path, not a current routing producer.
+read-only retained-data compatibility path, not a current routing producer. It
+is supported only until `2027-03-01T00:00:00Z`; owners of Run directories whose
+`preparation.json` contains completed Preflight evidence must export them to a
+Publication Bundle v3 or migrate them before that deadline. The exact retained
+set and removal condition are recorded in `ROUTING_COMPATIBILITY_AUDIT.md`.
 
 Publication Bundle v3 is the default producer output. It retains the readable
 normalized Run fields, a historical Preflight request ledger when present, a

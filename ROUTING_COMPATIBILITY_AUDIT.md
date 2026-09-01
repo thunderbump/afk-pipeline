@@ -19,10 +19,25 @@ No operational routing artifacts are stored in this repository, and obsolete
 routing/Plan evidence cannot be admitted to a current Run. One retained-data
 dependency does remain: the documented exporter accepts caller-owned historical
 Run directories containing a completed v1 Preflight, including Runs that
-terminally paused before Coordinator. The exporter therefore keeps only the v1
-Preflight data contract, strict ingestion, sanitized publication, and regression
-tests; it cannot produce or store new Preflight evidence. This compatibility can
-be removed after the exporter API's historical-Run support is retired and all
-caller-owned Preflight Runs within its announced retention window have been
-exported or migrated. Until then, callers do not need the removed routing v1
+terminally paused before Coordinator. Concretely, the retained set is any Run
+whose `preparation.json` contains a `preflight` member and whose completed
+`preflight-input.json`, `preflight/input.json`, and `preflight/output.json` pass
+the frozen v1 Preflight contract. Those directories are the only external data
+that depend on this compatibility; routing v1 Plans and Acceptance Evidence
+stores are not accepted.
+
+The retention window for that set ends at `2027-03-01T00:00:00Z` (exclusive).
+Before that instant, owners must either export each retained Run to a Publication
+Bundle v3 or migrate it to storage that does not invoke the current exporter on
+the Run directory. On or after that instant, the first exporter release may
+remove Preflight Run ingestion, `afk_preflight.contract`, its sanitization path,
+and its regression fixtures without inventorying undisclosed caller data.
+Publication Bundle readers are outside this removal condition and remain governed
+by their separately documented schema support. This date and the structural set
+above are the authoritative retirement condition; removal does not wait for a
+future announcement or for confirmation that every caller acted.
+
+Until that deadline, the exporter keeps only the v1 Preflight data contract,
+strict ingestion, sanitized publication, and regression tests; it cannot produce
+or store new Preflight evidence. Callers do not need the removed routing v1
 producer or any compatibility path into current Run admission.
