@@ -11,7 +11,7 @@ import tempfile
 from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
-from afk_attempt.transcript import build_attempt_transcript
+from afk_attempt.transcript import build_attempt_transcript, encode_attempt_transcript
 
 SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
@@ -2197,7 +2197,7 @@ def derive_public_artifact(candidate, redactions):
                 raw,
                 lambda item: sanitize_public_artifact_text(item, redactions),
             )
-            public = encode_json(value)
+            public = encode_attempt_transcript(value)
             changed = True
         elif candidate.get("inference_view"):
             view = json.loads(text)

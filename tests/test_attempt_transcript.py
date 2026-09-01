@@ -1,7 +1,10 @@
 import json
 import unittest
 
-from afk_attempt.transcript import build_attempt_transcript
+from afk_attempt.transcript import (
+    build_attempt_transcript,
+    encode_attempt_transcript,
+)
 from afk_export import REDACTED_SECRET, sanitize_public_artifact_text
 
 
@@ -148,16 +151,63 @@ class AttemptTranscriptTest(unittest.TestCase):
         raw = self.complete(event(type="future_event", prompt="never publish me"))
         transcript = build_attempt_transcript(raw, sanitizer)
         self.assertNotIn("never publish me", json.dumps(transcript))
-        self.assertEqual(
+        self.assertIn(
+            {
+                "reason": "event_not_allowlisted",
+                "event_type": "unknown",
+                "count": 1,
+            },
             transcript["omissions"],
-            [
-                {
-                    "reason": "event_not_allowlisted",
-                    "event_type": "future_event",
-                    "count": 1,
-                }
-            ],
         )
+
+    def test_untrusted_metadata_names_and_values_are_not_published(self):
+        secret = "token-abcdefghijklmnop-/home/operator/work/private"
+        raw = stream(
+            event(type="agent_start", **{secret: "lifecycle value"}),
+            event(type=secret, prompt="private"),
+            event(
+                type="tool_execution_start",
+                toolName="bash",
+                args={"command": "true", secret: "private argument"},
+            ),
+            event(
+                type="message_end",
+                message={"role": "assistant", "stopReason": secret, "content": []},
+            ),
+            event(type="agent_end"),
+        )
+        transcript = build_attempt_transcript(raw, sanitizer)
+        rendered = json.dumps(transcript)
+
+        self.assertNotIn(secret, rendered)
+        message = next(
+            item
+            for item in transcript["records"]
+            if item["event"] == "assistant_message_finished"
+        )
+        self.assertEqual(message["stop_reason"], "other")
+        self.assertIn(
+            {"reason": "event_not_allowlisted", "event_type": "unknown", "count": 1},
+            transcript["omissions"],
+        )
+        self.assertGreater(transcript["summary"]["omitted_event_count"], 0)
+
+    def test_retained_event_fields_and_arguments_are_counted_as_omissions(self):
+        raw = self.complete(
+            event(type="turn_start", private="drop me"),
+            event(
+                type="tool_execution_start",
+                toolName="read",
+                args={"path": "public.txt", "futureArgument": "drop me too"},
+            ),
+        )
+        transcript = build_attempt_transcript(raw, sanitizer)
+
+        reasons = {item["reason"] for item in transcript["omissions"]}
+        self.assertIn("event_fields_not_public", reasons)
+        self.assertIn("tool_arguments_not_public", reasons)
+        self.assertGreaterEqual(transcript["summary"]["omitted_item_count"], 2)
+        self.assertNotIn("futureArgument", json.dumps(transcript))
 
     def test_empty_session_is_explicit(self):
         transcript = build_attempt_transcript(b"", sanitizer)
@@ -181,10 +231,7 @@ class AttemptTranscriptTest(unittest.TestCase):
         self.assertEqual(transcript["status"], "truncated")
         self.assertEqual(transcript["records"][-1]["event"], "transcript_truncated")
         self.assertGreater(transcript["records"][-1]["omitted_records"], 0)
-        self.assertLessEqual(
-            len(json.dumps(transcript, sort_keys=True, separators=(",", ":")).encode()),
-            1200,
-        )
+        self.assertLessEqual(len(encode_attempt_transcript(transcript)), 1200)
 
 
 if __name__ == "__main__":
