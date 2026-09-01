@@ -697,7 +697,9 @@ failure instead of discarding the other Attempt evidence.
 
 - `succeeded`: the command exited zero and its event stream contains a
   non-error assistant message followed by `agent_end`; one final
-  `agent_settled` event is also accepted for current Pi.
+  `agent_settled` event is also accepted for current Pi. Pi may emit one matched
+  `compaction_start`/`compaction_end` bookkeeping pair between that final
+  `agent_end` and `agent_settled`.
 - `failed`: launch, process, or agent-protocol failure.
 - `timed_out`: the configured deadline expired.
 - `interrupted`: the executor received Ctrl-C while the runner was active.
@@ -708,8 +710,8 @@ by a valid `auto_retry_start` and a new `agent_start`. A successful final segmen
 includes its matching `auto_retry_end`, ends with `willRetry: false` or an omitted
 `willRetry` field, and settles once. Intermediate assistant errors never replace
 the final response text.
-Malformed seams, incomplete retries, and events after the final settlement fail
-closed.
+Malformed seams, incomplete retries, malformed or incomplete terminal
+compaction pairs, and events after the final settlement fail closed.
 
 The executor terminates the runner process group on timeout or interruption.
 `timeout_seconds` is the child execution deadline, not a wall-clock cap on the

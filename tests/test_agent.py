@@ -110,6 +110,77 @@ class AgentResponseRetryTest(unittest.TestCase):
         ]
         self.assertEqual(self.interpret(events)["agent"], {"status": "completed"})
 
+    def test_accepts_terminal_compaction_bookkeeping(self):
+        events = self.successful_retry()
+        events[-1:-1] = [
+            {"type": "compaction_start", "reason": "threshold"},
+            {
+                "type": "compaction_end",
+                "reason": "threshold",
+                "result": {
+                    "firstKeptEntryId": "b81bbd40",
+                    "tokensBefore": 267421,
+                    "estimatedTokensAfter": 18245,
+                },
+                "aborted": False,
+                "willRetry": False,
+            },
+        ]
+
+        self.assertEqual(
+            self.interpret(events),
+            {"agent": {"status": "completed"}, "text": "final answer"},
+        )
+
+    def test_terminal_compaction_sequence_fails_closed(self):
+        valid = self.successful_retry()
+        start = {"type": "compaction_start", "reason": "threshold"}
+        end = {
+            "type": "compaction_end",
+            "reason": "threshold",
+            "result": {},
+            "aborted": False,
+            "willRetry": False,
+        }
+        variants = {
+            "before final end": valid[:-2] + [start] + valid[-2:],
+            "end before start": valid[:-1] + [end] + valid[-1:],
+            "missing end": valid[:-1] + [start] + valid[-1:],
+            "missing settlement": valid[:-1] + [start, end],
+            "duplicate start": valid[:-1] + [start, start, end] + valid[-1:],
+            "duplicate end": valid[:-1] + [start, end, end] + valid[-1:],
+            "mismatched reason": valid[:-1]
+            + [start, {**end, "reason": "overflow"}]
+            + valid[-1:],
+            "invalid start reason": valid[:-1]
+            + [{**start, "reason": "timer"}, end]
+            + valid[-1:],
+            "malformed result": valid[:-1]
+            + [start, {**end, "result": []}]
+            + valid[-1:],
+            "malformed aborted": valid[:-1]
+            + [start, {**end, "aborted": "no"}]
+            + valid[-1:],
+            "retrying compaction": valid[:-1]
+            + [start, {**end, "willRetry": True}]
+            + valid[-1:],
+            "event inside pair": valid[:-1]
+            + [start, {"type": "queue_update"}, end]
+            + valid[-1:],
+        }
+        for name, events in variants.items():
+            with self.subTest(name=name):
+                self.assertEqual(
+                    self.interpret(events),
+                    {
+                        "agent": {
+                            "status": "error",
+                            "error": "invalid terminal compaction event sequence",
+                        },
+                        "text": None,
+                    },
+                )
+
     def test_retry_ordering_and_final_settlement_fail_closed(self):
         valid = self.successful_retry()
         variants = {
@@ -175,6 +246,22 @@ class AgentResponseRetryTest(unittest.TestCase):
         )
         self.assertEqual(counts["auto_retry_start"], 1)
         self.assertEqual(counts["auto_retry_end"], 1)
+        self.assertEqual(counts["unknown"], 0)
+
+        compacted = self.successful_retry()
+        compacted[-1:-1] = [
+            {"type": "compaction_start", "reason": "threshold"},
+            {
+                "type": "compaction_end",
+                "reason": "threshold",
+                "result": {},
+                "aborted": False,
+                "willRetry": False,
+            },
+        ]
+        counts = event_counts("\n".join(json.dumps(event) for event in compacted))
+        self.assertEqual(counts["compaction_start"], 1)
+        self.assertEqual(counts["compaction_end"], 1)
         self.assertEqual(counts["unknown"], 0)
 
     def test_rejects_retry_loop_beyond_bound(self):

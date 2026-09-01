@@ -47,6 +47,8 @@ EVENT_TYPES = {
     "agent_start",
     "agent_end",
     "agent_settled",
+    "compaction_start",
+    "compaction_end",
     "auto_retry_start",
     "auto_retry_end",
     "turn_start",
