@@ -2408,6 +2408,24 @@ def normalize_run(observed, include_evidence=True):
     return record, payloads
 
 
+def component_contract_allows_null_agent(component, value):
+    """Return whether this component envelope can legitimately omit an agent."""
+    if component not in {"attempt", "review", "assessment", "response"}:
+        return False
+    if value["outcome"] != COMPONENT_TOPOLOGY[component]["success"]:
+        return True
+    # Response can complete without invoking an agent when there are no assessed
+    # findings to address. Its producer records both the absent process and the
+    # empty response, distinguishing that path from an accepted agent response.
+    response = value.get("response")
+    return (
+        component == "response"
+        and value.get("process") is None
+        and isinstance(response, dict)
+        and response.get("finding_responses") == []
+    )
+
+
 def normalize_component_output(component, value, redactions):
     result = {"outcome": value["outcome"]}
     for field in ("started_at", "finished_at"):
@@ -2434,9 +2452,11 @@ def normalize_component_output(component, value, redactions):
     if "agent" in value:
         agent = value["agent"]
         if agent is None:
-            # A null agent is an observed fact: the adapter produced no response
-            # that the component accepted. Preserve that absence rather than
-            # fabricating a terminal agent status.
+            if not component_contract_allows_null_agent(component, value):
+                raise ExportError("component contract does not permit a null agent")
+            # A permitted null agent is an observed fact: no response was
+            # accepted (or required for the no-action Response path). Preserve
+            # that absence rather than fabricating a terminal agent status.
             result["agent"] = None
         else:
             if not isinstance(agent, dict) or not isinstance(agent.get("status"), str):

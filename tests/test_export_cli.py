@@ -444,6 +444,34 @@ class ExportCliTests(unittest.TestCase):
                 artifact_sources,
             )
 
+    def test_rejects_null_agent_for_successful_component(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            output_path = source / "coordinator/04-review/output.json"
+            output = json.loads(output_path.read_text())
+            output["agent"] = None
+            output_path.write_text(json.dumps(output))
+
+            result = self.export(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
+    def test_rejects_null_agent_for_component_without_agent_contract(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            output_path = source / "coordinator/02-validation/output.json"
+            output = json.loads(output_path.read_text())
+            output["agent"] = None
+            output_path.write_text(json.dumps(output))
+
+            result = self.export(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_rejects_malformed_non_null_component_agent(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
