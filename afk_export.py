@@ -1499,8 +1499,8 @@ def artifact_candidates_v3(observed, originals=None):
     root = observed["run_root"]
     if observed.get("acceptance_routing"):
         for source, kind, media_type, priority in (
-            ("planner-input.json", "json", "application/json", 0),
-            ("policy-input.json", "json", "application/json", 0),
+            ("planner/input.json", "json", "application/json", 0),
+            ("policy/input.json", "json", "application/json", 0),
             ("planner/stderr.log", "log", "text/plain; charset=utf-8", 1),
             ("planner/events.jsonl", "events", "application/x-ndjson", 2),
         ):
@@ -2128,7 +2128,7 @@ def derive_public_artifact(candidate, redactions):
             view = json.loads(text)
             if inference_view_contains_host_reference(view, redactions):
                 raise ExportError("inference view contains an unknown host path")
-        if candidate["kind"] == "related_work":
+        if candidate["kind"] == "related_work" and not candidate.get("secrets_only"):
             if candidate.get("validated_raw") != raw:
                 raise ExportError("validated related-work snapshot changed")
             public = raw

@@ -1757,6 +1757,20 @@ class ExportCliTests(unittest.TestCase):
                 (destination / descriptor["path"]).read_bytes(), related_raw
             )
 
+            v3_destination = root / "paused-v3-bundle"
+            v3_result = self.export_v3(source, v3_destination)
+            self.assertEqual(v3_result.returncode, 0, v3_result.stderr)
+            v3_record = json.loads((v3_destination / "workflow-run.json").read_text())
+            v3_descriptor = next(
+                item
+                for item in v3_record["artifacts"]
+                if item["source"]["path"] == "related-work.jsonl"
+            )
+            self.assertEqual(v3_descriptor["sanitization_status"], "sanitized")
+            v3_public = (v3_destination / v3_descriptor["path"]).read_text()
+            self.assertNotIn("ghp_example_value", v3_public)
+            self.assertIn(afk_export.REDACTED_SECRET, v3_public)
+
             invocation_input = {**preflight_input, "title": "Fabricated invocation"}
             (preflight / "input.json").write_text(json.dumps(invocation_input))
             rejected_destination = root / "inconsistent-paused-bundle"
@@ -1842,6 +1856,23 @@ class ExportCliTests(unittest.TestCase):
                 published = (destination / "workflow-run.json").read_text()
                 self.assertNotIn(str(root), published)
                 self.assertNotIn("system_prompt", published)
+
+    def test_v3_publishes_acceptance_step_inputs_not_caller_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            self.add_acceptance_routing(source, "direct")
+            destination = root / "routing-v3-bundle"
+
+            result = self.export_v3(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            sources = {item["source"]["path"] for item in record["artifacts"]}
+            self.assertIn("planner/input.json", sources)
+            self.assertIn("policy/input.json", sources)
+            self.assertNotIn("planner-input.json", sources)
+            self.assertNotIn("policy-input.json", sources)
 
     def test_v2_rejects_malformed_acceptance_routing_binding_end_to_end(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -2224,6 +2255,8 @@ class ExportCliTests(unittest.TestCase):
         policy_raw = json.dumps(policy_output, sort_keys=True).encode()
         (source / "planner-input.json").write_text(json.dumps(planner_input))
         (source / "policy-input.json").write_text(json.dumps(policy_input))
+        (planner / "input.json").write_text(json.dumps(planner_input))
+        (policy / "input.json").write_text(json.dumps(policy_input))
         (planner / "output.json").write_bytes(planner_raw)
         (policy / "output.json").write_bytes(policy_raw)
 
