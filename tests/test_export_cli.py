@@ -1080,6 +1080,134 @@ class ExportCliTests(unittest.TestCase):
                 {"artifacts/related-work.jsonl": case["related"]},
             )
 
+    def test_completed_central_43zn_54_exports_v3_with_sealed_evidence_unchanged(self):
+        """Regress the completed run whose optional evidence previously won the budget."""
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+
+            # Recreate the incident identity and its approximately 96 MiB retained
+            # evidence set. These are real files discovered and derived by the
+            # exporter, rather than mocked candidates, so this covers validation through final
+            # v3 bundle admission.
+            bead_path = source / "bead.json"
+            bead = json.loads(bead_path.read_text())
+            bead["id"] = "central-43zn.54"
+            bead_path.write_text(json.dumps(bead))
+            for relative in ("assignment.json", "coordinator/assignment.json"):
+                path = source / relative
+                assignment = json.loads(path.read_text())
+                assignment["source"]["id"] = "central-43zn.54"
+                path.write_text(json.dumps(assignment))
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preparation["run"]["id"] = "20260901T031623661726Z-5a1a63fb"
+            preparation["bead"]["id"] = "central-43zn.54"
+            preparation["repository"]["branch"] = (
+                "afk-central-43zn.54-20260901T031623661726Z-5a1a63fb"
+            )
+
+            snapshot_bytes = 87 * 1024
+            row = {
+                "id": "central-43zn.54",
+                "relationship": "subject",
+                "description": "",
+            }
+            encoded = lambda value: (
+                json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode()
+            row["description"] = "r" * (snapshot_bytes - len(encoded(row)))
+            related_raw = encoded(row)
+            self.assertEqual(len(related_raw), snapshot_bytes)
+            related_path = source / "related-work.jsonl"
+            related_path.write_bytes(related_raw)
+            related = {
+                "path": str(related_path),
+                "sha256": hashlib.sha256(related_raw).hexdigest(),
+                "media_type": "application/x-ndjson",
+                "record_count": 1,
+                "bytes": len(related_raw),
+            }
+            preparation["related_work"] = related
+            preparation_path.write_text(json.dumps(preparation))
+            for relative in (
+                "assignment.json",
+                "coordinator-request.json",
+                "coordinator/assignment.json",
+                "coordinator/input.json",
+            ):
+                path = source / relative
+                value = json.loads(path.read_text())
+                value["related_work"] = related
+                if relative.endswith("assignment.json"):
+                    value["related_work_instructions"] = (
+                        "Use this sealed snapshot as required publication evidence."
+                    )
+                path.write_text(json.dumps(value))
+
+            # The incident retained roughly 96 MiB. A sparse oversized stream
+            # preserves that source volume without checking a giant binary fixture
+            # into Git; two ordinary artifacts exercise remaining-budget fallback.
+            retained = source / "coordinator/01-attempt/events.jsonl"
+            with retained.open("wb") as stream:
+                stream.truncate(96 * 1024 * 1024)
+            optional = (
+                source / "coordinator/02-validation/stdout.log",
+                source / "coordinator/04-review/review.diff",
+            )
+            for path, line in zip(
+                optional, (b"validation passed\n", b"+safe change\n")
+            ):
+                repetitions = (600 * 1024 // len(line)) + 1
+                path.write_bytes((line * repetitions)[: 600 * 1024])
+            self.assertEqual(retained.stat().st_size, 96 * 1024 * 1024)
+
+            sealed = {
+                path.relative_to(source): hashlib.sha256(path.read_bytes()).hexdigest()
+                for path in source.rglob("*")
+                if path.is_file()
+            }
+            destination = root / "central-43zn.54-v3-bundle"
+            with mock.patch("afk_export.V2_MAX_BUNDLE_BYTES", 2 * 1024 * 1024):
+                result = afk_export.export_run(source, destination, schema_version=3)
+
+            self.assertEqual(result["outcome"], "exported")
+            record = json.loads((destination / "workflow-run.json").read_text())
+            self.assertEqual(record["schema_version"], 3)
+            self.assertEqual(record["bead"], {"id": "central-43zn.54"})
+            descriptors = {item["source"]["path"]: item for item in record["artifacts"]}
+            related_descriptor = descriptors["related-work.jsonl"]
+            self.assertEqual(related_descriptor["state"], "downloadable")
+            self.assertEqual(related_descriptor["public_sha256"], related["sha256"])
+            self.assertEqual(
+                (destination / related_descriptor["path"]).read_bytes(), related_raw
+            )
+            retained_descriptor = descriptors[retained.relative_to(source).as_posix()]
+            self.assertEqual(retained_descriptor["state"], "oversized")
+            self.assertEqual(
+                retained_descriptor["unavailable_reason"], "artifact_limit"
+            )
+            exhausted = [
+                descriptors[path.relative_to(source).as_posix()]
+                for path in optional
+                if descriptors[path.relative_to(source).as_posix()][
+                    "unavailable_reason"
+                ]
+                == "bundle_limit"
+            ]
+            self.assertTrue(exhausted)
+            self.assertTrue(all(item["state"] == "oversized" for item in exhausted))
+            self.assertEqual(
+                sealed,
+                {
+                    path.relative_to(source): hashlib.sha256(
+                        path.read_bytes()
+                    ).hexdigest()
+                    for path in source.rglob("*")
+                    if path.is_file()
+                },
+            )
+
     def test_v3_does_not_run_v2_artifact_admission_first(self):
         observed = {"marker": "observed"}
         with (

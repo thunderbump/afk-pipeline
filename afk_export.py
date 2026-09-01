@@ -836,6 +836,7 @@ def validate_preparation(source, value):
             frozenset(expected),
             frozenset(expected | {"preflight"}),
             frozenset(expected | {"routing"}),
+            frozenset(expected | {"related_work"}),
             frozenset(expected | {"routing", "related_work"}),
         }
         or value.get("schema_version") != 1
