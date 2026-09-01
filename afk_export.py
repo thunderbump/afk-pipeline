@@ -1665,8 +1665,12 @@ def _receipt_bound_inference_artifacts(
     # through its own artifact and V2_MAX_ARTIFACT_BYTES limit.
     metadata_only_receipt = {**receipt, "terminal_response": None}
     try:
+        # Receipt JSON may legitimately carry an escaped unpaired surrogate in
+        # one prompt section.  Keep the private envelope measurable without
+        # requiring every independently sanitized public section to be valid
+        # UTF-8 at this stage.
         metadata_bytes = (
-            json.dumps(metadata_only_receipt, indent=2, ensure_ascii=False) + "\n"
+            json.dumps(metadata_only_receipt, indent=2, ensure_ascii=True) + "\n"
         ).encode()
     except (TypeError, ValueError, UnicodeEncodeError) as error:
         raise ExportError("invalid Inference Receipt evidence") from error
