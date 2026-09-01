@@ -1628,6 +1628,108 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(task["sanitization_status"], "sanitized")
             self.assertEqual(data["sanitization_status"], "sanitized")
 
+    def test_receipt_loading_preserves_siblings_of_oversized_prompt_section(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["system"] = "x" * (afk_export.V2_MAX_ARTIFACT_BYTES + 1)
+            prompt["untrusted_task_data"] = None
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["policy"]["system_instructions"] = prompt["system"]
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            catalog = afk_export.receipt_bound_inference_artifacts(
+                root, relative, "review"
+            )
+            descriptors = {}
+            for item in catalog:
+                if item["kind"] not in {
+                    "inference_system_instructions",
+                    "inference_task_instructions",
+                    "inference_task_data",
+                }:
+                    continue
+                candidate = {**item, "root": root, "source": item["relative"]}
+                descriptors[item["kind"]] = afk_export.derive_public_artifact(
+                    candidate, []
+                )[0]
+
+            self.assertEqual(
+                descriptors["inference_system_instructions"]["state"], "oversized"
+            )
+            self.assertEqual(
+                descriptors["inference_task_instructions"]["state"], "downloadable"
+            )
+            self.assertEqual(
+                descriptors["inference_task_data"]["state"], "downloadable"
+            )
+            self.assertEqual(len(descriptors), 3)
+
+    def test_unpaired_surrogate_marks_only_its_prompt_section_unsafe(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["system"] = "bad " + chr(0xD800)
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["policy"]["system_instructions"] = prompt["system"]
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            catalog = afk_export.receipt_bound_inference_artifacts(
+                root, relative, "review"
+            )
+            sections = {
+                item["kind"]: {**item, "root": root, "source": item["relative"]}
+                for item in catalog
+                if item["kind"]
+                in {"inference_system_instructions", "inference_task_instructions"}
+            }
+            malformed_descriptor, _ = afk_export.derive_public_artifact(
+                sections["inference_system_instructions"], []
+            )
+            safe_descriptor, safe_payload = afk_export.derive_public_artifact(
+                sections["inference_task_instructions"], []
+            )
+            self.assertEqual(malformed_descriptor["state"], "unsafe")
+            self.assertEqual(
+                malformed_descriptor["unavailable_reason"], "unsafe_or_invalid"
+            )
+            self.assertEqual(safe_descriptor["state"], "downloadable")
+            self.assertEqual(safe_payload, b"inspect")
+
     def test_prompt_section_reports_its_own_oversized_decision(self):
         candidate = {
             "root": Path("."),

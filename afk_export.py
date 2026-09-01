@@ -1268,6 +1268,7 @@ def artifact_candidates(observed):
         inference_view=False,
         private_source=False,
         generated_raw=None,
+        unsafe_generated=False,
         destination=None,
     ):
         if not unsafe_path and not safe_relative(relative):
@@ -1308,6 +1309,7 @@ def artifact_candidates(observed):
                 "inference_view": inference_view,
                 "private_source": private_source,
                 "generated_raw": generated_raw,
+                "unsafe_generated": unsafe_generated,
                 **({"destination": destination} if destination is not None else {}),
             }
         )
@@ -1638,13 +1640,17 @@ def receipt_bound_inference_artifacts(root, relative, purpose, expected_setting=
 def _receipt_bound_inference_artifacts(
     root, relative, purpose, expected_setting, directory_descriptor
 ):
+    # prompt.json contains three independently limited public artifacts and is
+    # repeated by invocation.json. Account for JSON escaping while retaining a
+    # finite private-envelope read bound.
+    prompt_envelope_limit = V2_MAX_ARTIFACT_BYTES * 20 + 64 * 1024
     try:
         receipt_raw = read_bytes_at(
-            directory_descriptor, "receipt.json", MAX_JSON_BYTES
+            directory_descriptor, "receipt.json", prompt_envelope_limit
         )
         receipt = json.loads(decode_text(receipt_raw))
         invocation_raw = read_bytes_at(
-            directory_descriptor, "invocation.json", MAX_JSON_BYTES
+            directory_descriptor, "invocation.json", prompt_envelope_limit
         )
     except (OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         raise ExportError("invalid Inference Receipt evidence") from error
@@ -1733,7 +1739,7 @@ def _receipt_bound_inference_artifacts(
 
     catalog = []
 
-    def bind(path, claimed_hash, kind, media_type, priority):
+    def bind(path, claimed_hash, kind, media_type, priority, read_limit=None):
         if claimed_hash is None:
             return
         if not isinstance(claimed_hash, str) or not SHA256_TEXT.fullmatch(claimed_hash):
@@ -1743,7 +1749,9 @@ def _receipt_bound_inference_artifacts(
         local_path = path[len(relative) + 1 :]
         try:
             raw = read_bytes_beneath(
-                directory_descriptor, local_path, V2_MAX_ARTIFACT_BYTES
+                directory_descriptor,
+                local_path,
+                V2_MAX_ARTIFACT_BYTES if read_limit is None else read_limit,
             )
         except (OSError, ExportError) as error:
             raise ExportError("Inference Receipt artifact is unavailable") from error
@@ -1763,12 +1771,15 @@ def _receipt_bound_inference_artifacts(
         )
         return raw
 
+    # Reading either envelope under one artifact's public-byte limit would let
+    # one oversized section suppress the other section descriptors.
     bind(
         f"{relative}/invocation.json",
         hashes.get("invocation_sha256"),
         "inference_invocation",
         "application/json",
         0,
+        prompt_envelope_limit,
     )
     prompt_raw = bind(
         f"{relative}/prompt.json",
@@ -1776,6 +1787,7 @@ def _receipt_bound_inference_artifacts(
         "inference_prompt",
         "application/json",
         0,
+        prompt_envelope_limit,
     )
     if prompt_raw is None:
         raise ExportError("Inference Receipt omits its prompt hash")
@@ -1803,26 +1815,40 @@ def _receipt_bound_inference_artifacts(
     # operator objects.  Give every section its own identity and sanitation
     # decision so an unsafe or oversized section cannot suppress, expose, or
     # mislabel either of its siblings.
-    for kind, media_type, public_raw, filename in (
+    for kind, media_type, value, filename in (
         (
             "inference_system_instructions",
             "text/plain; charset=utf-8",
-            system_instructions.encode(),
+            system_instructions,
             "system-instructions.txt",
         ),
         (
             "inference_task_instructions",
             "text/plain; charset=utf-8",
-            task_instructions.encode(),
+            task_instructions,
             "task-instructions.txt",
         ),
         (
             "inference_task_data",
             "application/json",
-            encode_json(prompt.get("untrusted_task_data")),
+            prompt.get("untrusted_task_data"),
             "task-data.json",
         ),
     ):
+        try:
+            public_raw = (
+                encode_json(value)
+                if media_type == "application/json"
+                else value.encode()
+            )
+        except UnicodeEncodeError:
+            # json.loads deliberately permits escaped unpaired surrogates.
+            # Treat a malformed text section as its own unsafe object rather
+            # than aborting the catalog or borrowing bytes from prompt.json.
+            public_raw = None
+            unsafe_generated = True
+        else:
+            unsafe_generated = False
         catalog.append(
             {
                 "relative": f"{relative}/prompt.json",
@@ -1833,6 +1859,7 @@ def _receipt_bound_inference_artifacts(
                 "validated_raw": prompt_raw,
                 "expected_sha256": hashes["prompt_sha256"],
                 "generated_raw": public_raw,
+                "unsafe_generated": unsafe_generated,
                 "inference_view": True,
                 "destination": f"artifacts/{relative}/views/{filename}",
             }
@@ -2176,9 +2203,16 @@ def derive_public_artifact(candidate, redactions):
         return unavailable("unsafe", "unsafe_path")
     if candidate.get("private_source"):
         return nondownloadable_descriptor(base, "unavailable", "private_source"), None
+    if candidate.get("unsafe_generated"):
+        return unavailable("unsafe", "unsafe_or_invalid")
     generated = candidate.get("generated_raw")
     if generated is not None:
         raw = generated
+        # Generated views have already been isolated from their private source;
+        # classify their own byte limit before running potentially expensive
+        # text and path sanitation.
+        if len(raw) > V2_MAX_ARTIFACT_BYTES:
+            return unavailable("oversized", "artifact_limit")
     else:
         path = candidate["root"] / source
         try:
