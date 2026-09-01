@@ -126,26 +126,27 @@ def main():
             component = state["next_component"]
             if component == "response":
                 validation = validation_repair_source(state["history"])
-                if validation is not None and (
-                    not response_allowance_available(request, state)
-                    or not repairable_validation(
+                if validation is not None:
+                    if not repairable_validation(
                         run_directory / validation["directory"],
                         Path(assignment["workspace"]),
-                    )
-                ):
-                    progress(
-                        "failed Validation cannot allocate a bounded repair; "
-                        "sealing terminal failure"
-                    )
-                    return seal_failure(
-                        run_directory,
-                        state,
-                        "validation",
-                        validation["outcome"],
-                        None,
-                        state_path,
-                        terminal_output_path,
-                    )
+                    ):
+                        progress(
+                            "failed Validation is not repairable; sealing terminal failure"
+                        )
+                        return seal_failure(
+                            run_directory,
+                            state,
+                            "validation",
+                            validation["outcome"],
+                            None,
+                            state_path,
+                            terminal_output_path,
+                        )
+                    if not response_allowance_available(request, state):
+                        return seal_validation_repair_exhausted(
+                            run_directory, state, state_path, terminal_output_path
+                        )
             sequence = state["next_sequence"]
             directory_name = f"{sequence:02d}-{component}"
             component_input = COMPONENTS[component]["build_input"](
@@ -210,11 +211,14 @@ def main():
             if (
                 component == "validation"
                 and outcome == "failed"
-                and response_allowance_available(request, state)
                 and repairable_validation(
                     result_directory, Path(assignment["workspace"])
                 )
             ):
+                if not response_allowance_available(request, state):
+                    return seal_validation_repair_exhausted(
+                        run_directory, state, state_path, terminal_output_path
+                    )
                 state["next_component"] = "response"
                 seal_json(state_path, state)
                 progress(
@@ -390,6 +394,28 @@ def require_exhausted(
 ):
     if state["status"] != "completed" or state["terminal"] != {"decision": "exhausted"}:
         raise ValueError("only an exhausted Coordinator Run can be continued")
+    validation = validation_repair_source(state["history"])
+    if validation is not None:
+        completed_responses = sum(
+            record["component"] == "response" and record["outcome"] == "completed"
+            for record in state["history"]
+        )
+        if completed_responses != expected_max_responses:
+            raise ValueError(
+                "exhausted continuation requires matching Validation repair evidence"
+            )
+        validation_directory = run_directory / validation["directory"]
+        validation_input, _validation_output = validate_repairable_failure(
+            validation_directory
+        )
+        if check_workspace:
+            workspace = Path(validation_input["workspace"])
+            validate_repairable_failure(
+                validation_directory,
+                workspace,
+                repository_state(workspace),
+            )
+        return
     iteration = latest(state, "iteration")
     iteration_directory = run_directory / iteration["directory"]
     iteration_input, policy, lineage = validate_sealed_result(
@@ -614,6 +640,19 @@ def seal_failure(
     }
     seal_json(state_path, state)
     return finalize(run_directory, state, output_path)
+
+
+def seal_exhausted(run_directory, state, state_path, output_path):
+    state["status"] = "completed"
+    state["next_component"] = None
+    state["terminal"] = {"decision": "exhausted"}
+    seal_json(state_path, state)
+    return finalize(run_directory, state, output_path)
+
+
+def seal_validation_repair_exhausted(run_directory, state, state_path, output_path):
+    progress("failed Validation exhausted its bounded repair allowance")
+    return seal_exhausted(run_directory, state, state_path, output_path)
 
 
 def output_for(state):

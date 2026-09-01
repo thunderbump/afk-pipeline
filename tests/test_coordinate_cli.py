@@ -708,11 +708,7 @@ class CoordinatorCliTest(unittest.TestCase):
     def test_failed_run_refuses_continuation_without_changing_terminal_evidence(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         request = json.loads(request_path.read_text())
-        request["validation"]["command"] = [
-            sys.executable,
-            "-c",
-            "raise SystemExit(7)",
-        ]
+        request["validation"]["command"] = [str(self.root / "missing-validation")]
         self.write_json(request_path, request)
         run = self.root / "failed-continuation-origin"
         failed = self.invoke(request_path, run)
@@ -1066,9 +1062,9 @@ class CoordinatorCliTest(unittest.TestCase):
 
         resumed = self.invoke(request_path, run, response_scenario="validation-repair")
 
-        self.assertEqual(resumed.returncode, 1, resumed.stderr)
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
         output = json.loads((run / "output.json").read_text())
-        self.assertEqual(output["failed_component"], "validation")
+        self.assertEqual(output["decision"], "exhausted")
         self.assertEqual(
             [record["component"] for record in output["history"]],
             ["attempt", "validation"],
@@ -1187,7 +1183,7 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("error", validation["process"])
         self.assertFalse((run / "03-response").exists())
 
-    def test_repeated_validation_failure_exhausts_allowance_without_extra_repair(self):
+    def test_repeated_validation_failure_seals_exhausted_without_extra_repair(self):
         _assignment_path, request_path = self.prepare_run(max_responses=1)
         request = json.loads(request_path.read_text())
         request["validation"]["command"] = [sys.executable, "-c", "raise SystemExit(7)"]
@@ -1198,9 +1194,9 @@ class CoordinatorCliTest(unittest.TestCase):
             request_path, run, response_scenario="validation-repair"
         )
 
-        self.assertEqual(completed.returncode, 1, completed.stderr)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((run / "output.json").read_text())
-        self.assertEqual(output["failed_component"], "validation")
+        self.assertEqual(output["decision"], "exhausted")
         self.assertEqual(
             [record["component"] for record in output["history"]],
             ["attempt", "validation", "response", "validation"],
@@ -1211,7 +1207,44 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertFalse((run / "05-response").exists())
 
-    def test_sealed_component_failure_seals_the_run_and_resume_is_idempotent(self):
+    def test_review_response_counts_toward_validation_repair_exhaustion(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(7 if 'response applied' in Path('README.md').read_text() else 0)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "cross-origin-response-exhaustion"
+
+        completed = self.invoke(
+            request_path,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+            response_scenario="commit",
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["decision"], "exhausted")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            [
+                "attempt",
+                "validation",
+                "change",
+                "review",
+                "assessment",
+                "iteration",
+                "response",
+                "validation",
+            ],
+        )
+        self.assertFalse((run / "09-response").exists())
+
+    def test_validation_repair_exhaustion_accepts_continuation_allowance(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
         request = json.loads(request_path.read_text())
         request["validation"]["command"] = [
@@ -1219,6 +1252,32 @@ class CoordinatorCliTest(unittest.TestCase):
             "-c",
             "raise SystemExit(7)",
         ]
+        self.write_json(request_path, request)
+        run = self.root / "continued-validation-repair-exhaustion"
+
+        exhausted = self.invoke(request_path, run)
+        continued = self.invoke(
+            request_path,
+            run,
+            "--continue-exhausted",
+            "1",
+            response_scenario="validation-repair",
+        )
+
+        self.assertEqual(exhausted.returncode, 0, exhausted.stderr)
+        self.assertEqual(continued.returncode, 0, continued.stderr)
+        output = json.loads((run / "continuations" / "01" / "output.json").read_text())
+        self.assertEqual(output["decision"], "exhausted")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            ["attempt", "validation", "response", "validation"],
+        )
+        self.assertFalse((run / "05-response").exists())
+
+    def test_sealed_component_failure_seals_the_run_and_resume_is_idempotent(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [str(self.root / "missing-validation")]
         self.write_json(request_path, request)
         run = self.root / "failed-run"
 

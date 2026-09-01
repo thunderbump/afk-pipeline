@@ -273,7 +273,14 @@ def validate_terminal_history(state):
         raise ValueError("invalid coordinator checkpoint")
     last = state["history"][-1]
     if state["status"] == "completed":
-        if last["component"] != "iteration" or last["outcome"] != "completed":
+        iteration_terminal = (
+            last["component"] == "iteration" and last["outcome"] == "completed"
+        )
+        validation_exhausted = (
+            state["terminal"] == {"decision": "exhausted"}
+            and validation_repair_source(state["history"]) is not None
+        )
+        if not iteration_terminal and not validation_exhausted:
             raise ValueError("invalid coordinator checkpoint")
         return
     terminal = state["terminal"]

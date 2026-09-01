@@ -1054,7 +1054,9 @@ Validation with stable, clean, inspectable repository evidence may consume one
 remaining Feedback Response allowance. That repair receives the failed
 Validation input, output, stdout, and stderr, then returns through Validation,
 Committed Change, and Review in normal order. Every completed repair counts
-against `max_responses`; a repeated failure with no allowance is terminal.
+against `max_responses`, including a Feedback Response that began from Finding
+Assessment. A repairable Validation failure with no allowance seals an
+`exhausted` terminal instead of allocating another response.
 Malformed or missing evidence, timeout, interruption, launch or observation
 error, signals, dirty output, and repository drift remain terminal and never
 allocate repair.
@@ -1076,13 +1078,14 @@ python3 -m afk_coordinate run.json /existing/run-directory \
   --continue-exhausted ADDITIONAL_RESPONSES
 ```
 
-`ADDITIONAL_RESPONSES` must be a positive integer. The coordinator starts with
-the terminal Finding Assessment, does not repeat Attempt, and keeps the
-original `state.json` and `output.json` unchanged. Each continuation records its
-accepted allowance, effective limit, checkpoint, and terminal output under
-`continuations/NN/`. Repeating the command with the same allowance resumes an
-active continuation. A continuation that exhausts its allowance can receive a
-later additive allowance in the next numbered directory.
+`ADDITIONAL_RESPONSES` must be a positive integer. The coordinator starts from
+the exhausted Iteration Policy or failed Validation evidence, does not repeat
+Attempt, and keeps the original `state.json` and `output.json` unchanged. Each
+continuation records its accepted allowance, effective limit, checkpoint, and
+terminal output under `continuations/NN/`. Repeating the command with the same
+allowance resumes an active continuation. A continuation that exhausts its
+allowance can receive a later additive allowance in the next numbered
+directory.
 
 For a prepared Run with configured Publication Bundle admission, use the
 repository-owned continuation and publication entry point:
@@ -1095,7 +1098,7 @@ repository-owned continuation and publication entry point:
 This validates the original terminal and every numbered continuation before
 executing work and leaves the original `state.json` and `output.json`
 byte-for-byte unchanged. It publishes every retained sealed continuation oldest
-to newest through the same private v2 Publication Bundle and fail-closed
+to newest through the same Publication Bundle v3 and fail-closed
 Admission seam as `afk run`, stopping at the first failed or rejected identity.
 Publication streams and `publication.json` are retained in each attempted
 continuation directory. The bundle Run ID appends `.continuation.NN`, giving
@@ -1120,14 +1123,16 @@ the orphaned invocation as `abandoned` and allocates a new numbered retry.
 
 Only a clean exhausted run can continue. Stopped and failed runs are immutable,
 and continuation refuses if the workspace no longer matches the repository
-state captured by the terminal Finding Assessment. This keeps manual repairs or
-other external commits from being silently folded into old review evidence.
+state captured by the terminal Finding Assessment or failed Validation. This
+keeps manual repairs or other external commits from being silently folded into
+old evidence.
 
 `stop` and `exhausted` Iteration Policy decisions atomically seal terminal
-`output.json` with `outcome: completed`. A sealed non-success from any module
-seals `outcome: failed`. Exit status is `0` for a completed run, `1` for a
-failed run or unresolved active invocation, and `2` for invalid invocation,
-input, checkpoint, or evidence. Re-invoking a terminal run is idempotent.
+`output.json` with `outcome: completed`. Exhausted Validation repair allowance
+does the same. Any other sealed module non-success produces `outcome: failed`.
+Exit status is `0` for a completed run, `1` for a failed run or unresolved
+active invocation, and `2` for invalid invocation, input, checkpoint, or
+evidence. Re-invoking a terminal run is idempotent.
 
 The coordinator does not access Beads, prepare a workspace, choose a branch,
 infer worker liveness, retry component failures, publish feedback, manage
