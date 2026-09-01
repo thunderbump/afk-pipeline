@@ -2433,12 +2433,18 @@ def normalize_component_output(component, value, redactions):
         }
     if "agent" in value:
         agent = value["agent"]
-        if not isinstance(agent, dict) or not isinstance(agent.get("status"), str):
-            raise ExportError("invalid agent facts")
-        result["agent"] = {
-            "status": bounded_text(agent["status"], redactions),
-            **({"error_category": "protocol_error"} if agent.get("error") else {}),
-        }
+        if agent is None:
+            # A null agent is an observed fact: the adapter produced no response
+            # that the component accepted. Preserve that absence rather than
+            # fabricating a terminal agent status.
+            result["agent"] = None
+        else:
+            if not isinstance(agent, dict) or not isinstance(agent.get("status"), str):
+                raise ExportError("invalid agent facts")
+            result["agent"] = {
+                "status": bounded_text(agent["status"], redactions),
+                **({"error_category": "protocol_error"} if agent.get("error") else {}),
+            }
     if "repository" in value:
         result["repository"] = normalize_repository(value["repository"], redactions)
     if value["outcome"] == COMPONENT_TOPOLOGY[component]["success"]:

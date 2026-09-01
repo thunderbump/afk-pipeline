@@ -394,11 +394,22 @@ class ExportCliTests(unittest.TestCase):
                         "schema_version": 1,
                         "outcome": "failed",
                         "process": {"exit_code": 1, "signal": None},
-                        "agent": {"status": "error"},
+                        "agent": None,
                         "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
                     }
                 )
             )
+            inference = review_path.parent / "inference"
+            self.add_inference_receipt(inference)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["attempts"][0].pop("validation")
+            receipt["attempts"][0]["protocol"] = {"status": "adapter_failed"}
+            receipt["protocol"] = {"status": "adapter_failed"}
+            receipt["validation"] = {"status": "not_started"}
+            receipt["terminal_response"] = None
+            receipt["outcome"] = "adapter_failed"
+            receipt_path.write_text(json.dumps(receipt) + "\n")
             preparation_path = source / "preparation.json"
             preparation = json.loads(preparation_path.read_text())
             preparation["coordinator"].update(
@@ -413,9 +424,39 @@ class ExportCliTests(unittest.TestCase):
             record = json.loads((destination / "workflow-run.json").read_text())
             self.assertEqual(record["status"], "failed")
             self.assertEqual(record["terminal"], terminal)
+            failed_output = record["history"][-1]["output"]
+            self.assertIsNone(failed_output["agent"])
+            self.assertEqual(failed_output["details"], {"kind": "review"})
+            session = record["inference_sessions"][0]
+            self.assertEqual(session["scope"], "inference:review")
             self.assertEqual(
-                record["history"][-1]["output"]["details"], {"kind": "review"}
+                session["attempts"][0]["protocol_status"], "adapter_failed"
             )
+            self.assertIsNone(session["attempts"][0]["validation_status"])
+            self.assertFalse(session["attempts"][0]["terminal"])
+            self.assertEqual(session["validation_status"], "not_started")
+            artifact_sources = {item["source"]["path"] for item in record["artifacts"]}
+            self.assertIn(
+                "coordinator/04-review/inference/prompt.json", artifact_sources
+            )
+            self.assertIn(
+                "coordinator/04-review/inference/attempts/1/response.json",
+                artifact_sources,
+            )
+
+    def test_rejects_malformed_non_null_component_agent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            output_path = source / "coordinator/04-review/output.json"
+            output = json.loads(output_path.read_text())
+            output["agent"] = "completed"
+            output_path.write_text(json.dumps(output))
+
+            result = self.export(source, root / "bundle")
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
     def test_v2_publishes_semantic_artifacts_and_large_events_without_mutation(self):
         with tempfile.TemporaryDirectory() as temporary:
