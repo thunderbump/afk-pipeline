@@ -1678,6 +1678,54 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(descriptors["inference_task_data"]["state"], "oversized")
             self.assertEqual(len(descriptors), 3)
 
+    def test_oversized_system_instructions_do_not_suppress_sibling_sections(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            metadata_limit = 4 * 1024
+            prompt_path = inference / "prompt.json"
+            prompt = json.loads(prompt_path.read_text())
+            prompt["system"] = "x" * (metadata_limit + 1)
+            prompt_path.write_text(json.dumps(prompt) + "\n")
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["prompt"] = prompt
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["policy"]["system_instructions"] = prompt["system"]
+            receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+                prompt_path.read_bytes()
+            ).hexdigest()
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            with mock.patch("afk_export.MAX_JSON_BYTES", metadata_limit):
+                catalog = afk_export.receipt_bound_inference_artifacts(
+                    root, relative, "review"
+                )
+
+            sections = {
+                item["kind"]: item
+                for item in catalog
+                if item["kind"]
+                in {
+                    "inference_system_instructions",
+                    "inference_task_instructions",
+                    "inference_task_data",
+                }
+            }
+            self.assertEqual(len(sections), 3)
+            self.assertEqual(
+                sections["inference_system_instructions"]["generated_raw"],
+                prompt["system"].encode(),
+            )
+
     def test_unicode_prompt_section_uses_utf8_size_for_receipt_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1728,6 +1776,36 @@ class ExportCliTests(unittest.TestCase):
             self.assertIn("inference_system_instructions", sections)
             self.assertIn("inference_task_instructions", sections)
             self.assertIn("inference_task_data", sections)
+
+    def test_escaped_unpaired_surrogates_use_their_json_escape_size(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            relative = "coordinator/04-review/inference"
+            inference = root / relative
+            inference.parent.mkdir(parents=True)
+            self.add_inference_receipt(inference)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["ignored_padding"] = chr(0xD800) * 1000
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            metadata = {**receipt, "terminal_response": None}
+            metadata["policy"] = {
+                **receipt["policy"],
+                "system_instructions": None,
+            }
+            rendered = json.dumps(metadata, indent=2, ensure_ascii=False) + "\n"
+            undercounted_size = len(rendered.encode("utf-8", "surrogatepass"))
+            escaped_size = len(rendered.encode("utf-8", "backslashreplace"))
+            self.assertGreater(escaped_size, undercounted_size)
+
+            with (
+                mock.patch("afk_export.MAX_JSON_BYTES", escaped_size - 1),
+                self.assertRaisesRegex(
+                    afk_export.ExportError, "invalid Inference Receipt evidence"
+                ),
+            ):
+                afk_export.receipt_bound_inference_artifacts(root, relative, "review")
 
     def test_receipt_loading_rejects_oversized_integrity_metadata(self):
         with tempfile.TemporaryDirectory() as temporary:

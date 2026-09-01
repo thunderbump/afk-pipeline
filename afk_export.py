@@ -1660,19 +1660,25 @@ def _receipt_bound_inference_artifacts(
 
     if not isinstance(receipt, dict):
         raise ExportError("invalid Inference Receipt evidence")
-    # Keep metadata bounded without charging the duplicated terminal response
-    # against that budget. The response is authenticated and admitted below
-    # through its own artifact and V2_MAX_ARTIFACT_BYTES limit.
+    # Keep metadata bounded without charging independently admitted artifacts
+    # against that budget. The terminal response has its own artifact, and the
+    # policy's system-instructions copy is authenticated against prompt.json
+    # below. Both are subject to V2_MAX_ARTIFACT_BYTES through their public views.
     metadata_only_receipt = {**receipt, "terminal_response": None}
+    metadata_policy = receipt.get("policy")
+    if isinstance(metadata_policy, dict):
+        metadata_only_receipt["policy"] = {
+            **metadata_policy,
+            "system_instructions": None,
+        }
     try:
-        # Measure valid text in its UTF-8 form rather than inflating non-ASCII
-        # prompt text into JSON escape sequences. Receipt JSON may legitimately
-        # carry an escaped unpaired surrogate in one prompt section; surrogatepass
-        # keeps this private-envelope accounting finite while that section is
-        # independently classified as unsafe below.
+        # Measure ordinary text in UTF-8 while retaining JSON's required six-byte
+        # escape for an unpaired surrogate. surrogatepass would encode that code
+        # point as three bytes and allow malformed escaped metadata to evade the
+        # declared JSON byte limit.
         metadata_bytes = (
             json.dumps(metadata_only_receipt, indent=2, ensure_ascii=False) + "\n"
-        ).encode("utf-8", errors="surrogatepass")
+        ).encode("utf-8", errors="backslashreplace")
     except (TypeError, ValueError, UnicodeEncodeError) as error:
         raise ExportError("invalid Inference Receipt evidence") from error
     if len(metadata_bytes) > MAX_JSON_BYTES:
