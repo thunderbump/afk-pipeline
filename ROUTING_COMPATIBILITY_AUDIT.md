@@ -19,12 +19,34 @@ No operational routing artifacts are stored in this repository, and obsolete
 routing/Plan evidence cannot be admitted to a current Run. One retained-data
 dependency does remain: the documented exporter accepts caller-owned historical
 Run directories containing a completed v1 Preflight, including Runs that
-terminally paused before Coordinator. Concretely, the retained set is any Run
-whose `preparation.json` contains a `preflight` member and whose completed
-`preflight-input.json`, `preflight/input.json`, and `preflight/output.json` pass
-the frozen v1 Preflight contract. Those directories are the only external data
-that depend on this compatibility; routing v1 Plans and Acceptance Evidence
-stores are not accepted.
+terminally paused before Coordinator.
+
+The retained set is exactly the otherwise exporter-admissible terminal Runs that
+satisfy all of these shared Preflight bindings (not merely Runs with three
+contract-valid files):
+
+- `preparation.json` contains completed Preflight facts naming `preflight/` and
+  `preflight/output.json`, with status and outcome `completed`, exit code zero,
+  and a decision equal to the output decision;
+- `preflight-input.json` and `preflight/input.json` are equal after validation by
+  the frozen v1 input contract;
+- `preflight/output.json` passes the frozen v1 output contract against that
+  input, including matching source, completed outcome, and a decision derived
+  from its request ledger; and
+- the input/output source is the Bead identified by the validated Run
+  preparation and agrees with any Bead assertion in the export request.
+
+Within that set, a prepared Coordinator Run must have preparation status
+`prepared`, pass the normal terminal Run and Coordinator evidence checks, and
+bind both its preparation facts and Preflight output to `decision: proceed`. A
+terminally paused Run must instead have `preparation_status: paused`, pass the
+paused-Run preparation, identity, assignment, and terminal timestamp checks,
+bind both decisions to `pause`, record Coordinator as `not_started` with null
+exit code, outcome, and decision, and contain an existing empty `coordinator/`
+directory. A directory that fails any shared or branch-specific condition is not
+in the retained migration cohort. These Runs are the only external data that
+depend on this compatibility; routing v1 Plans and Acceptance Evidence stores
+are not accepted.
 
 The retention window for that set ends at `2027-03-01T00:00:00Z` (exclusive).
 Before that instant, owners must either export each retained Run to a Publication
