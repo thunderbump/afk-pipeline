@@ -988,8 +988,8 @@ def validate_preparer_terminal(preparation, output):
         raise ExportError("Run Preparer status disagrees with Coordinator")
 
 
-def normalize_run_v2(observed):
-    """Create the v2 semantic record and its sanitized public artifacts."""
+def normalize_run_v2(observed, include_artifacts=True):
+    """Create the v2 semantic record and, when requested, public artifacts."""
     if observed["state"] is None:
         routing = observed.get("acceptance_routing")
         record = {
@@ -1044,6 +1044,8 @@ def normalize_run_v2(observed):
                 observed["acceptance_routing"], observed["redactions"]
             )
 
+    if not include_artifacts:
+        return record, {}
     descriptors, payloads = public_artifacts(observed)
     record["artifacts"] = descriptors
     return record, payloads
@@ -1051,7 +1053,10 @@ def normalize_run_v2(observed):
 
 def normalize_run_v3(observed):
     """Create the v3 Run record with one sanitized copy per step object."""
-    record, _ = normalize_run_v2(observed)
+    # v3 has a different artifact catalog.  Do not perform the v2 admission
+    # pass first: besides reading everything twice, that pass can consume its
+    # budget before reaching required related-work evidence.
+    record, _ = normalize_run_v2(observed, include_artifacts=False)
     candidates = artifact_candidates(observed)
     descriptors, payloads = public_artifacts(
         observed, candidates=artifact_candidates_v3(observed, candidates)
@@ -1189,21 +1194,40 @@ def public_artifacts(observed, candidates=None):
     # streams.  Stable sorting makes the policy independent of filesystem order.
     candidates.sort(key=lambda item: (item["priority"], item["source"]))
     budget = V2_MAX_BUNDLE_BYTES - MAX_MANIFEST_BYTES - MAX_INCLUDED_BYTES
+    file_budget = MAX_BUNDLE_FILES - 1  # workflow-run.json occupies one slot
     used = 0
+
+    # Load and admit required related-work before considering optional evidence.
+    # Keep descriptor ordering stable, but reserve both its bytes and file slot
+    # now so an earlier-sorting component or inference artifact cannot crowd it
+    # out.  Reading it first also preserves the existing fail-closed race and
+    # validation behavior.
+    required = {}
     for candidate in candidates:
+        if candidate.get("kind") != "related_work":
+            continue
+        descriptor, data = derive_public_artifact(candidate, observed["redactions"])
+        required[id(candidate)] = descriptor, data
+        if data is None:
+            continue
+        if used + len(data) > budget or len(payloads) >= file_budget:
+            raise ExportError(
+                "validated related-work snapshot cannot be published: bundle_limit"
+            )
+        if descriptor["path"] in payloads:
+            raise ExportError("public artifact destinations collide")
+        used += len(data)
+        payloads[descriptor["path"]] = data
+
+    for candidate in candidates:
+        if id(candidate) in required:
+            descriptor, data = required[id(candidate)]
+            descriptors.append(descriptor)
+            continue
         descriptor, data = derive_public_artifact(candidate, observed["redactions"])
         if data is not None and (
-            used + len(data) > budget or len(payloads) >= MAX_BUNDLE_FILES - 1
+            used + len(data) > budget or len(payloads) >= file_budget
         ):
-            # Optional evidence may degrade to a descriptor, but the frozen
-            # related-work bytes are required publication evidence.  Do not
-            # silently omit them when earlier artifacts exhaust either budget.
-            if candidate.get("kind") == "related_work" and not candidate.get(
-                "secrets_only"
-            ):
-                raise ExportError(
-                    "validated related-work snapshot cannot be published: bundle_limit"
-                )
             descriptor.update(
                 state="oversized",
                 public_bytes=0,

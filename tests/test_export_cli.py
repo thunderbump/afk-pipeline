@@ -1008,7 +1008,7 @@ class ExportCliTests(unittest.TestCase):
         self.assertEqual(result[1]["unavailable_reason"], "bundle_limit")
         self.assertEqual(set(payloads), {"artifacts/first.json"})
 
-    def test_v2_fails_closed_when_bundle_limits_exclude_related_work(self):
+    def test_reserves_bundle_capacity_for_related_work(self):
         candidates = [
             {"priority": 0, "source": "first.json", "kind": "json"},
             {
@@ -1017,14 +1017,14 @@ class ExportCliTests(unittest.TestCase):
                 "kind": "related_work",
             },
         ]
-        descriptors = [
-            {
+        descriptors = {
+            candidate["source"]: {
                 "source": {"path": candidate["source"]},
                 "state": "downloadable",
                 "path": f"artifacts/{candidate['source']}",
             }
             for candidate in candidates
-        ]
+        }
 
         cases = (
             {
@@ -1033,36 +1033,98 @@ class ExportCliTests(unittest.TestCase):
                 "related": b"y" * 10,
                 "bundle_bytes": 55,
                 "bundle_files": afk_export.MAX_BUNDLE_FILES,
+                "secrets_only": False,
             },
             {
-                "name": "file budget",
+                "name": "v3 file budget",
                 "first": b"x",
                 "related": b"y",
                 "bundle_bytes": 100,
                 "bundle_files": 2,
+                "secrets_only": True,
             },
         )
         for case in cases:
+            if case["secrets_only"]:
+                candidates[1]["secrets_only"] = True
+            else:
+                candidates[1].pop("secrets_only", None)
+            data = {
+                "first.json": case["first"],
+                "related-work.jsonl": case["related"],
+            }
+            derived = []
+
+            def derive(candidate, _redactions, data=data, derived=derived):
+                source = candidate["source"]
+                derived.append(source)
+                return descriptors[source].copy(), data[source]
+
             with (
                 self.subTest(case["name"]),
                 mock.patch("afk_export.artifact_candidates", return_value=candidates),
-                mock.patch(
-                    "afk_export.derive_public_artifact",
-                    side_effect=[
-                        (descriptors[0].copy(), case["first"]),
-                        (descriptors[1].copy(), case["related"]),
-                    ],
-                ),
+                mock.patch("afk_export.derive_public_artifact", side_effect=derive),
                 mock.patch("afk_export.V2_MAX_BUNDLE_BYTES", case["bundle_bytes"]),
                 mock.patch("afk_export.MAX_BUNDLE_FILES", case["bundle_files"]),
                 mock.patch("afk_export.MAX_MANIFEST_BYTES", 0),
                 mock.patch("afk_export.MAX_INCLUDED_BYTES", 0),
-                self.assertRaisesRegex(
-                    afk_export.ExportError,
-                    "related-work snapshot cannot be published: bundle_limit",
-                ),
             ):
-                afk_export.public_artifacts({"redactions": set()})
+                result, payloads = afk_export.public_artifacts({"redactions": set()})
+
+            self.assertEqual(derived[0], "related-work.jsonl")
+            self.assertEqual(result[0]["state"], "oversized")
+            self.assertEqual(result[0]["unavailable_reason"], "bundle_limit")
+            self.assertEqual(result[1]["state"], "downloadable")
+            self.assertEqual(
+                payloads,
+                {"artifacts/related-work.jsonl": case["related"]},
+            )
+
+    def test_v3_does_not_run_v2_artifact_admission_first(self):
+        observed = {"marker": "observed"}
+        with (
+            mock.patch(
+                "afk_export.normalize_run_v2",
+                return_value=({"schema_version": 2}, {}),
+            ) as normalize_v2,
+            mock.patch("afk_export.artifact_candidates", return_value=[]) as candidates,
+            mock.patch("afk_export.artifact_candidates_v3", return_value=[]),
+            mock.patch("afk_export.public_artifacts", return_value=([], {})) as publish,
+        ):
+            record, payloads = afk_export.normalize_run_v3(observed)
+
+        normalize_v2.assert_called_once_with(observed, include_artifacts=False)
+        candidates.assert_called_once_with(observed)
+        publish.assert_called_once_with(observed, candidates=[])
+        self.assertEqual(record, {"schema_version": 3, "artifacts": []})
+        self.assertEqual(payloads, {})
+
+    def test_v2_fails_closed_when_related_work_itself_exceeds_bundle_limits(self):
+        candidate = {
+            "priority": 0,
+            "source": "related-work.jsonl",
+            "kind": "related_work",
+        }
+        descriptor = {
+            "source": {"path": candidate["source"]},
+            "state": "downloadable",
+            "path": f"artifacts/{candidate['source']}",
+        }
+        with (
+            mock.patch("afk_export.artifact_candidates", return_value=[candidate]),
+            mock.patch(
+                "afk_export.derive_public_artifact",
+                return_value=(descriptor, b"required"),
+            ),
+            mock.patch("afk_export.V2_MAX_BUNDLE_BYTES", 7),
+            mock.patch("afk_export.MAX_MANIFEST_BYTES", 0),
+            mock.patch("afk_export.MAX_INCLUDED_BYTES", 0),
+            self.assertRaisesRegex(
+                afk_export.ExportError,
+                "related-work snapshot cannot be published: bundle_limit",
+            ),
+        ):
+            afk_export.public_artifacts({"redactions": set()})
 
     def test_v2_admits_only_receipt_bound_inference_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
