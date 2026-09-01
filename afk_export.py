@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
+from afk_attempt.transcript import build_attempt_transcript
 
 SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
 
@@ -1505,7 +1506,34 @@ def artifact_candidates_v3(observed, originals=None):
     ):
         candidate = original.copy()
         candidate["secrets_only"] = True
-        if candidate["kind"] in {"inference_prompt", "inference_response"}:
+        if (
+            candidate["kind"] == "events"
+            and candidate["scope"].startswith("component:")
+            and candidate["scope"].endswith(":attempt")
+        ):
+            # Attempt stdout is private session evidence.  Keep a visible
+            # nondownloadable source declaration and publish a separately
+            # derived, output-bound transcript under the Attempt's own scope.
+            candidate.update(
+                kind="attempt_events_private",
+                private_source=False,
+                media_type="application/x-ndjson",
+            )
+            candidate.pop("destination", None)
+            selected.append(candidate)
+            transcript = original.copy()
+            transcript.update(
+                kind="attempt_session_transcript",
+                media_type="application/json",
+                priority=0,
+                private_source=False,
+                inference_view=False,
+                generated_raw=None,
+                secrets_only=False,
+            )
+            transcript.pop("destination", None)
+            selected.append(transcript)
+        elif candidate["kind"] in {"inference_prompt", "inference_response"}:
             candidate.update(
                 kind="json",
                 media_type="application/json",
@@ -1558,7 +1586,11 @@ def artifact_candidates_v3(observed, originals=None):
     for candidate in selected:
         if candidate["unsafe_path"]:
             continue
-        desired = f"artifacts/{candidate['source']}"
+        desired = (
+            f"artifacts/{candidate['source'].removesuffix('events.jsonl')}session-transcript.json"
+            if candidate["kind"] == "attempt_session_transcript"
+            else f"artifacts/{candidate['source']}"
+        )
         destination = desired
         duplicate = 2
         while destination in destinations:
@@ -2122,7 +2154,7 @@ def derive_public_artifact(candidate, redactions):
             return unavailable("unavailable", "unavailable")
         if stat.S_ISLNK(facts.st_mode) or not stat.S_ISREG(facts.st_mode):
             return unavailable("unsafe", "unsafe_file")
-        if facts.st_size == 0:
+        if facts.st_size == 0 and candidate["kind"] != "attempt_session_transcript":
             return unavailable("empty", "empty")
         if facts.st_size > V2_MAX_ARTIFACT_BYTES:
             return unavailable("oversized", "artifact_limit")
@@ -2132,6 +2164,8 @@ def derive_public_artifact(candidate, redactions):
             # Optional evidence remains describable, but required frozen context
             # cannot degrade into a nondownloadable artifact after source loading.
             return unavailable("unavailable", "unavailable")
+    if candidate["kind"] == "attempt_events_private":
+        return unavailable("unsafe", "private_attempt_events")
     json_sanitizer = (
         sanitize_secret_json_value
         if candidate.get("secrets_only")
@@ -2158,11 +2192,20 @@ def derive_public_artifact(candidate, redactions):
         ):
             raise ExportError("validated Acceptance Routing output changed")
         text = decode_text(raw)
-        if candidate.get("inference_view"):
+        if candidate["kind"] == "attempt_session_transcript":
+            value = build_attempt_transcript(
+                raw,
+                lambda item: sanitize_public_artifact_text(item, redactions),
+            )
+            public = encode_json(value)
+            changed = True
+        elif candidate.get("inference_view"):
             view = json.loads(text)
             if inference_view_contains_host_reference(view, redactions):
                 raise ExportError("inference view contains an unknown host path")
-        if candidate["kind"] == "related_work" and not candidate.get("secrets_only"):
+        if candidate["kind"] == "attempt_session_transcript":
+            pass
+        elif candidate["kind"] == "related_work" and not candidate.get("secrets_only"):
             if candidate.get("validated_raw") != raw:
                 raise ExportError("validated related-work snapshot changed")
             public = raw

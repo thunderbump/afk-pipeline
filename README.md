@@ -541,8 +541,21 @@ schema-validated historical Preflight output, the classifier `key` alone is
 replaced with an explicit public marker. Artifact state is `downloadable`,
 `empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
 carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
-optional sources remain explicit without public bytes. Structured payloads and
-logs are admitted before events. The allowlist covers the frozen Bead,
+optional sources remain explicit without public bytes. Attempt event streams are
+an exception to ordinary event publication: their raw descriptors are never
+downloadable (ordinary streams are `unsafe` with reason
+`private_attempt_events`; empty or oversized sources retain their explicit
+state). For a protocol-valid stream, the
+exporter instead emits an Attempt-owned, downloadable JSON session transcript
+that is also suitable for inline View presentation. Its closed allowlist keeps
+ordered lifecycle, command, file-operation, tool completion, provider retry, and
+compaction facts; message bodies, tool results, edit/write content, unknown
+arguments, and unknown events are omitted and counted. Known credentials and
+host paths are redacted, ambiguous paths and other unrecognized unsafe retained
+content fail closed, and a 256 KiB cap ends with an explicit truncation record.
+Empty streams receive an explicit empty-session transcript; malformed streams
+leave the transcript unsafe and nondownloadable. Structured payloads and logs
+are admitted before events. The allowlist covers the frozen Bead,
 Assignment, Coordinator request, Preparation record, retained Preflight records,
 Coordinator records, and each Component Invocation input, output, and declared
 artifact. The limits are
@@ -584,6 +597,9 @@ python3 -m afk_attempt assignment.json /new/attempt-directory
 The destination must not exist. The executor creates it, records the accepted
 Assignment as `input.json`, writes the runner's JSON-lines stdout and raw stderr
 to `events.jsonl` and `stderr.log`, then atomically writes `output.json` last.
+These raw files are private Attempt evidence. Publication Bundle v3 derives its
+public session transcript from the output-declared event stream; it never
+publishes the raw stream as a download.
 During execution, the wrapper writes concise timestamped progress to its stdout
 and flushes each line immediately for input acceptance, repository observations,
 artifact preparation, child start and completion, and final outcome sealing.
@@ -886,6 +902,12 @@ commits must exactly match Git's descendant commit range. A Feedback Response
 must additionally match its completed read-only Assessment and Review, the
 structured actionable findings and responses, and the originating succeeded
 Attempt's workspace, final state, and objective.
+
+Attempt session evidence describes what the implementation worker did and can
+include provider/tool chronology; it belongs to Attempt even when later stages
+consume it. Committed Change evidence is different: it deterministically proves
+the Git transition, immutable commit range, and repository states. A transcript
+is not Git proof, and Change does not own or regenerate the Attempt transcript.
 
 The result contains the accepted `input.json` and an atomically sealed
 `output.json`. A completed output exposes one `change` object with the frozen

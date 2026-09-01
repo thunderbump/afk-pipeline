@@ -130,6 +130,72 @@ class ExportCliTests(unittest.TestCase):
             self.assertIn("/tmp/worktree/file.py", rendered)
             self.assertIn(afk_export.REDACTED_SECRET, rendered)
 
+    def test_v3_publishes_attempt_owned_transcript_and_keeps_raw_events_private(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            events = source / "coordinator/01-attempt/events.jsonl"
+            events.write_text(
+                "\n".join(
+                    [
+                        json.dumps({"type": "agent_start"}),
+                        json.dumps(
+                            {
+                                "type": "tool_execution_start",
+                                "toolName": "bash",
+                                "args": {"command": "pwd"},
+                            }
+                        ),
+                        json.dumps(
+                            {
+                                "type": "message_end",
+                                "message": {
+                                    "role": "assistant",
+                                    "stopReason": "stop",
+                                    "content": [],
+                                },
+                            }
+                        ),
+                        json.dumps({"type": "agent_end"}),
+                    ]
+                )
+                + "\n"
+            )
+            destination = root / "bundle"
+
+            result = self.export_v3(source, destination)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            record = json.loads((destination / "workflow-run.json").read_text())
+            attempt = [
+                item
+                for item in record["artifacts"]
+                if item["scope"] == "component:1:attempt"
+                and item["source"]["path"].endswith("events.jsonl")
+            ]
+            private = next(
+                item for item in attempt if item["kind"] == "attempt_events_private"
+            )
+            transcript = next(
+                item for item in attempt if item["kind"] == "attempt_session_transcript"
+            )
+            self.assertEqual(private["state"], "unsafe")
+            self.assertEqual(private["unavailable_reason"], "private_attempt_events")
+            self.assertEqual(transcript["state"], "downloadable")
+            self.assertTrue(transcript["path"].endswith("session-transcript.json"))
+            public = json.loads((destination / transcript["path"]).read_text())
+            self.assertEqual(public["ownership"], "attempt")
+            self.assertEqual(
+                public["source"]["sha256"],
+                hashlib.sha256(events.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                next(item for item in public["records"] if item.get("tool") == "bash")[
+                    "command"
+                ],
+                "pwd",
+            )
+
     def test_explicit_v1_exports_the_legacy_portable_bundle(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
