@@ -2225,6 +2225,13 @@ def derive_public_artifact(candidate, redactions):
             )
         return nondownloadable_descriptor(base, state, reason), None
 
+    # The raw Attempt stream is a private evidence declaration, regardless of
+    # its file size.  Classify it before any source or generated-byte handling
+    # so artifact limits cannot weaken the descriptor required by admission.
+    # Its separately derived transcript remains an ordinary candidate and is
+    # therefore still independently subject to every limit below.
+    if candidate["kind"] == "attempt_events_private":
+        return unavailable("unsafe", "private_attempt_events")
     if candidate.get("unsafe_path"):
         return unavailable("unsafe", "unsafe_path")
     if candidate.get("private_source"):
@@ -2259,8 +2266,6 @@ def derive_public_artifact(candidate, redactions):
             # Optional evidence remains describable, but required frozen context
             # cannot degrade into a nondownloadable artifact after source loading.
             return unavailable("unavailable", "unavailable")
-    if candidate["kind"] == "attempt_events_private":
-        return unavailable("unsafe", "private_attempt_events")
     json_sanitizer = (
         sanitize_secret_json_value
         if candidate.get("secrets_only")

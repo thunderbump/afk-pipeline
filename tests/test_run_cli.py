@@ -10,6 +10,7 @@ from contextlib import redirect_stdout
 from pathlib import Path
 from unittest import mock
 
+import afk_export
 import afk_run
 from afk_review.contract import REVIEW_AUDIT
 from tests.inference_cli_fixture import install_pi
@@ -622,6 +623,41 @@ class RunPreparerCliTest(unittest.TestCase):
             "publication outcome for Bead central-123: accepted", result.stdout
         )
         self.assertFalse(Path(observed["bundle"]).exists())
+
+    def test_publication_admits_attempt_events_above_the_artifact_limit(self):
+        receipt = self.root / "operations-contract-receipt.json"
+        adapter = self.write_operations_contract_adapter(receipt)
+        self.configure_publication(
+            [sys.executable, str(adapter), "{bundle_path}", str(receipt)]
+        )
+        write_completed = self.write_completed_coordinator
+
+        def write_with_oversized_attempt_events(coordinator, output):
+            write_completed(coordinator, output)
+            events = coordinator / "01-attempt/events.jsonl"
+            with events.open("wb") as stream:
+                stream.truncate(afk_export.V2_MAX_ARTIFACT_BYTES + 1)
+
+        with mock.patch.object(
+            self,
+            "write_completed_coordinator",
+            side_effect=write_with_oversized_attempt_events,
+        ):
+            code, _, artifact = self.run_with_coordinator_output(
+                self.completed_output("stop"), 0, complete_evidence=True
+            )
+
+        publication = json.loads((artifact / "publication.json").read_text())
+        admitted = json.loads(receipt.read_text())
+        self.assertEqual(code, 0)
+        self.assertEqual(publication["admission_outcome"], "accepted")
+        self.assertEqual(
+            admitted,
+            {
+                "private": ["unsafe", "private_attempt_events"],
+                "transcript": ["oversized", "artifact_limit"],
+            },
+        )
 
     def test_same_terminal_run_replays_through_the_publication_seam(self):
         store = self.root / "adapter-store.json"
@@ -1337,6 +1373,31 @@ class RunPreparerCliTest(unittest.TestCase):
             f"print(json.dumps({{'schema_version': 1, 'outcome': {outcome!r}, "
             "'identity': record['identity'], 'location': 'fixture/location'}))\n"
             f"raise SystemExit({exit_code})\n"
+        )
+        return path
+
+    def write_operations_contract_adapter(self, receipt):
+        path = self.root / "operations-contract-publication.py"
+        path.write_text(
+            "import json,sys\n"
+            "from pathlib import Path\n"
+            "bundle=Path(sys.argv[1])\n"
+            "record=json.loads((bundle/'workflow-run.json').read_text())\n"
+            "attempt=[item for item in record['artifacts'] if "
+            "item['scope']=='component:1:attempt' and "
+            "item['source']['path'].endswith('events.jsonl')]\n"
+            "by_kind={item['kind']: item for item in attempt}\n"
+            "private=by_kind['attempt_events_private']\n"
+            "transcript=by_kind['attempt_session_transcript']\n"
+            "observed={'private': [private['state'], private['unavailable_reason']], "
+            "'transcript': [transcript['state'], transcript['unavailable_reason']]}\n"
+            "Path(sys.argv[2]).write_text(json.dumps(observed))\n"
+            "accepted=(observed['private']==['unsafe','private_attempt_events'] and "
+            "observed['transcript']==['oversized','artifact_limit'])\n"
+            "outcome='accepted' if accepted else 'rejected'\n"
+            "print(json.dumps({'schema_version': 1, 'outcome': outcome, "
+            "'identity': record['identity'], 'location': 'fixture/location'}))\n"
+            "raise SystemExit(0 if accepted else 1)\n"
         )
         return path
 

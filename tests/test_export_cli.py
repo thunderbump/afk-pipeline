@@ -1255,11 +1255,29 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(
                 (destination / related_descriptor["path"]).read_bytes(), related_raw
             )
-            retained_descriptor = descriptors[retained.relative_to(source).as_posix()]
-            self.assertEqual(retained_descriptor["state"], "oversized")
+            retained_descriptors = [
+                item
+                for item in record["artifacts"]
+                if item["source"]["path"] == retained.relative_to(source).as_posix()
+            ]
             self.assertEqual(
-                retained_descriptor["unavailable_reason"], "artifact_limit"
+                {item["kind"] for item in retained_descriptors},
+                {"attempt_events_private", "attempt_session_transcript"},
             )
+            private = next(
+                item
+                for item in retained_descriptors
+                if item["kind"] == "attempt_events_private"
+            )
+            self.assertEqual(private["state"], "unsafe")
+            self.assertEqual(private["unavailable_reason"], "private_attempt_events")
+            transcript = next(
+                item
+                for item in retained_descriptors
+                if item["kind"] == "attempt_session_transcript"
+            )
+            self.assertEqual(transcript["state"], "oversized")
+            self.assertEqual(transcript["unavailable_reason"], "artifact_limit")
             exhausted = [
                 descriptors[path.relative_to(source).as_posix()]
                 for path in optional

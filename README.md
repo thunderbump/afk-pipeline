@@ -546,11 +546,10 @@ replaced with an explicit public marker. Artifact state is `downloadable`,
 `empty`, `oversized`, `unsafe`, or `unavailable`; only `downloadable` records
 carry a payload path. Invalid, non-UTF-8, empty, missing, unsafe, and oversized
 optional sources remain explicit without public bytes. Attempt event streams are
-an exception to ordinary event publication: their raw descriptors are never
-downloadable (ordinary streams are `unsafe` with reason
-`private_attempt_events`; empty or oversized sources retain their explicit
-state). For a protocol-valid stream, the
-exporter instead emits an Attempt-owned, downloadable JSON session transcript
+an exception to ordinary event publication: their raw descriptors are always
+`unsafe` with reason `private_attempt_events`, including when the source is empty
+or exceeds the per-artifact limit. For a protocol-valid stream, the exporter
+instead emits an Attempt-owned, downloadable JSON session transcript
 that is also suitable for inline View presentation. Its closed allowlist keeps
 ordered lifecycle, command, file-operation, tool completion, provider retry, and
 compaction facts; message bodies, tool results, edit/write content, unknown
