@@ -19,6 +19,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
+from afk_validate.evidence import evidence_identity, load_passed_evidence
 
 USAGE = "usage: python3 -m afk_assess ASSESSMENT_JSON RESULT_DIRECTORY"
 
@@ -172,17 +173,19 @@ def load_evidence(assessment_input: dict[str, object]) -> dict[str, object]:
         if not isinstance(directory, str) or not Path(directory).is_absolute():
             raise ValueError(f"invalid Review evidence {field}")
         evidence_directories[field] = Path(directory)
-    validation = evidence_directories["validation_directory"]
+    validation_input, validation_output, validation_stdout, validation_stderr = (
+        load_passed_evidence(evidence_directories["validation_directory"])
+    )
     return {
         "input": review_input,
         "output": read_json(review_directory / "output.json"),
         "change_output": read_json(
             evidence_directories["change_directory"] / "output.json"
         ),
-        "validation": read_json(validation / "output.json"),
-        "validation_input": read_json(validation / "input.json"),
-        "validation_stdout": (validation / "stdout.log").read_text(),
-        "validation_stderr": (validation / "stderr.log").read_text(),
+        "validation": validation_output,
+        "validation_input": validation_input,
+        "validation_stdout": validation_stdout,
+        "validation_stderr": validation_stderr,
     }
 
 
@@ -200,6 +203,10 @@ def verify_subject(
         change_state = subject_state(change["repository"]["after"])
         review_before = subject_state(review_output["repository"]["before"])
         review_state = subject_state(review_output["repository"]["after"])
+        validation_input = evidence["validation_input"]
+        validation = evidence["validation"]
+        validation_before = subject_state(validation["repository"]["before"])
+        validation_state = subject_state(validation["repository"]["after"])
         reviewed_head = review_state["head"]
         review = review_output["review"]
     except (KeyError, TypeError) as error:
@@ -230,6 +237,26 @@ def verify_subject(
         raise ValueError("workspace must match the completed Review input")
     if Path(change_workspace).resolve() != Path(review_workspace).resolve():
         raise ValueError("workspace must match the reviewed Committed Change")
+    validation_workspace = validation_input.get("workspace")
+    if (
+        not isinstance(validation_workspace, str)
+        or Path(validation_workspace).resolve() != Path(review_workspace).resolve()
+    ):
+        raise ValueError("Validation workspace must match the completed Review")
+    if not (validation_before == validation_state == change_state):
+        raise ValueError(
+            "Validation must identify the reviewed Committed Change repository state"
+        )
+    validation_identity = evidence_identity(
+        validation_input,
+        validation,
+        evidence["validation_stdout"],
+        evidence["validation_stderr"],
+    )
+    if review_output.get("validation_evidence") != validation_identity:
+        raise ValueError(
+            "Validation evidence no longer matches the evidence used by Review"
+        )
     if change_state != review_state:
         raise ValueError("Review must match its Committed Change repository state")
     if subject_state(before) != review_state:

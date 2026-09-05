@@ -18,6 +18,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
+from afk_validate.evidence import evidence_identity
 
 USAGE = "usage: python3 -m afk_review REVIEW_JSON RESULT_DIRECTORY"
 
@@ -136,6 +137,7 @@ def main() -> int:
             "unchanged": unchanged,
             **({"observation_error": observation_error} if observation_error else {}),
         },
+        "validation_evidence": evidence["validation_identity"],
         "artifacts": {
             "diff": "diff.patch",
             "events": "events.jsonl",
@@ -206,6 +208,12 @@ def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> No
         workspace, change["repository"]["before"], change["repository"]["after"]
     )
     evidence["change"] = change
+    evidence["validation_identity"] = evidence_identity(
+        evidence["validation_input"],
+        evidence["validation"],
+        evidence["validation_stdout"],
+        evidence["validation_stderr"],
+    )
 
 
 def subject_state(state: dict[str, object]) -> dict[str, object]:

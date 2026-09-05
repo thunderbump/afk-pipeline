@@ -749,7 +749,9 @@ the Review input.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
 the single read-only inference invocation receipt, and an atomically sealed
-`output.json`. Review task contract version 2 composes five fixed,
+`output.json`. The output also records SHA-256 content identities for the
+Validation input, output, stdout, and stderr evidence supplied to Review, so a
+later role can reject replaced evidence. Review task contract version 2 composes five fixed,
 language-neutral instruction packets in this order: common, Behavior, Design,
 Standards, and output contract. The packet constants, declared tuple, pure
 composition function, and exact composed instructions are directly inspectable
@@ -801,8 +803,11 @@ Assessment input is structured JSON:
 ```
 
 The prepared workspace must match the completed Review's clean committed state.
-Before creating the result directory, Finding Assessment validates that Review's
-structured findings against the exact reviewed Git object. The branch remains
+Before creating the result directory, Finding Assessment validates Review's
+structured findings against the exact reviewed Git object. It also reloads the
+Validation evidence, validates its passed schema and logs, checks its workspace
+and repository state against the reviewed Committed Change, and requires its
+content identities to match those recorded by Review. The branch remains
 implicit and may be detached.
 
 The default adapter invokes Pi with `gpt-5.6-sol` and read-oriented tools.

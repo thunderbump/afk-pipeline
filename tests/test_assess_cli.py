@@ -11,6 +11,7 @@ from pathlib import Path
 
 from afk_related_work import build_snapshot, reference
 from afk_review.contract import REVIEW_AUDIT
+from afk_validate.evidence import evidence_identity
 from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
@@ -83,8 +84,32 @@ class AssessmentCliTest(unittest.TestCase):
         )
         validation = self.root / "validation"
         validation.mkdir()
-        self.write_json(validation / "input.json", {"command": ["test"]})
-        self.write_json(validation / "output.json", {"outcome": "passed"})
+        self.write_json(
+            validation / "input.json",
+            {
+                "schema_version": 1,
+                "workspace": str(self.workspace),
+                "command": ["test"],
+                "timeout_seconds": 30,
+            },
+        )
+        self.write_json(
+            validation / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "passed",
+                "started_at": "2026-01-01T00:00:00Z",
+                "finished_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1.0,
+                "process": {"exit_code": 0, "signal": None},
+                "repository": {
+                    "before": state,
+                    "after": state,
+                    "head_changed": False,
+                },
+                "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+            },
+        )
         (validation / "stdout.log").write_text("validation passed\n")
         (validation / "stderr.log").write_text("")
         self.review = self.root / "review"
@@ -125,6 +150,12 @@ class AssessmentCliTest(unittest.TestCase):
                     "after": state,
                     "unchanged": True,
                 },
+                "validation_evidence": evidence_identity(
+                    json.loads((validation / "input.json").read_text()),
+                    json.loads((validation / "output.json").read_text()),
+                    "validation passed\n",
+                    "",
+                ),
                 "artifacts": {
                     "diff": "diff.patch",
                     "events": "events.jsonl",
@@ -271,6 +302,68 @@ class AssessmentCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
         self.assertIn("diff.patch", completed.stderr)
+
+    def test_reloaded_validation_evidence_is_verified_before_assessment(self):
+        validation = self.root / "validation"
+        original_input = json.loads((validation / "input.json").read_text())
+        original_output = json.loads((validation / "output.json").read_text())
+        cases = {
+            "malformed-input": (
+                lambda value: value.pop("schema_version"),
+                None,
+                "Validation input must use schema_version 1",
+            ),
+            "replaced-output": (
+                None,
+                lambda value: value.update(outcome="failed"),
+                "invalid passed Validation output",
+            ),
+            "valid-but-replaced-output": (
+                None,
+                lambda value: value.update(duration_seconds=2.0),
+                "no longer matches the evidence used by Review",
+            ),
+            "stale-state": (
+                None,
+                lambda value: value["repository"].update(
+                    before=self.change_before(), after=self.change_before()
+                ),
+                "must identify the reviewed Committed Change",
+            ),
+            "wrong-workspace": (
+                lambda value: value.update(workspace=str(self.root)),
+                None,
+                "Validation workspace must match",
+            ),
+        }
+        for name, (mutate_input, mutate_output, message) in cases.items():
+            with self.subTest(name=name):
+                validation_input = json.loads(json.dumps(original_input))
+                validation_output = json.loads(json.dumps(original_output))
+                if mutate_input:
+                    mutate_input(validation_input)
+                if mutate_output:
+                    mutate_output(validation_output)
+                self.write_json(validation / "input.json", validation_input)
+                self.write_json(validation / "output.json", validation_output)
+
+                result, completed = self.run_assessment(
+                    "address", result_name=f"assessment-{name}"
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertFalse(result.exists())
+                self.assertIn(message, completed.stderr)
+
+        self.write_json(validation / "input.json", original_input)
+        self.write_json(validation / "output.json", original_output)
+        (validation / "stdout.log").unlink()
+        result, completed = self.run_assessment(
+            "address", result_name="assessment-missing-log"
+        )
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("Validation logs are unavailable", completed.stderr)
 
     def test_sibling_owned_finding_is_out_of_scope_under_trusted_policy(self):
         records = {
@@ -519,6 +612,11 @@ class AssessmentCliTest(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def change_before(self):
+        return json.loads((self.change / "output.json").read_text())["change"][
+            "repository"
+        ]["before"]
 
     def state(self):
         status = self.git("status", "--porcelain").splitlines()
