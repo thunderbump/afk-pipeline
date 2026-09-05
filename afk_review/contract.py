@@ -73,7 +73,11 @@ def validate_finding(
     if not locations:
         raise ValueError("finding locations must not be empty")
     for location in locations:
-        if not isinstance(location, dict) or not isinstance(location.get("path"), str):
+        if not isinstance(location, dict):
+            raise TypeError("each finding location must be an object")
+        if list(location) != ["path", "line"]:
+            raise ValueError("finding location fields are malformed or out of order")
+        if not isinstance(location.get("path"), str):
             raise TypeError("each finding location needs a path")
         if not location["path"].strip() or location["path"].startswith("/"):
             raise ValueError("finding location path must be repository-relative")

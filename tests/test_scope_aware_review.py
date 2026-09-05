@@ -1,8 +1,17 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from afk_assess.contract import validate_assessment
+from afk_assess.task import build_task as build_assessment_task
+from afk_related_work import (
+    RelatedWorkError,
+    build_snapshot,
+    reference,
+    validate_snapshot,
+)
 from afk_respond.contract import actionable_findings
-from afk_review.contract import validate_scope_claim
+from afk_review.contract import validate_finding, validate_scope_claim
 from afk_review.task import (
     BEHAVIOR_INSTRUCTIONS,
     COMMON_INSTRUCTIONS,
@@ -12,6 +21,7 @@ from afk_review.task import (
     STANDARDS_INSTRUCTIONS,
     compose_review_instructions,
 )
+from afk_review.task import build_task as build_review_task
 
 
 class ScopeAwareReviewContractTest(unittest.TestCase):
@@ -83,6 +93,57 @@ class ScopeAwareReviewContractTest(unittest.TestCase):
     def test_no_findings_requires_no_decisions(self):
         value = {"summary": "Nothing to assess.", "decisions": []}
         self.assertIs(validate_assessment({"findings": []}, value), value)
+
+    def test_task_builders_revalidate_frozen_related_work_before_using_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            records = {"task": {"id": "task", "title": "Current task"}}
+            raw, facts = build_snapshot(records["task"], records.__getitem__)
+            snapshot = root / "related-work.jsonl"
+            snapshot.write_bytes(raw)
+            related = reference(snapshot, facts)
+            validate_snapshot(snapshot, related)
+            snapshot.write_bytes(raw.replace(b"Current task", b"Changed task"))
+
+            builders = (
+                lambda: build_review_task(
+                    {"related_work": related}, {}, root / "diff.patch", root, "HEAD"
+                ),
+                lambda: build_assessment_task(
+                    {"related_work": related, "review_directory": str(root)},
+                    {"findings": []},
+                    "objective",
+                    root,
+                ),
+            )
+            for builder in builders:
+                with self.subTest(builder=builder), self.assertRaises(RelatedWorkError):
+                    builder()
+
+    def test_location_contract_rejects_extra_and_reordered_fields(self):
+        base = {
+            "lens": "behavior",
+            "title": "Problem",
+            "details": "Concrete defect.",
+            "locations": [],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "Owned by the objective.",
+            },
+        }
+        malformed = (
+            {"path": "README.md", "line": 1, "column": 2},
+            {"line": 1, "path": "README.md"},
+        )
+        for location in malformed:
+            finding = {**base, "locations": [location]}
+            with (
+                self.subTest(location=location),
+                self.assertRaisesRegex(
+                    ValueError, "location fields are malformed or out of order"
+                ),
+            ):
+                validate_finding(finding, Path.cwd(), "HEAD")
 
     @staticmethod
     def decision(index, defect, scope, related_id=None):

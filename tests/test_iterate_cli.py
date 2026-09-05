@@ -87,6 +87,42 @@ class IterationPolicyCliTest(unittest.TestCase):
         )
         self.assertFalse((result / "output.json.tmp").exists())
 
+    def test_unknown_scope_stays_in_evidence_without_triggering_repair(self):
+        output_path = self.assessment / "output.json"
+        output = json.loads(output_path.read_text())
+        decision = output["assessment"]["decisions"][0]
+        decision["defect_decision"] = "confirmed"
+        decision["scope"] = {
+            "kind": "unknown",
+            "rationale": "No owner can be established from the frozen evidence.",
+        }
+        self.write_json(output_path, output)
+
+        result, completed = self.run_policy(max_responses=3)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        policy = json.loads((result / "output.json").read_text())["policy"]
+        self.assertEqual(policy["decision"], "stop")
+        self.assertEqual(policy["actionable_findings"], 0)
+        preserved = json.loads(output_path.read_text())["assessment"]["decisions"][0]
+        self.assertEqual(preserved, decision)
+
+    def test_malformed_scope_is_rejected_by_the_iteration_pipeline(self):
+        output_path = self.assessment / "output.json"
+        output = json.loads(output_path.read_text())
+        output["assessment"]["decisions"][0]["scope"] = {
+            "kind": "unknown",
+            "rationale": "Malformed because unknown scopes cannot name an owner.",
+            "related_work_id": "not-allowed",
+        }
+        self.write_json(output_path, output)
+
+        result, completed = self.run_policy(max_responses=3)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("scope fields are malformed or out of order", completed.stderr)
+        self.assertFalse(result.exists())
+
     def test_response_lineage_exhausts_or_continues_at_the_caller_limit(self):
         self.assessment = self.make_response_assessment(worth_addressing=True)
 
