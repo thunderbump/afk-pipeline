@@ -100,7 +100,11 @@ def load_passed_evidence(
         raise ValueError("passed Validation repository evidence is invalid")
     before = validate_repository_state(repository.get("before"))
     after = validate_repository_state(repository.get("after"))
-    if before != after:
+    # Validation treats the checked-out branch as an implicit ref: commands may
+    # attach or detach HEAD, or switch between branches at the same commit.  Its
+    # consumers care about the validated content state, not branch attachment.
+    content_fields = ("head", "dirty", "status")
+    if any(before[field] != after[field] for field in content_fields):
         raise ValueError("passed Validation changed the repository")
 
     artifacts = validation_output.get("artifacts")

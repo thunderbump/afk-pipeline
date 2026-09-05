@@ -304,6 +304,21 @@ class ReviewCliTest(unittest.TestCase):
         self.assertIsNone(output["repository"]["before"]["branch"])
         self.assertTrue(output["repository"]["unchanged"])
 
+    def test_validation_branch_only_transition_is_reviewable(self):
+        validation = json.loads((self.validation / "output.json").read_text())
+        validation["repository"]["after"] = {
+            **validation["repository"]["after"],
+            "branch": None,
+        }
+        self.write_json(self.validation / "output.json", validation)
+
+        result, completed = self.run_review("no-findings")
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "completed")
+        self.assertTrue(output["repository"]["unchanged"])
+
     def test_reviewer_workspace_mutation_is_a_sealed_failure(self):
         result, completed = self.run_review("mutate-workspace")
 
