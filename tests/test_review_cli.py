@@ -115,7 +115,15 @@ class ReviewCliTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "outcome": "passed",
-                "repository": {"before": self.after, "after": self.after},
+                "started_at": "2026-01-01T00:00:00Z",
+                "finished_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1.0,
+                "process": {"exit_code": 0, "signal": None},
+                "repository": {
+                    "before": self.after,
+                    "after": self.after,
+                    "head_changed": False,
+                },
                 "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
             },
         )
@@ -506,13 +514,13 @@ class ReviewCliTest(unittest.TestCase):
             ),
             "failed-validation": (
                 lambda _change, validation: validation.update(outcome="failed"),
-                "Validation must have passed",
+                "invalid passed Validation output",
             ),
             "wrong-validation-before": (
                 lambda _change, validation: validation["repository"].update(
                     before=self.before
                 ),
-                "identify one repository state",
+                "passed Validation changed the repository",
             ),
             "dirty-change-before": (
                 lambda change, _validation: change["change"]["repository"][
@@ -585,7 +593,66 @@ class ReviewCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 2)
         self.assertFalse(result.exists())
-        self.assertIn("Validation must use schema_version 1", completed.stderr)
+        self.assertIn("invalid passed Validation output", completed.stderr)
+
+    def test_malformed_or_mismatched_validation_is_rejected_before_review(self):
+        original_input = json.loads((self.validation / "input.json").read_text())
+        original_output = json.loads((self.validation / "output.json").read_text())
+        cases = {
+            "wrong-workspace": (
+                lambda value: value.update(workspace=str(self.root / "other")),
+                None,
+                "Review workspace must match Validation",
+            ),
+            "empty-command": (
+                lambda value: value.update(command=[]),
+                None,
+                "invalid passed Validation input",
+            ),
+            "nonzero-process": (
+                None,
+                lambda value: value.update(process={"exit_code": 1, "signal": None}),
+                "invalid passed Validation output",
+            ),
+            "wrong-artifacts": (
+                None,
+                lambda value: value.update(
+                    artifacts={"stdout": "other.log", "stderr": "stderr.log"}
+                ),
+                "logs are not identified",
+            ),
+        }
+        for name, (mutate_input, mutate_output, error) in cases.items():
+            with self.subTest(name=name):
+                validation_input = json.loads(json.dumps(original_input))
+                validation_output = json.loads(json.dumps(original_output))
+                if mutate_input is not None:
+                    mutate_input(validation_input)
+                if mutate_output is not None:
+                    mutate_output(validation_output)
+                self.write_json(self.validation / "input.json", validation_input)
+                self.write_json(self.validation / "output.json", validation_output)
+
+                result, completed = self.run_review(
+                    "no-findings", result_name=f"review-{name}"
+                )
+
+                self.assertEqual(completed.returncode, 2)
+                self.assertFalse(result.exists())
+                self.assertIn(error, completed.stderr)
+
+        self.write_json(self.validation / "input.json", original_input)
+        self.write_json(self.validation / "output.json", original_output)
+        (self.validation / "stdout.log").unlink()
+        (self.validation / "stdout.log").symlink_to(self.validation / "stderr.log")
+
+        result, completed = self.run_review(
+            "no-findings", result_name="review-symlink-log"
+        )
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertFalse(result.exists())
+        self.assertIn("logs are unavailable", completed.stderr)
 
     def run_review(
         self,

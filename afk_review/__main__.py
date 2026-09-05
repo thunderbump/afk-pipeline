@@ -18,7 +18,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
-from afk_validate.evidence import evidence_identity
+from afk_validate.evidence import evidence_identity, load_passed_evidence
 
 USAGE = "usage: python3 -m afk_review REVIEW_JSON RESULT_DIRECTORY"
 
@@ -169,14 +169,16 @@ def validate_input(value: object) -> None:
 
 def load_evidence(review_input: dict[str, object]) -> dict[str, object]:
     change = Path(review_input["change_directory"])
-    validation = Path(review_input["validation_directory"])
+    validation_input, validation_output, validation_stdout, validation_stderr = (
+        load_passed_evidence(Path(review_input["validation_directory"]))
+    )
     return {
         "workspace": review_input["workspace"],
         "change_output": read_json(change / "output.json"),
-        "validation": read_json(validation / "output.json"),
-        "validation_input": read_json(validation / "input.json"),
-        "validation_stdout": (validation / "stdout.log").read_text(),
-        "validation_stderr": (validation / "stderr.log").read_text(),
+        "validation": validation_output,
+        "validation_input": validation_input,
+        "validation_stdout": validation_stdout,
+        "validation_stderr": validation_stderr,
     }
 
 
@@ -185,6 +187,7 @@ def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> No
         change_output = evidence["change_output"]
         change = validate_change_output(change_output)
         validation = evidence["validation"]
+        validation_input = evidence["validation_input"]
         change_workspace = change["workspace"]
         change_after = subject_state(change["repository"]["after"])
         validation_before = subject_state(validation["repository"]["before"])
@@ -196,8 +199,12 @@ def verify_subject(before: dict[str, object], evidence: dict[str, object]) -> No
     workspace = Path(change_workspace)
     if workspace.resolve() != Path(evidence["workspace"]).resolve():
         raise ValueError("Review workspace must match Committed Change")
-    if validation.get("outcome") != "passed":
-        raise ValueError("review Validation must have passed")
+    validation_workspace = validation_input.get("workspace")
+    if (
+        not isinstance(validation_workspace, str)
+        or Path(validation_workspace).resolve() != workspace.resolve()
+    ):
+        raise ValueError("Review workspace must match Validation")
     if not (change_after == validation_before == validation_state):
         raise ValueError(
             "Committed Change and Validation must identify one repository state"

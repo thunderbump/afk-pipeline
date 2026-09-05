@@ -105,9 +105,14 @@ elif scenario in (
             "output": {
                 "schema_version": 1,
                 "outcome": "passed",
+                "started_at": "2026-01-01T00:00:00Z",
+                "finished_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1.0,
+                "process": {"exit_code": 0, "signal": None},
                 "repository": {
                     "before": task["committed_change"]["change"]["repository"]["after"],
                     "after": task["committed_change"]["change"]["repository"]["after"],
+                    "head_changed": False,
                 },
                 "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
             },
