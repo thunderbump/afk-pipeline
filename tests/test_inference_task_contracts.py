@@ -93,7 +93,30 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 "b",
             )
             assessment_task = build_assessment_task(
-                {"review_directory": str(root)}, review, "objective", root
+                {"review_directory": str(root)},
+                review,
+                "objective",
+                root,
+                {
+                    "change_output": {"change": "output"},
+                    "validation_input": {"validation": "input"},
+                    "validation": {"validation": "output"},
+                    "validation_stdout": "validation out",
+                    "validation_stderr": "validation err",
+                },
+            )
+            self.assertEqual(
+                assessment_task.untrusted_data["committed_change"],
+                {"change": "output"},
+            )
+            self.assertEqual(
+                assessment_task.untrusted_data["validation"],
+                {
+                    "input": {"validation": "input"},
+                    "output": {"validation": "output"},
+                    "stdout": "validation out",
+                    "stderr": "validation err",
+                },
             )
             response_task = build_response_task({}, [], "objective")
 

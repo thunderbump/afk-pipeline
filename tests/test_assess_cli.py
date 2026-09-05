@@ -81,6 +81,12 @@ class AssessmentCliTest(unittest.TestCase):
                 },
             },
         )
+        validation = self.root / "validation"
+        validation.mkdir()
+        self.write_json(validation / "input.json", {"command": ["test"]})
+        self.write_json(validation / "output.json", {"outcome": "passed"})
+        (validation / "stdout.log").write_text("validation passed\n")
+        (validation / "stderr.log").write_text("")
         self.review = self.root / "review"
         self.review.mkdir()
         self.write_json(

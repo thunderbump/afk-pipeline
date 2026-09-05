@@ -19,6 +19,7 @@ def build_task(
     review: dict[str, object],
     objective: str,
     workspace: Path,
+    evidence: dict[str, object],
 ) -> TaskContract:
     """Build and bind the v2 Finding Assessment task."""
     review_directory = Path(assessment_input["review_directory"])
@@ -30,6 +31,13 @@ def build_task(
         "findings": review["findings"],
         "review": review,
         "reviewed_diff": (review_directory / "diff.patch").read_text(),
+        "committed_change": evidence["change_output"],
+        "validation": {
+            "input": evidence["validation_input"],
+            "output": evidence["validation"],
+            "stdout": evidence["validation_stdout"],
+            "stderr": evidence["validation_stderr"],
+        },
         "related_work": related_records,
     }
 

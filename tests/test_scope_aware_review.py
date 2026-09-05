@@ -114,6 +114,7 @@ class ScopeAwareReviewContractTest(unittest.TestCase):
                     {"findings": []},
                     "objective",
                     root,
+                    {},
                 ),
             )
             for builder in builders:

@@ -53,7 +53,7 @@ def main() -> int:
     progress("observing reviewed repository")
     before = repository_state(workspace)
     review, objective = verify_subject(assessment_input, before, evidence)
-    task = build_task(assessment_input, review, objective, workspace)
+    task = build_task(assessment_input, review, objective, workspace, evidence)
 
     progress("preparing finding-assessment result directory")
     result_directory.mkdir()
@@ -166,16 +166,23 @@ def load_evidence(assessment_input: dict[str, object]) -> dict[str, object]:
     review_input = read_json(review_directory / "input.json")
     if not isinstance(review_input, dict):
         raise TypeError("invalid Review evidence")
-    change_directory = review_input.get("change_directory")
-    if (
-        not isinstance(change_directory, str)
-        or not Path(change_directory).is_absolute()
-    ):
-        raise ValueError("invalid Review evidence change_directory")
+    evidence_directories = {}
+    for field in ("change_directory", "validation_directory"):
+        directory = review_input.get(field)
+        if not isinstance(directory, str) or not Path(directory).is_absolute():
+            raise ValueError(f"invalid Review evidence {field}")
+        evidence_directories[field] = Path(directory)
+    validation = evidence_directories["validation_directory"]
     return {
         "input": review_input,
         "output": read_json(review_directory / "output.json"),
-        "change_output": read_json(Path(change_directory) / "output.json"),
+        "change_output": read_json(
+            evidence_directories["change_directory"] / "output.json"
+        ),
+        "validation": read_json(validation / "output.json"),
+        "validation_input": read_json(validation / "input.json"),
+        "validation_stdout": (validation / "stdout.log").read_text(),
+        "validation_stderr": (validation / "stderr.log").read_text(),
     }
 
 

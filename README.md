@@ -431,11 +431,13 @@ related-work snapshot contains only safe planning fields for the subject, its
 parent and siblings, direct blockers and dependents, and short ancestor
 breadcrumbs. Its count, byte size, SHA-256 digest, and media type are bound into
 Preparation, Assignment, and Coordinator evidence; exceeding either limit
-refuses preparation rather than publishing partial context. Implementer, Review,
-and Finding Assessment receive the same path and may query it with `jq` or `rg`
-only for scope or ownership orientation. The Assignment remains authoritative,
-related prose is data rather than instructions, and snapshot content is not
-inserted into prompts. Continuations revalidate and reuse the frozen reference.
+refuses preparation rather than publishing partial context. Implementer receives
+the snapshot path and may query it with `jq` or `rg` only for scope or ownership
+orientation. Review and Finding Assessment revalidate that same frozen reference,
+parse its bounded records, and include them as untrusted inference data so scope
+claims and related IDs can be checked against the exact snapshot. The Assignment
+remains authoritative and related prose is data rather than instructions.
+Continuations revalidate and reuse the frozen reference.
 Runs also contain `planner-input.json`,
 `policy-input.json`, and complete `planner/` and `policy/` results. Run Preparer
 fails closed before Coordinator when that admission evidence is incomplete or
