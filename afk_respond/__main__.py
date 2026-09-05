@@ -9,6 +9,7 @@ from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
 from afk_inference import invoke
+from afk_related_work import snapshot_ids
 from afk_respond.contract import actionable_findings, validate_input
 from afk_respond.task import build_task
 from afk_review.contract import validate_review
@@ -296,8 +297,16 @@ def verify_subject(response_input, before, evidence):
         raise ValueError("workspace must match the assessed repository state")
     if assessment_state["dirty"] or assessment_state["status"]:
         raise ValueError("feedback response requires a clean committed state")
-    reviewed = validate_review(review, workspace, assessment_state["head"])
-    assessed = validate_assessment(reviewed, assessment)
+    review_related = review_input.get("related_work")
+    if assessment_input.get("related_work") != review_related:
+        raise ValueError("Finding Assessment must use the Review related-work snapshot")
+    related_work_ids = (
+        snapshot_ids(review_related) if review_related is not None else set()
+    )
+    reviewed = validate_review(
+        review, workspace, assessment_state["head"], related_work_ids
+    )
+    assessed = validate_assessment(reviewed, assessment, related_work_ids)
     return reviewed, assessed, objective
 
 

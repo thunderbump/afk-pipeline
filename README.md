@@ -746,25 +746,31 @@ prompt as the final argument. Do not put credentials in this configuration or
 the Review input.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
-and an atomically sealed `output.json`. Before responding, the reviewer is
-instructed to inspect the objective, its stated acceptance criteria, the complete
-reviewed diff, and all supplied evidence, then return every actionable finding
-discovered in that audit together. This applies equally to code and documentation
-work. A completed response contains a summary, a possibly empty findings array,
-and exactly this ordered audit declaration:
+the single read-only inference invocation receipt, and an atomically sealed
+`output.json`. Review task contract version 2 composes five fixed,
+language-neutral instruction packets in this order: common, Behavior, Design,
+Standards, and output contract. The packet constants, declared tuple, pure
+composition function, and exact composed instructions are directly inspectable
+in `afk_review.task`; the coordinator supplies data but no review-policy prose.
+All three lenses run in that one inference call. A completed response contains a
+summary, a possibly empty findings array, and exactly this ordered audit
+declaration:
 
 ```json
 {"completed":true,"scopes":["objective","acceptance_criteria","reviewed_diff","supplied_evidence"]}
 ```
 
 The declaration records that the reviewer performed those inspection scopes; it
-is not mechanical proof that every possible defect was found. It neither maps
-findings to scopes nor assigns identities to acceptance criteria that the input
-does not provide. Missing, extra, reordered, or malformed audit fields and values
-invalidate the Review and its downstream use. Every finding requires severity,
-title, details, and at least one repository-relative path with a positive 1-based
-line number that exists in a text file under the reviewed `HEAD`. Findings do not
-make execution fail and do not authorize repair or GitHub posting.
+is not mechanical proof that every possible defect was found. Missing, extra,
+reordered, or malformed audit fields and values invalidate the Review and its
+downstream use. Every concrete finding has a `lens` (`behavior`, `design`, or
+`standards`), title, details, and at least one repository-relative path with a
+positive 1-based line number that exists in a text file under the reviewed
+`HEAD`. It also has a `scope_claim` with `kind` (`current`, `related`, or
+`unknown`) and a rationale. Only `related` includes `related_work_id`, which
+must identify a record in the frozen related-work snapshot. Review v2 has no
+severity policy, language detection, language-specific packets, or internal
+fan-out. Findings do not make execution fail or authorize repair.
 
 Review outcomes are `completed`, `failed`, `timed_out`, or `interrupted`. A
 review completes only when the child exits zero, the Pi event stream and
@@ -774,7 +780,8 @@ invalid invocation, configuration, input, or evidence.
 
 ## Finding Assessment
 
-Assess whether every finding from one completed Review is worth addressing:
+Independently assess the defect and final scope of every finding from one
+completed Review:
 
 ```sh
 python3 -m afk_assess assessment.json /new/result-directory
@@ -802,11 +809,15 @@ test may set `AFK_ASSESS_AGENT_COMMAND` to a JSON argv array; Finding Assessment
 appends its generated prompt as the final argument.
 
 The result directory contains `input.json`, raw `events.jsonl`, raw
-`stderr.log`, and an atomically sealed `output.json`. A completed assessment has
-a summary and exactly one decision for every immutable Review finding. Each
-decision contains its zero-based `finding_index`, boolean `worth_addressing`,
-and non-empty `rationale`. A Review with no findings requires an empty decisions
-array. Findings may not be skipped or duplicated.
+`stderr.log`, and an atomically sealed `output.json`. Finding Assessment task
+contract version 2 returns a summary and exactly one decision for every
+immutable Review finding. Each decision contains its zero-based `finding_index`,
+independent `defect_decision` (`confirmed` or `rejected`) and rationale, plus an
+independent `scope` (`current`, `related`, or `unknown`) and scope rationale.
+Only related scope includes a `related_work_id`, validated against the exact
+same frozen snapshot used by Review. Assessment keeps both rationales and may
+disagree with Review. A Review with no findings requires an empty decisions
+array; findings may not be skipped or duplicated.
 
 Assessment outcomes are `completed`, `failed`, `timed_out`, or `interrupted`.
 Completion is separate from the boolean decisions and does not authorize repair,
@@ -850,9 +861,11 @@ prompt identifies all four Validation artifacts and explicitly distinguishes a
 validation repair from an accepted Review finding; its structured result uses
 an empty `finding_responses` array.
 
-One invocation selects all and only Assessment decisions whose
-`worth_addressing` value is true. Only an actionable response or validation
-repair requests the Inference Runtime's semantic `WRITE` capability. The
+One invocation selects all and only Assessment decisions with
+`defect_decision: "confirmed"` and final `scope.kind: "current"`. Rejected,
+related, and unknown findings remain in Review and Assessment evidence but do
+not trigger repair. Only a selected response or validation repair requests the
+Inference Runtime's semantic `WRITE` capability. The
 runtime owns Pi construction, capability tools, timing, protocol
 interpretation, and retained inference evidence; Feedback Response supplies
 verified task data and validates the domain response. The no-action path does
@@ -952,10 +965,11 @@ The result contains accepted `input.json` and an atomically sealed `output.json`
 Its completed `policy` records the derived response and actionable-finding
 counts, the configured limit, a reason, and one deterministic decision:
 
-- `stop` when the latest Assessment has no actionable findings, regardless of
-  remaining budget.
-- `exhausted` when actionable findings remain and the response limit has been
-  reached.
+- `stop` when the latest Assessment has no confirmed current-scope findings,
+  regardless of remaining budget. Rejected, related, and unknown findings do
+  not force repair and remain in the evidence.
+- `exhausted` when confirmed current-scope findings remain and the response
+  limit has been reached.
 - `continue` otherwise; only this decision includes `next_response_number`.
 
 Exit status is `0` after a completed decision and `2` for invalid invocation,

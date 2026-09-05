@@ -12,6 +12,7 @@ from afk_change.contract import (
     validate_git_transition,
     validate_repository_state,
 )
+from afk_related_work import snapshot_ids
 from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import validate_input as validate_response_input
 from afk_review.contract import validate_review
@@ -142,8 +143,18 @@ def _committed_response(source_directory, visited, lineage):
             response_value = response_output["response"]
         except KeyError as error:
             raise ValueError("invalid Feedback Response evidence") from error
-        reviewed = validate_review(review_value, workspace, before["head"])
-        assessed = validate_assessment(reviewed, assessment_value)
+        review_related = review_input.get("related_work")
+        if assessment_input.get("related_work") != review_related:
+            raise ValueError(
+                "Finding Assessment must use the Review related-work snapshot"
+            )
+        related_work_ids = (
+            snapshot_ids(review_related) if review_related is not None else set()
+        )
+        reviewed = validate_review(
+            review_value, workspace, before["head"], related_work_ids
+        )
+        assessed = validate_assessment(reviewed, assessment_value, related_work_ids)
         selected = actionable_findings(reviewed, assessed)
         if not selected:
             raise ValueError(

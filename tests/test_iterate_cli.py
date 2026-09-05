@@ -266,7 +266,7 @@ class IterationPolicyCliTest(unittest.TestCase):
 
     def make_response_assessment(self, worth_addressing):
         initial_output = json.loads((self.assessment / "output.json").read_text())
-        initial_output["assessment"]["decisions"][0]["worth_addressing"] = True
+        initial_output["assessment"]["decisions"][0]["defect_decision"] = "confirmed"
         self.write_json(self.assessment / "output.json", initial_output)
 
         response = self.root / "06-response"
@@ -338,10 +338,14 @@ class IterationPolicyCliTest(unittest.TestCase):
             },
         )
         finding = {
-            "severity": "medium",
+            "lens": "behavior",
             "title": "Check the response",
             "details": "The response may miss another edge case.",
             "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior.",
+            },
         }
         self.write_json(
             review / "output.json",
@@ -381,8 +385,14 @@ class IterationPolicyCliTest(unittest.TestCase):
                     "decisions": [
                         {
                             "finding_index": 0,
-                            "worth_addressing": worth_addressing,
+                            "defect_decision": "confirmed"
+                            if worth_addressing
+                            else "rejected",
                             "rationale": "The finding was assessed.",
+                            "scope": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                 },
@@ -451,10 +461,14 @@ class IterationPolicyCliTest(unittest.TestCase):
             },
         )
         finding = {
-            "severity": "medium",
+            "lens": "behavior",
             "title": "Check the implementation",
             "details": "The implementation may miss an edge case.",
             "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior.",
+            },
         }
         self.write_json(
             review / "output.json",
@@ -494,8 +508,14 @@ class IterationPolicyCliTest(unittest.TestCase):
                     "decisions": [
                         {
                             "finding_index": 0,
-                            "worth_addressing": worth_addressing,
+                            "defect_decision": "confirmed"
+                            if worth_addressing
+                            else "rejected",
                             "rationale": "The finding was assessed.",
+                            "scope": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                 },

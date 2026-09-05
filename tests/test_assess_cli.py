@@ -102,10 +102,14 @@ class AssessmentCliTest(unittest.TestCase):
                     "summary": "One finding reported.",
                     "findings": [
                         {
-                            "severity": "medium",
+                            "lens": "behavior",
                             "title": "Fixture finding",
                             "details": "The fixture reports one concrete problem.",
                             "locations": [{"path": "README.md", "line": 1}],
+                            "scope_claim": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                     "audit": REVIEW_AUDIT,
@@ -137,10 +141,16 @@ class AssessmentCliTest(unittest.TestCase):
                 "decisions": [
                     {
                         "finding_index": 0,
-                        "worth_addressing": True,
+                        "defect_decision": "confirmed",
                         "rationale": (
                             "The behavior is reachable and violates the objective."
                         ),
+                        "scope": {
+                            "kind": "current",
+                            "rationale": (
+                                "The current objective owns the assessed behavior."
+                            ),
+                        },
                     }
                 ],
             },
@@ -175,7 +185,7 @@ class AssessmentCliTest(unittest.TestCase):
                 self.assertEqual(output["outcome"], "completed")
                 self.assertEqual(
                     [
-                        decision["worth_addressing"]
+                        decision["defect_decision"] == "confirmed"
                         for decision in output["assessment"]["decisions"]
                     ],
                     expected,
@@ -186,7 +196,7 @@ class AssessmentCliTest(unittest.TestCase):
         for scenario, message in (
             ("missing-decision", "each Review finding must have one decision"),
             ("duplicate-decision", "each Review finding must have one decision"),
-            ("invalid-decision", "worth_addressing must be a boolean"),
+            ("invalid-decision", "defect_decision must be confirmed or rejected"),
         ):
             with self.subTest(scenario=scenario):
                 result, completed = self.run_assessment(scenario, result_name=scenario)
@@ -276,9 +286,13 @@ class AssessmentCliTest(unittest.TestCase):
         input_path, result, environment = self.prepare_assessment(
             "sibling-owned-finding"
         )
+        related = reference(snapshot, facts)
         value = json.loads(input_path.read_text())
-        value["related_work"] = reference(snapshot, facts)
+        value["related_work"] = related
         self.write_json(input_path, value)
+        review_input = json.loads((self.review / "input.json").read_text())
+        review_input["related_work"] = related
+        self.write_json(self.review / "input.json", review_input)
 
         completed = self.invoke(input_path, result, environment)
 
@@ -286,7 +300,8 @@ class AssessmentCliTest(unittest.TestCase):
         decision = json.loads((result / "output.json").read_text())["assessment"][
             "decisions"
         ][0]
-        self.assertFalse(decision["worth_addressing"])
+        self.assertEqual(decision["defect_decision"], "confirmed")
+        self.assertEqual(decision["scope"]["kind"], "related")
 
     def test_change_objective_is_required_and_given_to_the_assessor(self):
         marker = self.root / "prompt.txt"
@@ -447,10 +462,14 @@ class AssessmentCliTest(unittest.TestCase):
 
     def finding(self, title):
         return {
-            "severity": "medium",
+            "lens": "behavior",
             "title": title,
             "details": "The fixture reports one concrete problem.",
             "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior.",
+            },
         }
 
     def set_findings(self, findings):

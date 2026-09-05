@@ -380,7 +380,16 @@ class ReviewCliTest(unittest.TestCase):
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
         output = json.loads((result / "output.json").read_text())
-        self.assertEqual(output["review"]["findings"], [])
+        finding = output["review"]["findings"][0]
+        self.assertEqual(finding["lens"], "behavior")
+        self.assertEqual(
+            finding["scope_claim"],
+            {
+                "kind": "related",
+                "rationale": "The frozen sibling record owns caller migration.",
+                "related_work_id": "callers",
+            },
+        )
         self.assertIn("related sibling", output["review"]["summary"])
 
     def test_agent_launch_failure_is_sealed(self):

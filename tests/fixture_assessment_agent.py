@@ -76,7 +76,7 @@ elif scenario in ("dismiss", "sibling-owned-finding"):
         ):
             raise SystemExit("caller migration was not sibling-owned")
         if "current implementation objective is authoritative" not in prompt or (
-            "work owned by a sibling task" not in prompt
+            "frozen related-work record owns it" not in prompt
         ):
             raise SystemExit("trusted sibling-ownership policy was omitted")
         rationale = "The requested caller migration is owned by a sibling task."
@@ -129,6 +129,28 @@ elif scenario == "invalid-json":
     assessment = "not JSON"
 else:
     raise SystemExit(f"unknown assessment fixture scenario: {scenario}")
+
+if isinstance(assessment, dict):
+    for decision in assessment.get("decisions", []):
+        if "scope" in decision:  # the duplicate fixture aliases one dictionary
+            continue
+        worth = decision.pop("worth_addressing", None)
+        decision["defect_decision"] = (
+            "confirmed" if worth is True else "rejected" if worth is False else worth
+        )
+        rationale = decision.pop("rationale")
+        decision["rationale"] = rationale
+        decision["scope"] = {
+            "kind": "current",
+            "rationale": "The current objective owns the assessed behavior.",
+        }
+        if scenario == "sibling-owned-finding":
+            decision["defect_decision"] = "confirmed"
+            decision["scope"] = {
+                "kind": "related",
+                "rationale": "The frozen sibling record owns caller migration.",
+                "related_work_id": "callers",
+            }
 
 print(json.dumps({"type": "agent_start"}), flush=True)
 print(

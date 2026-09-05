@@ -133,8 +133,12 @@ class ResponseCliTest(unittest.TestCase):
                     "decisions": [
                         {
                             "finding_index": 0,
-                            "worth_addressing": True,
+                            "defect_decision": "confirmed",
                             "rationale": "The behavior is concrete and reachable.",
+                            "scope": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                 },
@@ -601,10 +605,14 @@ class ResponseCliTest(unittest.TestCase):
 
     def finding(self, title):
         return {
-            "severity": "medium",
+            "lens": "behavior",
             "title": title,
             "details": "The fixture reports one concrete problem.",
             "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior.",
+            },
         }
 
     def set_findings_and_decisions(self, findings, worth_addressing):
@@ -615,8 +623,12 @@ class ResponseCliTest(unittest.TestCase):
         assessment["assessment"]["decisions"] = [
             {
                 "finding_index": index,
-                "worth_addressing": value,
+                "defect_decision": "confirmed" if value else "rejected",
                 "rationale": "Fixture assessment rationale.",
+                "scope": {
+                    "kind": "current",
+                    "rationale": "The current objective owns this behavior.",
+                },
             }
             for index, value in enumerate(worth_addressing)
         ]
@@ -624,7 +636,7 @@ class ResponseCliTest(unittest.TestCase):
 
     def make_no_action(self):
         assessment = json.loads((self.assessment / "output.json").read_text())
-        assessment["assessment"]["decisions"][0]["worth_addressing"] = False
+        assessment["assessment"]["decisions"][0]["defect_decision"] = "rejected"
         self.write_json(self.assessment / "output.json", assessment)
 
     def wrap_git(self, environment, mode):

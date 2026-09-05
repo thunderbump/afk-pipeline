@@ -2706,11 +2706,7 @@ def component_details(component, value, redactions):
             "kind": "assessment",
             "summary": bounded_text(assessment.get("summary"), redactions),
             "decisions": [
-                {
-                    "finding_index": nonnegative_integer(item.get("finding_index")),
-                    "worth_addressing": require_boolean(item.get("worth_addressing")),
-                    "rationale": bounded_text(item.get("rationale"), redactions),
-                }
+                normalize_assessment_decision(item, redactions)
                 for item in assessment["decisions"]
             ],
         }
@@ -2755,9 +2751,42 @@ def component_details(component, value, redactions):
     return {"kind": component}
 
 
+def normalize_scope(value, redactions):
+    if not isinstance(value, dict) or value.get("kind") not in {
+        "current",
+        "related",
+        "unknown",
+    }:
+        raise ExportError("invalid finding scope")
+    result = {
+        "kind": value["kind"],
+        "rationale": bounded_text(value.get("rationale"), redactions),
+    }
+    if value["kind"] == "related":
+        result["related_work_id"] = bounded_text(
+            value.get("related_work_id"), redactions
+        )
+    elif "related_work_id" in value:
+        raise ExportError("invalid finding scope")
+    return result
+
+
+def normalize_assessment_decision(value, redactions):
+    if value.get("defect_decision") not in {"confirmed", "rejected"}:
+        raise ExportError("invalid Assessment defect decision")
+    return {
+        "finding_index": nonnegative_integer(value.get("finding_index")),
+        "defect_decision": value["defect_decision"],
+        "rationale": bounded_text(value.get("rationale"), redactions),
+        "scope": normalize_scope(value.get("scope"), redactions),
+    }
+
+
 def normalize_finding(value, redactions):
     if not isinstance(value, dict) or not isinstance(value.get("locations"), list):
         raise ExportError("invalid Review finding")
+    if value.get("lens") not in {"behavior", "design", "standards"}:
+        raise ExportError("invalid Review finding lens")
     locations = []
     for location in value["locations"]:
         if not isinstance(location, dict) or not safe_relative(location.get("path")):
@@ -2766,10 +2795,11 @@ def normalize_finding(value, redactions):
             {"path": location["path"], "line": positive_integer(location.get("line"))}
         )
     return {
-        "severity": bounded_text(value.get("severity"), redactions),
+        "lens": value["lens"],
         "title": bounded_text(value.get("title"), redactions),
         "details": bounded_text(value.get("details"), redactions),
         "locations": locations,
+        "scope_claim": normalize_scope(value.get("scope_claim"), redactions),
     }
 
 

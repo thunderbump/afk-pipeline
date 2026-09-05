@@ -5,6 +5,7 @@ from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.evidence import verify_change_lineage
+from afk_related_work import snapshot_ids
 from afk_review.contract import validate_review
 from afk_runtime import progress, seal_json, write_json
 
@@ -58,7 +59,9 @@ def evaluate_policy(policy_input):
     )
     completed_responses = lineage.response_count
     actionable_findings = sum(
-        decision["worth_addressing"] for decision in assessment["decisions"]
+        decision["defect_decision"] == "confirmed"
+        and decision["scope"]["kind"] == "current"
+        for decision in assessment["decisions"]
     )
     return (
         decide(
@@ -163,14 +166,26 @@ def verified_assessment(assessment_directory):
         == Path(review_input.get("workspace", "")).resolve()
     ):
         raise ValueError("iteration evidence workspaces must match")
-    review = validate_review(review_value, workspace, review_after["head"])
+    review_related = review_input.get("related_work")
+    if assessment_input.get("related_work") != review_related:
+        raise ValueError("Finding Assessment must use the Review related-work snapshot")
+    related_work_ids = (
+        snapshot_ids(review_related) if review_related is not None else set()
+    )
+    review = validate_review(
+        review_value, workspace, review_after["head"], related_work_ids
+    )
     evidence_directories = {
         assessment_directory.resolve(),
         review_directory.resolve(),
         Path(review_input["validation_directory"]).resolve(),
         *lineage.evidence_directories,
     }
-    return validate_assessment(review, assessment_value), lineage, evidence_directories
+    return (
+        validate_assessment(review, assessment_value, related_work_ids),
+        lineage,
+        evidence_directories,
+    )
 
 
 def validate_stage_input(value, name, *evidence_fields):

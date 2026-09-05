@@ -26,26 +26,42 @@ def validate_audit(value: object) -> dict[str, object]:
 
 
 def validate_review(
-    value: object, workspace: Path, reviewed_head: str
+    value: object,
+    workspace: Path,
+    reviewed_head: str,
+    related_work_ids: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("review response must be an object")
+    if list(value) != ["summary", "findings", "audit"]:
+        raise ValueError(
+            "review response or audit fields are malformed or out of order"
+        )
     if not isinstance(value.get("summary"), str):
         raise TypeError("review summary must be a string")
+    if not value["summary"].strip():
+        raise ValueError("review summary must be a non-empty string")
     validate_audit(value.get("audit"))
     findings = value.get("findings")
     if not isinstance(findings, list):
         raise TypeError("review findings must be an array")
     for finding in findings:
-        validate_finding(finding, workspace, reviewed_head)
+        validate_finding(finding, workspace, reviewed_head, related_work_ids)
     return value
 
 
-def validate_finding(finding: object, workspace: Path, reviewed_head: str) -> None:
+def validate_finding(
+    finding: object,
+    workspace: Path,
+    reviewed_head: str,
+    related_work_ids: set[str] | frozenset[str] = frozenset(),
+) -> None:
     if not isinstance(finding, dict):
         raise TypeError("each finding must be an object")
-    if finding.get("severity") not in {"high", "medium", "low"}:
-        raise ValueError("finding severity must be high, medium, or low")
+    if list(finding) != ["lens", "title", "details", "locations", "scope_claim"]:
+        raise ValueError("finding fields are malformed or out of order")
+    if finding.get("lens") not in {"behavior", "design", "standards"}:
+        raise ValueError("finding lens must be behavior, design, or standards")
     for field in ("title", "details"):
         if not isinstance(finding.get(field), str):
             raise TypeError(f"finding {field} must be a string")
@@ -67,6 +83,36 @@ def validate_finding(finding: object, workspace: Path, reviewed_head: str) -> No
         if line < 1:
             raise ValueError("finding location line must be a positive integer")
         validate_location(workspace, reviewed_head, location["path"], line)
+    validate_scope_claim(finding.get("scope_claim"), related_work_ids)
+
+
+def validate_scope_claim(
+    value: object, related_work_ids: set[str] | frozenset[str]
+) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TypeError("finding scope_claim must be an object")
+    kind = value.get("kind")
+    expected_fields = (
+        ["kind", "rationale", "related_work_id"]
+        if kind == "related"
+        else ["kind", "rationale"]
+    )
+    if list(value) != expected_fields:
+        raise ValueError("finding scope_claim fields are malformed or out of order")
+    if kind not in {"current", "related", "unknown"}:
+        raise ValueError(
+            "finding scope_claim kind must be current, related, or unknown"
+        )
+    rationale = value.get("rationale")
+    if not isinstance(rationale, str) or not rationale.strip():
+        raise ValueError("finding scope_claim rationale must be a non-empty string")
+    if kind == "related":
+        related_id = value.get("related_work_id")
+        if not isinstance(related_id, str) or related_id not in related_work_ids:
+            raise ValueError(
+                "finding scope_claim related_work_id must exist in related work"
+            )
+    return value
 
 
 def validate_location(

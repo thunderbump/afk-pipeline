@@ -261,10 +261,14 @@ class ChangeCliTest(unittest.TestCase):
             },
         )
         finding = {
-            "severity": "medium",
+            "lens": "behavior",
             "title": "Address the edge case",
             "details": "The implementation misses a concrete edge case.",
             "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior.",
+            },
         }
         self.write_json(
             review / "output.json",
@@ -304,8 +308,12 @@ class ChangeCliTest(unittest.TestCase):
                     "decisions": [
                         {
                             "finding_index": 0,
-                            "worth_addressing": True,
+                            "defect_decision": "confirmed",
                             "rationale": "It is concrete.",
+                            "scope": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                 },

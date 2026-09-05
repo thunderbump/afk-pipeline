@@ -54,7 +54,8 @@ def actionable_findings(review, assessment):
             "assessment_rationale": decision["rationale"],
         }
         for decision in assessment["decisions"]
-        if decision["worth_addressing"]
+        if decision["defect_decision"] == "confirmed"
+        and decision["scope"]["kind"] == "current"
     ]
 
 

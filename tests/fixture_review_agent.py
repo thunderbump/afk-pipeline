@@ -92,7 +92,7 @@ elif scenario in (
             ):
                 raise SystemExit("caller migration was not sibling-owned")
             if "current objective is authoritative" not in prompt or (
-                "do not report work owned by a sibling task" not in prompt
+                "related-work records are ownership evidence" not in prompt
             ):
                 raise SystemExit("trusted sibling-ownership policy was omitted")
         elif task["validation"] != {
@@ -115,6 +115,23 @@ elif scenario in (
             "stderr": "validation warning\n",
         }:
             raise SystemExit("complete validation evidence was not supplied")
+    related_finding = (
+        [
+            {
+                "lens": "behavior",
+                "title": "Production callers still use the old API",
+                "details": "Caller migration is a concrete compatibility defect.",
+                "locations": [{"path": "README.md", "line": 1}],
+                "scope_claim": {
+                    "kind": "related",
+                    "rationale": "The frozen sibling record owns caller migration.",
+                    "related_work_id": "callers",
+                },
+            }
+        ]
+        if scenario == "sibling-owned-migration"
+        else []
+    )
     review = {
         "summary": (
             "Caller migration belongs to the related sibling; "
@@ -122,7 +139,7 @@ elif scenario in (
             if scenario == "sibling-owned-migration"
             else "No actionable defects found."
         ),
-        "findings": [],
+        "findings": related_finding,
         "audit": AUDIT,
     }
 elif scenario in (
@@ -152,18 +169,26 @@ elif scenario in (
         "summary": "One actionable defect found.",
         "findings": [
             {
-                "severity": "medium",
+                "lens": "behavior",
                 "title": "Fixture finding",
                 "details": "The fixture demonstrates a line-anchored finding.",
                 "locations": [location],
+                "scope_claim": {
+                    "kind": "current",
+                    "rationale": "The objective owns the reviewed behavior.",
+                },
             },
             *(
                 [
                     {
-                        "severity": "low",
+                        "lens": "standards",
                         "title": "Second fixture finding",
                         "details": "The audit returns every discovered finding together.",
                         "locations": [{"path": "docs/note.txt", "line": 1}],
+                        "scope_claim": {
+                            "kind": "current",
+                            "rationale": "The current objective owns this contract.",
+                        },
                     }
                 ]
                 if scenario == "multiple-findings"

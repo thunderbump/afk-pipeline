@@ -239,6 +239,12 @@ def validate_reference(value, *, expected_path=None):
     return value
 
 
+def snapshot_ids(value):
+    """Validate one frozen reference and return its immutable record identities."""
+    raw = validate_snapshot(value["path"], value)
+    return {json.loads(line)["id"] for line in raw.splitlines()}
+
+
 def validate_snapshot(path, value):
     validate_reference(value, expected_path=path)
     path = Path(path)

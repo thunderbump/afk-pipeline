@@ -3409,10 +3409,14 @@ class ExportCliTests(unittest.TestCase):
                     "summary": "One finding.",
                     "findings": [
                         {
-                            "severity": "medium",
+                            "lens": "behavior",
                             "title": "Example",
                             "details": "Fix it.",
                             "locations": [{"path": "README.md", "line": 1}],
+                            "scope_claim": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                     "audit": REVIEW_AUDIT,
@@ -3431,8 +3435,12 @@ class ExportCliTests(unittest.TestCase):
                     "decisions": [
                         {
                             "finding_index": 0,
-                            "worth_addressing": True,
+                            "defect_decision": "confirmed",
                             "rationale": "Relevant.",
+                            "scope": {
+                                "kind": "current",
+                                "rationale": "The current objective owns this behavior.",
+                            },
                         }
                     ],
                 },
