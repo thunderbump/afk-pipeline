@@ -19,6 +19,35 @@ ROOT = Path(__file__).parents[1]
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
 
+class AdmissionTerminalTest(unittest.TestCase):
+    def test_nonzero_adapter_retains_successful_admission_as_partial_success(self):
+        identity = {"project": "fixture", "run_id": "run-1"}
+        stdout = json.dumps(
+            {"schema_version": 1, "outcome": "accepted", "identity": identity}
+        )
+
+        self.assertEqual(
+            afk_run.admission_terminal(stdout, 1, identity),
+            ("accepted", "post_admission_failed"),
+        )
+
+    def test_nonzero_adapter_still_rejects_a_mismatched_admission_identity(self):
+        stdout = json.dumps(
+            {
+                "schema_version": 1,
+                "outcome": "accepted",
+                "identity": {"project": "fixture", "run_id": "wrong-run"},
+            }
+        )
+
+        self.assertEqual(
+            afk_run.admission_terminal(
+                stdout, 1, {"project": "fixture", "run_id": "run-1"}
+            ),
+            (None, "admission_protocol"),
+        )
+
+
 class ContinuationPublicationTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()

@@ -891,10 +891,10 @@ def admission_terminal(stdout, exit_code, expected_identity):
     outcome = value.get("outcome") if isinstance(value, dict) else None
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         return None, "admission_protocol"
-    if exit_code == 0 and outcome in {"accepted", "replayed"}:
+    if outcome in {"accepted", "replayed"}:
         if value.get("identity") != expected_identity:
             return None, "admission_protocol"
-        return outcome, None
+        return outcome, None if exit_code == 0 else "post_admission_failed"
     if exit_code != 0 and outcome in {"conflict", "rejected"}:
         return outcome, "admission_rejected"
     return None, "admission_protocol"
