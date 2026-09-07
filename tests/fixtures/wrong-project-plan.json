@@ -1,0 +1,241 @@
+{
+  "request": {
+    "schema_version": 2,
+    "parent": {
+      "id": "central-shfv.3",
+      "title": "Align current AFK review and assessment details with the console renderer",
+      "description": "A current AFK Run is accepted by Operations Datastore Admission but omitted by Projection Refresh as malformed_run. Fix projection, projected-detail validation and static rendering to support the current AFK Review and Finding Assessment contracts while retaining explicitly supported historical forms.\n\nConcrete reproduction: project bump-eqemu, Bead central-dcq7.17, Run 20260906T181603130703Z-429816e9. The bundle is retained under v3/projects/bump-eqemu/workflow-runs/20260906T181603130703Z-429816e9 in the configured Operations Datastore. Publication and automatic refresh succeeded at 2026-09-06T19:04Z, but the served EQEmu console reports malformed_run and omits the Run.\n\nreadPublicationBundle accepts the 42-stage record. In scripts/console-refresh.mjs, bundleDetails requires review finding.severity even though the admitted current record supplies lens and scope_claim; it throws Expected string. Assessment projection requires worth_addressing even though current records supply defect_decision and scope; an isolated replay throws Expected boolean. Audit the corresponding projected validators and renderer, not just these two reads. Preserve the current distinction between defect confirmation and work ownership; do not fabricate a severity or collapse related work into current actionable work.\n\nThis is the concrete first case for the existing outcome-detail union audit. Preserve unsuccessful component handling: failed Review, Assessment and Response may lack successful-result details. Keep malformed records rejected or visibly omitted according to the existing boundary, without crashing the whole refresh. Do not weaken Admission or edit immutable accepted bundles. No AFK execution or EQEmu gameplay changes belong here.",
+      "acceptance_criteria": "- A sanitized fixture matching the retained Run passes Admission, projection, projected-record validation and actual static rendering end to end; the Run appears under central-dcq7.17 with exhausted status and all 42 stages, rather than malformed_run.\n- Current Review lens/scope and Assessment defect_decision/scope remain visible with their actual meanings, including current versus related ownership. Legacy severity/worth_addressing records remain renderable only where supported by the admitted contract.\n- Projection and renderer agree on successful and unsuccessful component detail shapes. Cover failed Review/Assessment/Response without successful-result details and malformed retained records; invalid data cannot masquerade as success or crash the complete site.\n- Tests include current, legacy and malformed shapes. The retained bundle remains byte-for-byte unchanged.\n- Run repository-owned tests/build and applicable documentation authority checks. After validation, perform host-side console refresh and verify the retained EQEmu Run appears in the served page. Follow operations-webui AGENTS.md for any documentation update or deployment. Report implementation proof and host-side publication verification separately.",
+      "labels": [
+        "project:operations-webui",
+        "ready-for-agent"
+      ]
+    },
+    "catalog": {
+      "schema_version": 2,
+      "projects": [
+        {
+          "slug": "afk-pipeline",
+          "routes": [
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "pipeline_run",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "repository_check",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "Caller agent",
+              "executor": "caller_agent",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Credential holder",
+              "executor": "outside_help",
+              "outside_help_reason": "missing_credentials",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Decision maker",
+              "executor": "outside_help",
+              "outside_help_reason": "human_judgment",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            }
+          ]
+        },
+        {
+          "slug": "operations-webui",
+          "routes": [
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "pipeline_run",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "repository_check",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "Caller agent",
+              "executor": "caller_agent",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Credential holder",
+              "executor": "outside_help",
+              "outside_help_reason": "missing_credentials",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Decision maker",
+              "executor": "outside_help",
+              "outside_help_reason": "human_judgment",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            }
+          ]
+        },
+        {
+          "slug": "bump-eqemu",
+          "routes": [
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "pipeline_run",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "AFK Run",
+              "executor": "afk_run",
+              "evidence_route": "repository_check",
+              "phases": [
+                "implementation"
+              ]
+            },
+            {
+              "owner": "Caller agent",
+              "executor": "caller_agent",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Credential holder",
+              "executor": "outside_help",
+              "outside_help_reason": "missing_credentials",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            },
+            {
+              "owner": "Decision maker",
+              "executor": "outside_help",
+              "outside_help_reason": "human_judgment",
+              "evidence_route": "external_check",
+              "phases": [
+                "implementation",
+                "closure"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "timeout_seconds": 300
+  },
+  "plan": {
+    "schema_version": 2,
+    "status": "proposed",
+    "parent": {
+      "id": "central-shfv.3",
+      "sha256": "4df33fec75d97623dd31946f94ffc846c473b4ca075235672ec8c8784f07b9d9"
+    },
+    "catalog_sha256": "583dfc8dd95473aff6f49f0386adb824fd0284d91866710d1f973864f4728aac",
+    "criteria": [
+      {
+        "id": "criterion-1",
+        "source_text": "- A sanitized fixture matching the retained Run passes Admission, projection, projected-record validation and actual static rendering end to end; the Run appears under central-dcq7.17 with exhausted status and all 42 stages, rather than malformed_run.\n",
+        "statement": "A sanitized fixture matching the retained Run passes Admission, projection, projected-record validation, and actual static rendering end to end; the Run appears under central-dcq7.17 with exhausted status and all 42 stages rather than malformed_run."
+      },
+      {
+        "id": "criterion-2",
+        "source_text": "- Current Review lens/scope and Assessment defect_decision/scope remain visible with their actual meanings, including current versus related ownership. Legacy severity/worth_addressing records remain renderable only where supported by the admitted contract.\n",
+        "statement": "Current Review lens/scope and Assessment defect_decision/scope remain visible with their actual meanings, including current versus related ownership; legacy severity/worth_addressing records remain renderable only where supported by the admitted contract."
+      },
+      {
+        "id": "criterion-3",
+        "source_text": "- Projection and renderer agree on successful and unsuccessful component detail shapes. Cover failed Review/Assessment/Response without successful-result details and malformed retained records; invalid data cannot masquerade as success or crash the complete site.\n",
+        "statement": "Projection and renderer agree on successful and unsuccessful component detail shapes, covering failed Review/Assessment/Response without successful-result details and malformed retained records; invalid data cannot masquerade as success or crash the complete site."
+      },
+      {
+        "id": "criterion-4",
+        "source_text": "- Tests include current, legacy and malformed shapes. The retained bundle remains byte-for-byte unchanged.\n- Run repository-owned tests/build and applicable documentation authority checks. After validation, perform host-side console refresh and verify the retained EQEmu Run appears in the served page. Follow operations-webui AGENTS.md for any documentation update or deployment. Report implementation proof and host-side publication verification separately.",
+        "statement": "Tests cover current, legacy, and malformed shapes; the retained bundle remains byte-for-byte unchanged. Run repository-owned tests/build and applicable documentation checks, then perform host-side console refresh and verify the retained EQEmu Run in the served page, following operations-webui AGENTS.md and reporting implementation proof separately from host-side publication verification."
+      }
+    ],
+    "children": [
+      {
+        "local_id": "projection-rendering",
+        "title": "Fix projection and console rendering",
+        "objective": "Implement and validate sanitized, legacy, malformed, and component-result handling while preserving supported historical fields and preventing malformed data from crashing rendering.",
+        "criteria": [
+          "criterion-1",
+          "criterion-2",
+          "criterion-3"
+        ],
+        "project": "bump-eqemu",
+        "owner": "AFK Run",
+        "phase": "implementation",
+        "executor": "afk_run",
+        "evidence_route": "repository_check",
+        "depends_on": [],
+        "readiness": "ready-for-agent"
+      },
+      {
+        "local_id": "validation-publication",
+        "title": "Run validation and verify served console",
+        "objective": "Run repository tests, builds, and documentation checks, preserve the retained bundle byte-for-byte, then refresh the host-side console and separately report implementation and publication verification.",
+        "criteria": [
+          "criterion-4"
+        ],
+        "project": "bump-eqemu",
+        "owner": "Caller agent",
+        "phase": "implementation",
+        "executor": "caller_agent",
+        "evidence_route": "external_check",
+        "depends_on": [
+          "projection-rendering"
+        ],
+        "readiness": "ready-for-agent"
+      }
+    ],
+    "ambiguities": [],
+    "authorization": null,
+    "plan_sha256": "90b7213850231e829893739890784107f61968d163b5bedbb88e3420c591f6ab"
+  }
+}

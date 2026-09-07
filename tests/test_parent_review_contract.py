@@ -71,6 +71,12 @@ class ParentReviewCapabilityContractTest(unittest.TestCase):
         self.assertNotIn("approval", prompt)
         self.assertNotIn("waiver", prompt)
 
+    def test_follow_up_does_not_admit_planner_only_justification(self):
+        follow_up = self.follow_up()
+        follow_up["project_justification"] = {"unchecked": "extra data"}
+        with self.assertRaisesRegex(ValueError, "invalid fields"):
+            validate_follow_up(follow_up, ["criterion-1"], self.fan_in())
+
 
 if __name__ == "__main__":
     unittest.main()

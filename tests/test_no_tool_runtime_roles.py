@@ -117,7 +117,10 @@ class NoToolRuntimeRoleTest(unittest.TestCase):
         output = json.loads((self.result / "output.json").read_text())
         self.assertEqual(receipt["policy"]["requested_capability"], Capability.NO_TOOLS)
         self.assertEqual(receipt["terminal_response"], json.dumps(direct_proposal()))
-        self.assertEqual(prompt["untrusted_task_data"], self.request)
+        self.assertEqual(
+            prompt["untrusted_task_data"],
+            {**self.request, "source_project": "afk-pipeline"},
+        )
         self.assertEqual(output["outcome"], "completed")
 
     def test_rejected_planner_response_keeps_terminal_evidence(self):

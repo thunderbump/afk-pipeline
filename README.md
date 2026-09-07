@@ -101,6 +101,29 @@ runtime owns adapter selection, process policy, and evidence. Inference returns
 exactly one `direct` or `decompose` decision with ordered criterion coverage. It
 neither creates Beads nor authorizes publication.
 
+Planner task contract version 3 supplies `source_project`, derived from the
+frozen parent's sole project label. Children stay in that Project by default,
+including its caller-agent checks and publication work. A project named in
+fixture data or a retained Run is not automatically the implementation owner.
+
+A cross-project child must include `project_justification` with `source_field`
+(`title`, `description`, or `acceptance_criteria`), `source_text` (an exact
+quotation from that parent field naming the target catalog slug), and a nonempty
+`rationale` explaining why that other Project must do the work. Source-project
+children omit this field. The canonical Plan retains the justification under
+its digest, and Policy revalidates it. Missing, invented, or catalog-only
+justification is rejected. Uncertain ownership should remain in the source
+Project with an explicit ambiguity instead of guessing a transfer.
+
+These checks establish recorded grounding, not the semantic truth of the
+ownership claim. Inference must still distinguish an actual cross-project
+requirement from a quotation that merely mentions example data. The accepted
+basis remains `structural_validity_only`. Existing cross-project Plans without
+justification must be replanned before new acceptance or revalidation; do not
+rewrite frozen historical evidence to add it. Same-project Plans and the
+schema-version-2 envelope are unchanged. Justification remains inspectable in
+the Planner/Policy evidence; the compact console route summary is unchanged.
+
 A direct proposal assigns every criterion to the unchanged source Bead and
 contains no children. Its routes may use catalog-defined ownership and evidence
 so the deterministic policy can visibly reject an incompatible proposal. A

@@ -30,7 +30,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         self.assertEqual(
             [hashlib.sha256(prompt.encode()).hexdigest() for prompt in prompts],
             [
-                "bf02719b2b2fedb0d14c1cd5f611ef712a0c06dec82b11fe1339c8b8855b84b3",
+                "0bc2c611c5ad00a462bb682eed013fc79ffb5dc40e261384bb73a461aab0fee3",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "bc6408b0456e90edf9bb0d8bef6e27f2cd909149a348493b37c6067b4c2aab79",
                 "5eee337b538a643f6361c8a8927c5729f4c9f8e213606bdeee99a66beb9ee75e",
@@ -58,8 +58,10 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         planner = build_plan_task(request)
         fan_in = {"schema_version": 2}
         parent = build_parent_review_task(fan_in)
-        self.assertEqual((planner.contract_version, parent.contract_version), (2, 2))
-        self.assertIs(planner.untrusted_data, request)
+        self.assertEqual((planner.contract_version, parent.contract_version), (3, 2))
+        self.assertEqual(
+            planner.untrusted_data, {**request, "source_project": "afk-pipeline"}
+        )
         self.assertIs(parent.untrusted_data, fan_in)
         for task in (planner, parent):
             self.assertEqual(task.capability, Capability.NO_TOOLS)

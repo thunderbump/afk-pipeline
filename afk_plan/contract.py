@@ -325,6 +325,8 @@ def validate_proposal(request: dict[str, object], value: object) -> dict[str, ob
         raise ValueError("proposal schema_version must match its input")
     accepted_criteria = validate_criteria(request, proposal["criteria"])
     children = validate_children(request, proposal["children"], accepted_criteria)
+    for child in children:
+        validate_project_justification(request, child)
     ambiguities = validate_ambiguities(proposal["ambiguities"])
     proposal["criteria"] = accepted_criteria
     proposal["children"] = children
@@ -442,14 +444,18 @@ def child_routes(children, criteria):
     ]
 
 
-def direct_pipeline_compatible(request, routes):
-    source_project = next(
+def source_project(request):
+    """Read ownership from the validated frozen parent, never its example data."""
+    return next(
         label.removeprefix("project:")
         for label in request["parent"]["labels"]
         if label.startswith("project:")
     )
+
+
+def direct_pipeline_compatible(request, routes):
     return all(
-        route["project"] == source_project
+        route["project"] == source_project(request)
         and route["executor"] == "afk_run"
         and route["phase"] == "implementation"
         and route["evidence_route"] in {"pipeline_run", "repository_check"}
@@ -482,7 +488,11 @@ def validate_children(request, values, criteria):
             "depends_on",
         }
         allowed = required | {"outside_help_reason"}
-        if set(child) != required and set(child) != allowed:
+        # Parent Review also uses this route validator, without Planner ownership
+        # context. Keep its follow-up shape unchanged.
+        if "parent" in request:
+            allowed.add("project_justification")
+        if not required <= set(child) <= allowed:
             raise ValueError(f"child {index + 1} has invalid fields")
         local_id = child["local_id"]
         if (
@@ -517,6 +527,43 @@ def validate_children(request, values, criteria):
         raise ValueError("every criterion must be assigned exactly once")
     validate_graph(accepted)
     return accepted
+
+
+def validate_project_justification(request, child):
+    """Require source-grounded cross-project claims, not semantic proof of them."""
+    if child["project"] == source_project(request):
+        if "project_justification" in child:
+            raise ValueError("source-project child must omit project_justification")
+        return
+    if "project_justification" not in child:
+        raise ValueError("cross-project child requires project_justification")
+    justification = object_with_keys(
+        child.get("project_justification"),
+        {"source_field", "source_text", "rationale"},
+        "cross-project child project_justification",
+    )
+    field = justification["source_field"]
+    enum(
+        field,
+        {"title", "description", "acceptance_criteria"},
+        "project_justification source_field",
+    )
+    quote = justification["source_text"]
+    bounded_text(quote, "project_justification source_text", MAX_TEXT)
+    bounded_text(justification["rationale"], "project_justification rationale", 2048)
+    if quote not in request["parent"][field]:
+        raise ValueError(
+            "project_justification source_text must quote the frozen parent exactly"
+        )
+    if (
+        re.search(
+            r"(?<![a-z0-9-])" + re.escape(child["project"]) + r"(?![a-z0-9-])", quote
+        )
+        is None
+    ):
+        raise ValueError(
+            "project_justification source_text must name the target project slug"
+        )
 
 
 def validate_graph(children):
