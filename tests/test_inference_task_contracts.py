@@ -32,8 +32,8 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             [
                 "0bc2c611c5ad00a462bb682eed013fc79ffb5dc40e261384bb73a461aab0fee3",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
-                "bc6408b0456e90edf9bb0d8bef6e27f2cd909149a348493b37c6067b4c2aab79",
-                "5eee337b538a643f6361c8a8927c5729f4c9f8e213606bdeee99a66beb9ee75e",
+                "c0d24375befff6cdee15d447daf34236addf4f73e4065e01d6a1df6f4962f989",
+                "126e63cf0f9c82d7e6e8c49c074e1062bfc8b25e7470a3aa06c165e56039626b",
                 "1bb5670cf37f6bf319e199db9a63e549efc8a566e16d9146bf386a8cc8c18c94",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],

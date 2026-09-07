@@ -16,18 +16,38 @@ class ReviewContractTest(unittest.TestCase):
         value = self.review()
         self.assertIs(validate_review(value, Path("."), "unused"), value)
 
-    def test_rejects_missing_extra_reordered_or_malformed_audit(self):
+    def test_accepts_reordered_response_and_nested_object_fields(self):
+        value = {
+            "audit": {"scopes": list(REVIEW_AUDIT["scopes"]), "completed": True},
+            "findings": [
+                {
+                    "scope_claim": {
+                        "rationale": "The current objective owns this behavior.",
+                        "kind": "current",
+                    },
+                    "locations": [{"line": 1, "path": "README.md"}],
+                    "details": "A concrete problem occurs.",
+                    "title": "Problem",
+                    "lens": "behavior",
+                }
+            ],
+            "summary": "Complete audit found one actionable defect.",
+        }
+        self.assertIs(validate_review(value, Path("."), "HEAD"), value)
+
+    def test_rejects_missing_extra_or_malformed_audit(self):
         cases = {
-            "missing": {"summary": "Clean.", "findings": []},
-            "extra": self.review(
+            "missing response field": {"summary": "Clean.", "findings": []},
+            "extra response field": {**self.review(), "proof": True},
+            "missing audit field": self.review(
+                {"scopes": list(REVIEW_AUDIT["scopes"])}
+            ),
+            "extra audit field": self.review(
                 {
                     "completed": True,
                     "scopes": list(REVIEW_AUDIT["scopes"]),
                     "proof": True,
                 }
-            ),
-            "reordered fields": self.review(
-                {"scopes": list(REVIEW_AUDIT["scopes"]), "completed": True}
             ),
             "reordered scopes": self.review(
                 {
@@ -47,7 +67,7 @@ class ReviewContractTest(unittest.TestCase):
         for name, value in cases.items():
             with (
                 self.subTest(name=name),
-                self.assertRaisesRegex((TypeError, ValueError), "audit"),
+                self.assertRaisesRegex((TypeError, ValueError), "malformed"),
             ):
                 validate_review(value, Path("."), "unused")
 

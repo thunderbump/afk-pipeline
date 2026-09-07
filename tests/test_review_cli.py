@@ -246,9 +246,7 @@ class ReviewCliTest(unittest.TestCase):
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["outcome"], "failed")
         self.assertIsNone(output["review"])
-        self.assertIn(
-            "location fields are malformed or out of order", output["review_error"]
-        )
+        self.assertIn("location fields are malformed", output["review_error"])
 
     def test_finding_locations_must_exist_within_the_reviewed_head(self):
         (self.workspace / ".git" / "info" / "exclude").write_text("ignored.txt\n")

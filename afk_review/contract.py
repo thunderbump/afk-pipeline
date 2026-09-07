@@ -15,11 +15,11 @@ REVIEW_AUDIT = {
 
 
 def validate_audit(value: object) -> dict[str, object]:
-    """Validate the Review's ordered declaration of the completed audit scope."""
+    """Validate the Review's declaration of the completed, ordered audit scopes."""
     if not isinstance(value, dict):
         raise TypeError("review audit must be an object")
-    if list(value) != ["completed", "scopes"]:
-        raise ValueError("review audit fields must be completed then scopes")
+    if set(value) != {"completed", "scopes"}:
+        raise ValueError("review audit fields are malformed")
     if value["completed"] is not True or value["scopes"] != REVIEW_AUDIT["scopes"]:
         raise ValueError("review audit declaration is malformed")
     return value
@@ -33,10 +33,8 @@ def validate_review(
 ) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("review response must be an object")
-    if list(value) != ["summary", "findings", "audit"]:
-        raise ValueError(
-            "review response or audit fields are malformed or out of order"
-        )
+    if set(value) != {"summary", "findings", "audit"}:
+        raise ValueError("review response fields are malformed")
     if not isinstance(value.get("summary"), str):
         raise TypeError("review summary must be a string")
     if not value["summary"].strip():
@@ -58,8 +56,8 @@ def validate_finding(
 ) -> None:
     if not isinstance(finding, dict):
         raise TypeError("each finding must be an object")
-    if list(finding) != ["lens", "title", "details", "locations", "scope_claim"]:
-        raise ValueError("finding fields are malformed or out of order")
+    if set(finding) != {"lens", "title", "details", "locations", "scope_claim"}:
+        raise ValueError("finding fields are malformed")
     if finding.get("lens") not in {"behavior", "design", "standards"}:
         raise ValueError("finding lens must be behavior, design, or standards")
     for field in ("title", "details"):
@@ -75,8 +73,8 @@ def validate_finding(
     for location in locations:
         if not isinstance(location, dict):
             raise TypeError("each finding location must be an object")
-        if list(location) != ["path", "line"]:
-            raise ValueError("finding location fields are malformed or out of order")
+        if set(location) != {"path", "line"}:
+            raise ValueError("finding location fields are malformed")
         if not isinstance(location.get("path"), str):
             raise TypeError("each finding location needs a path")
         if not location["path"].strip() or location["path"].startswith("/"):
@@ -97,12 +95,12 @@ def validate_scope_claim(
         raise TypeError("finding scope_claim must be an object")
     kind = value.get("kind")
     expected_fields = (
-        ["kind", "rationale", "related_work_id"]
+        {"kind", "rationale", "related_work_id"}
         if kind == "related"
-        else ["kind", "rationale"]
+        else {"kind", "rationale"}
     )
-    if list(value) != expected_fields:
-        raise ValueError("finding scope_claim fields are malformed or out of order")
+    if set(value) != expected_fields:
+        raise ValueError("finding scope_claim fields are malformed")
     if kind not in {"current", "related", "unknown"}:
         raise ValueError(
             "finding scope_claim kind must be current, related, or unknown"

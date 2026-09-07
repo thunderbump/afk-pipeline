@@ -26,8 +26,8 @@ def validate_assessment(
 ) -> dict[str, object]:
     if not isinstance(value, dict):
         raise TypeError("assessment response must be an object")
-    if list(value) != ["summary", "decisions"]:
-        raise ValueError("assessment response fields are malformed or out of order")
+    if set(value) != {"summary", "decisions"}:
+        raise ValueError("assessment response fields are malformed")
     if not isinstance(value.get("summary"), str) or not value["summary"].strip():
         raise ValueError("assessment summary must be a non-empty string")
     decisions = value.get("decisions")
@@ -50,8 +50,8 @@ def validate_decision(
 ) -> None:
     if not isinstance(decision, dict):
         raise TypeError("each assessment decision must be an object")
-    if list(decision) != ["finding_index", "defect_decision", "rationale", "scope"]:
-        raise ValueError("assessment decision fields are malformed or out of order")
+    if set(decision) != {"finding_index", "defect_decision", "rationale", "scope"}:
+        raise ValueError("assessment decision fields are malformed")
     index = decision.get("finding_index")
     if not isinstance(index, int) or isinstance(index, bool):
         raise TypeError("decision finding_index must be an integer")
@@ -73,12 +73,12 @@ def validate_scope(
         raise TypeError("decision scope must be an object")
     kind = value.get("kind")
     expected_fields = (
-        ["kind", "rationale", "related_work_id"]
+        {"kind", "rationale", "related_work_id"}
         if kind == "related"
-        else ["kind", "rationale"]
+        else {"kind", "rationale"}
     )
-    if list(value) != expected_fields:
-        raise ValueError("decision scope fields are malformed or out of order")
+    if set(value) != expected_fields:
+        raise ValueError("decision scope fields are malformed")
     if kind not in {"current", "related", "unknown"}:
         raise ValueError("decision scope kind must be current, related, or unknown")
     rationale = value.get("rationale")

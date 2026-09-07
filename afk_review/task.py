@@ -17,9 +17,9 @@ STANDARDS_INSTRUCTIONS = """Standards lens: look for concrete violations of repo
 
 OUTPUT_CONTRACT_INSTRUCTIONS = """For each concrete defect, make an evidence-backed scope_claim. Use kind \"current\" when this objective owns it, \"related\" when a record in the supplied frozen related-work snapshot owns it, and \"unknown\" when the available evidence cannot establish ownership. A related claim must include that record's exact id as related_work_id. Current and unknown claims must omit related_work_id. Always include a non-empty scope rationale.
 
-Return only one JSON object with this exact shape and field order:
+Return only one JSON object with this exact shape (use the displayed key order for deterministic serialization, but object key order is semantically insignificant):
 {"summary":"concise scope and conclusion","findings":[{"lens":"behavior|design|standards","title":"concise problem","details":"why it matters and when it occurs","locations":[{"path":"relative/file.py","line":1}],"scope_claim":{"kind":"current|related|unknown","rationale":"evidence for the ownership claim","related_work_id":"required only for related"}}],"audit":{"completed":true,"scopes":["objective","acceptance_criteria","reviewed_diff","supplied_evidence"]}}
-Every finding needs a repository-relative file path and positive 1-based line in the reviewed HEAD. Use an empty findings array when there is no concrete defect. Do not add fields, assign severity, or wrap the JSON in Markdown."""
+Every finding needs a repository-relative file path and positive 1-based line in the reviewed HEAD. Finding positions are meaningful, and audit.scopes must retain the displayed array order. Use an empty findings array when there is no concrete defect. Do not add fields, assign severity, or wrap the JSON in Markdown."""
 
 REVIEW_INSTRUCTION_PACKETS = (
     COMMON_INSTRUCTIONS,

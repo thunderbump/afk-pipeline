@@ -120,7 +120,7 @@ class IterationPolicyCliTest(unittest.TestCase):
         result, completed = self.run_policy(max_responses=3)
 
         self.assertEqual(completed.returncode, 2)
-        self.assertIn("scope fields are malformed or out of order", completed.stderr)
+        self.assertIn("scope fields are malformed", completed.stderr)
         self.assertFalse(result.exists())
 
     def test_response_lineage_exhausts_or_continues_at_the_caller_limit(self):

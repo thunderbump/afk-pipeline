@@ -94,6 +94,77 @@ class ScopeAwareReviewContractTest(unittest.TestCase):
         value = {"summary": "Nothing to assess.", "decisions": []}
         self.assertIs(validate_assessment({"findings": []}, value), value)
 
+    def test_assessment_accepts_reordered_response_decision_and_scope_fields(self):
+        value = {
+            "decisions": [
+                {
+                    "scope": {
+                        "related_work_id": "sibling",
+                        "rationale": "The sibling owns this behavior.",
+                        "kind": "related",
+                    },
+                    "rationale": "The reported behavior is reachable.",
+                    "defect_decision": "confirmed",
+                    "finding_index": 0,
+                }
+            ],
+            "summary": "The finding is confirmed.",
+        }
+        self.assertIs(
+            validate_assessment(
+                {"findings": [{"title": "problem"}]}, value, {"sibling"}
+            ),
+            value,
+        )
+
+    def test_assessment_rejects_missing_and_extra_object_fields(self):
+        valid = {
+            "summary": "The finding is confirmed.",
+            "decisions": [self.decision(0, "confirmed", "current")],
+        }
+        cases = {
+            "missing response field": {"summary": valid["summary"]},
+            "extra response field": {**valid, "audit": True},
+            "missing decision field": {
+                **valid,
+                "decisions": [
+                    {
+                        key: item
+                        for key, item in valid["decisions"][0].items()
+                        if key != "rationale"
+                    }
+                ],
+            },
+            "extra decision field": {
+                **valid,
+                "decisions": [{**valid["decisions"][0], "severity": "high"}],
+            },
+            "missing scope field": {
+                **valid,
+                "decisions": [
+                    {
+                        **valid["decisions"][0],
+                        "scope": {"kind": "current"},
+                    }
+                ],
+            },
+            "extra scope field": {
+                **valid,
+                "decisions": [
+                    {
+                        **valid["decisions"][0],
+                        "scope": {
+                            **valid["decisions"][0]["scope"],
+                            "related_work_id": "sibling",
+                        },
+                    }
+                ],
+            },
+        }
+        for name, value in cases.items():
+            with self.subTest(name=name), self.assertRaises((TypeError, ValueError)):
+                validate_assessment({"findings": [{"title": "problem"}]}, value)
+
     def test_task_builders_revalidate_frozen_related_work_before_using_it(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -121,7 +192,42 @@ class ScopeAwareReviewContractTest(unittest.TestCase):
                 with self.subTest(builder=builder), self.assertRaises(RelatedWorkError):
                     builder()
 
-    def test_location_contract_rejects_extra_and_reordered_fields(self):
+    def test_finding_accepts_reordered_finding_location_and_scope_fields(self):
+        finding = {
+            "scope_claim": {
+                "rationale": "Owned by the objective.",
+                "kind": "current",
+            },
+            "locations": [{"line": 1, "path": "README.md"}],
+            "details": "Concrete defect.",
+            "title": "Problem",
+            "lens": "behavior",
+        }
+        validate_finding(finding, Path.cwd(), "HEAD")
+
+    def test_finding_contract_rejects_missing_and_extra_fields(self):
+        base = {
+            "lens": "behavior",
+            "title": "Problem",
+            "details": "Concrete defect.",
+            "locations": [{"path": "README.md", "line": 1}],
+            "scope_claim": {
+                "kind": "current",
+                "rationale": "Owned by the objective.",
+            },
+        }
+        malformed = (
+            {key: item for key, item in base.items() if key != "details"},
+            {**base, "severity": "high"},
+        )
+        for finding in malformed:
+            with (
+                self.subTest(finding=finding),
+                self.assertRaisesRegex(ValueError, "finding fields are malformed"),
+            ):
+                validate_finding(finding, Path.cwd(), "HEAD")
+
+    def test_location_contract_rejects_missing_and_extra_fields(self):
         base = {
             "lens": "behavior",
             "title": "Problem",
@@ -133,16 +239,14 @@ class ScopeAwareReviewContractTest(unittest.TestCase):
             },
         }
         malformed = (
+            {"path": "README.md"},
             {"path": "README.md", "line": 1, "column": 2},
-            {"line": 1, "path": "README.md"},
         )
         for location in malformed:
             finding = {**base, "locations": [location]}
             with (
                 self.subTest(location=location),
-                self.assertRaisesRegex(
-                    ValueError, "location fields are malformed or out of order"
-                ),
+                self.assertRaisesRegex(ValueError, "location fields are malformed"),
             ):
                 validate_finding(finding, Path.cwd(), "HEAD")
 
