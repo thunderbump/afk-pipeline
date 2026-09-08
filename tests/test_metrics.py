@@ -767,12 +767,15 @@ class MetricsReportTests(unittest.TestCase):
                             "usage": {"input": 2},
                             "compaction_usage": {"input": 3},
                             "usage_coverage": "partial",
-                            "cost": {"amount": 0.01},
+                            "cost": {"amount": 0.01, "status": "partial"},
                         },
                     },
                     "timing": {
                         "run_wall_span_seconds": 3,
+                        "response_validator_seconds": 0.25,
+                        "response_validator_coverage": "partial",
                         "repository_validation_seconds": 1,
+                        "repository_validation_coverage": "partial",
                     },
                 }
             ],
@@ -787,6 +790,17 @@ class MetricsReportTests(unittest.TestCase):
             human,
         )
         self.assertIn("accepted / succeeded", human)
+        self.assertIn(
+            "response validation: 0.25 s (coverage: partial; "
+            "inference response validator, not repository testing)",
+            human,
+        )
+        self.assertIn("repository Validation: 1 s (coverage: partial)", human)
+        self.assertIn(
+            "API cost: 0.01 (status: partial; Pi-reported estimate, "
+            "not billed charges)",
+            human,
+        )
 
 
 class MetricsCliTests(unittest.TestCase):

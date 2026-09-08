@@ -47,11 +47,20 @@ def _human(report):
                         model_parts.append(label)
             cost = totals["cost"]
             usage_coverage = totals.get("usage_coverage", "unavailable")
-            cost_text = "unavailable"
+            cost_status = cost.get("status", "unavailable")
+            cost_text = f"unavailable (status: {cost_status})"
             if cost["amount"] is not None:
                 cost_text = (
-                    f"{cost['amount']} (Pi-reported estimate, not billed charges)"
+                    f"{cost['amount']} (status: {cost_status}; "
+                    "Pi-reported estimate, not billed charges)"
                 )
+            timing = run["timing"]
+            repository_validation_coverage = timing.get(
+                "repository_validation_coverage", "unavailable"
+            )
+            response_validator_coverage = timing.get(
+                "response_validator_coverage", "unavailable"
+            )
             lines.extend(
                 [
                     f"  Run identity: {', '.join(identity_parts) or 'unavailable'}",
@@ -59,9 +68,10 @@ def _human(report):
                     f"  terminal outcome: {outcome['terminal']}",
                     f"  validation: {', '.join(str(x) for x in outcome['validation_results']) or 'unavailable'}",
                     f"  repairs / retries: {outcome['repair_count']} / {outcome['retry_count']}",
-                    f"  Run wall span: {_available(run['timing']['run_wall_span_seconds'])} s",
+                    f"  Run wall span: {_available(timing['run_wall_span_seconds'])} s",
                     f"  inference invocation elapsed: {_available(totals['elapsed_seconds'])} s (includes adapter/runtime/tool work; not pure inference latency)",
-                    f"  repository Validation: {_available(run['timing']['repository_validation_seconds'])} s",
+                    f"  response validation: {_available(timing.get('response_validator_seconds'))} s (coverage: {response_validator_coverage}; inference response validator, not repository testing)",
+                    f"  repository Validation: {_available(timing.get('repository_validation_seconds'))} s (coverage: {repository_validation_coverage})",
                     "  Change / Iteration timing: unavailable / unavailable",
                     f"  usage ({usage_coverage} coverage): {json.dumps(totals['usage'], sort_keys=True) if totals['usage'] else 'unavailable'}",
                     f"  compaction usage (separate aggregate; {usage_coverage} coverage): {json.dumps(totals.get('compaction_usage', {}), sort_keys=True) if totals.get('compaction_usage') else 'unavailable'}",
