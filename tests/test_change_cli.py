@@ -5,7 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from afk_evidence.stages import verify_source
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
+from afk_evidence.stages import verify_change_lineage, verify_source
 from afk_review.contract import REVIEW_AUDIT
 from afk_validate.evidence import evidence_identity
 
@@ -211,6 +212,16 @@ class ChangeCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("requires a succeeded Attempt", completed.stderr)
         self.assertFalse(result.exists())
+
+    def test_missing_transitive_attempt_proof_remains_unavailable(self):
+        (self.attempt / "input.json").unlink()
+        reader = EvidenceReader((self.root,))
+
+        with self.assertRaises(EvidenceUnavailable) as caught:
+            verify_change_lineage(self.prior_change, reader=reader, verify_git=False)
+
+        self.assertEqual(caught.exception.reason, "missing evidence")
+        self.assertEqual(caught.exception.identity, str(self.attempt / "input.json"))
 
     def test_canonical_heads_are_required_without_local_git_queries(self):
         attempt_output = json.loads((self.attempt / "output.json").read_text())

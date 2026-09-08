@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from afk_evidence import RunValidationError, TrustedContext, read_run
 from afk_evidence.access import (
@@ -10,7 +11,12 @@ from afk_evidence.access import (
     EvidenceReader,
     EvidenceUnavailable,
 )
-from afk_evidence.continuation import validate_link
+from afk_evidence.continuation import (
+    continuation_directories,
+    observe_lineage,
+    validate_link,
+)
+from afk_evidence.iteration import read_object
 
 
 class RunSnapshotTest(unittest.TestCase):
@@ -87,6 +93,16 @@ class RunSnapshotTest(unittest.TestCase):
         with self.assertRaises(EvidenceUnavailable):
             reader.json(missing)
 
+    def test_iteration_transitive_read_preserves_unavailable_identity(self):
+        reader = EvidenceReader((self.run,))
+        missing = self.run / "assessment" / "input.json"
+
+        with self.assertRaises(EvidenceUnavailable) as caught:
+            read_object(reader, missing, "Finding Assessment input")
+
+        self.assertEqual(caught.exception.reason, "missing evidence")
+        self.assertEqual(caught.exception.identity, str(missing))
+
     def test_reader_rejects_replacement_between_reads_in_one_snapshot(self):
         reader = EvidenceReader((self.run,))
         path = self.run / "state.json"
@@ -97,6 +113,74 @@ class RunSnapshotTest(unittest.TestCase):
 
         with self.assertRaisesRegex(EvidenceAccessError, "between reads"):
             reader.json(path)
+
+    def test_reader_rejects_metadata_changes_between_reads(self):
+        reader = EvidenceReader((self.run,))
+        path = self.run / "state.json"
+        self.assertEqual(reader.json(path), self.state)
+        path.chmod(path.stat().st_mode ^ 0o100)
+
+        with self.assertRaisesRegex(EvidenceAccessError, "between reads"):
+            reader.json(path)
+
+    def test_dangling_continuations_link_is_invalid_not_an_empty_chain(self):
+        continuations = self.run / "continuations"
+        continuations.symlink_to(self.root / "missing", target_is_directory=True)
+
+        with self.assertRaisesRegex(ValueError, "real directory"):
+            continuation_directories(continuations)
+
+    def test_dangling_active_output_link_is_invalid(self):
+        continuation = self.run / "continuations" / "01"
+        continuation.mkdir(parents=True)
+        continuation_input = {
+            "schema_version": 1,
+            "additional_responses": 1,
+            "completed_responses": 0,
+            "effective_max_responses": 1,
+            "prior_output": "../../output.json",
+        }
+        active_state = {
+            "schema_version": 1,
+            "status": "running",
+            "next_sequence": 1,
+            "next_component": "attempt",
+            "active_invocation": None,
+            "history": [],
+            "terminal": None,
+            "continuation": continuation_input,
+        }
+        (continuation / "input.json").write_text(json.dumps(continuation_input))
+        (continuation / "state.json").write_text(json.dumps(active_state))
+        (continuation / "output.json").symlink_to(self.root / "missing-output")
+        base_state = {
+            "schema_version": 1,
+            "status": "completed",
+            "next_sequence": 1,
+            "next_component": None,
+            "active_invocation": None,
+            "history": [],
+            "terminal": {"decision": "exhausted"},
+        }
+        base_output = {
+            "schema_version": 1,
+            "outcome": "completed",
+            "decision": "exhausted",
+            "history": [],
+        }
+
+        with (
+            mock.patch("afk_evidence.continuation.require_exhausted_structure"),
+            self.assertRaisesRegex(ValueError, "not terminal"),
+        ):
+            observe_lineage(
+                self.run,
+                base_state,
+                base_output,
+                0,
+                read_json=lambda path: json.loads(path.read_text()),
+                locate_component=lambda *_args: self.run,
+            )
 
     def test_sealed_continuation_must_append_an_invocation(self):
         continuation_input = {

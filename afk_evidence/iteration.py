@@ -8,7 +8,6 @@ from afk_evidence.access import (
     MAX_RELATED_WORK_BYTES,
     MAX_VALIDATION_LOG_BYTES,
     EvidenceReader,
-    EvidenceUnavailable,
 )
 from afk_evidence.stages import verify_change_lineage
 from afk_related_work import validate_snapshot_bytes
@@ -240,10 +239,9 @@ def decide(actionable_findings, completed_responses, max_responses):
 
 
 def read_object(reader, path, name):
-    try:
-        value = reader.json(path)
-    except EvidenceUnavailable as error:
-        raise ValueError(error.reason) from error
+    # Preserve unavailable proof for snapshot callers; malformed present JSON
+    # remains a structural validation error below.
+    value = reader.json(path)
     if not isinstance(value, dict):
         raise TypeError(f"{name} must be an object")
     return value
@@ -254,10 +252,7 @@ def _snapshot_ids(reader, reference):
         return set()
     if not isinstance(reference, dict) or not isinstance(reference.get("path"), str):
         raise TypeError("related-work reference is malformed")
-    try:
-        reader.authorize_file(reference["path"])
-        raw = reader.bytes(reference["path"], MAX_RELATED_WORK_BYTES)
-    except EvidenceUnavailable as error:
-        raise ValueError(error.reason) from error
+    reader.authorize_file(reference["path"])
+    raw = reader.bytes(reference["path"], MAX_RELATED_WORK_BYTES)
     validate_snapshot_bytes(raw, reference)
     return {json.loads(line)["id"] for line in raw.splitlines()}

@@ -166,11 +166,20 @@ class EvidenceReader:
                 raise EvidenceUnavailable(
                     "evidence exceeds proof-read limit", str(path)
                 )
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+            if (
+                before.st_dev,
+                before.st_ino,
+                before.st_mode,
+                before.st_size,
+                before.st_mtime_ns,
+                before.st_ctime_ns,
+            ) != (
                 after.st_dev,
                 after.st_ino,
+                after.st_mode,
                 after.st_size,
                 after.st_mtime_ns,
+                after.st_ctime_ns,
             ) or len(raw) != before.st_size:
                 raise EvidenceAccessError("evidence changed while it was read")
             pathname = str(Path(path).absolute())
@@ -178,8 +187,10 @@ class EvidenceReader:
             observation = (
                 after.st_dev,
                 after.st_ino,
+                after.st_mode,
                 after.st_size,
                 after.st_mtime_ns,
+                after.st_ctime_ns,
                 digest,
             )
             previous = self._observations.get(pathname)

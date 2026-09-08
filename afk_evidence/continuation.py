@@ -36,9 +36,13 @@ class ContinuationObservation:
 
 
 def continuation_directories(root: Path) -> list[Path]:
+    # Test the directory entry before existence: exists() follows links and is
+    # false for a dangling symlink, which must not masquerade as no lineage.
+    if root.is_symlink():
+        raise ValueError("continuations must be a real directory")
     if not root.exists():
         return []
-    if root.is_symlink() or not root.is_dir():
+    if not root.is_dir():
         raise ValueError("continuations must be a real directory")
     directories = sorted(root.iterdir())
     expected = [f"{number:02d}" for number in range(1, len(directories) + 1)]
@@ -124,6 +128,7 @@ def observe_lineage(
                 not allow_running
                 or index != len(directories) - 1
                 or (directory / "output.json").exists()
+                or (directory / "output.json").is_symlink()
             ):
                 raise ValueError("newest continuation is not terminal")
             active = ObservedContinuation(

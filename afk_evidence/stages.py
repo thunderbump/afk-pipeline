@@ -95,10 +95,9 @@ class _Lineage:
         self.evidence_directories.add(Path(directory).absolute())
 
     def read(self, path):
-        try:
-            return self.reader.json(path)
-        except EvidenceUnavailable as error:
-            raise ValueError(error.reason) from error
+        # Missing and oversized proof must retain its two-state classification
+        # all the way to read_run; structural contradictions alone are invalid.
+        return self.reader.json(path)
 
 
 def _committed_attempt(source_directory, lineage):
@@ -414,10 +413,7 @@ def _snapshot_ids(lineage, reference):
     path = reference.get("path") if isinstance(reference, dict) else None
     if not isinstance(path, str):
         raise TypeError("related-work reference is malformed")
-    try:
-        lineage.reader.authorize_file(path)
-        raw = lineage.reader.bytes(path, MAX_RELATED_WORK_BYTES)
-    except EvidenceUnavailable as error:
-        raise ValueError(error.reason) from error
+    lineage.reader.authorize_file(path)
+    raw = lineage.reader.bytes(path, MAX_RELATED_WORK_BYTES)
     validate_snapshot_bytes(raw, reference)
     return {json.loads(line)["id"] for line in raw.splitlines()}
