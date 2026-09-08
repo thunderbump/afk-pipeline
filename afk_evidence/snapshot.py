@@ -33,12 +33,7 @@ from .access import (
     EvidenceReader,
     EvidenceUnavailable,
 )
-from .continuation import (
-    continuation_directories,
-    require_exhausted_structure,
-    require_terminal_pair,
-    validate_link,
-)
+from .continuation import observe_lineage, require_terminal_pair
 
 
 class RunValidationError(EvidenceAccessError):
@@ -173,14 +168,9 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
         require_terminal_pair(state, output)
         latest = _terminal(None, coordinator, state, output)
         terminals = {None: latest}
-        expected_limit = request["max_responses"]
-        prior_output = "../../output.json"
-        directories = continuation_directories(coordinator / "continuations")
-        retained_roots = [coordinator]
-        for index, directory in enumerate(directories):
-            bases = tuple(retained_roots)
 
-            def invocation_directory(record, invocation_roots=bases):
+        def exhaustion_verifiers(invocation_roots):
+            def invocation_directory(record):
                 return _invocation_path(invocation_roots, record, "output.json").parent
 
             def verify_failed_validation(record):
@@ -202,42 +192,27 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
                     verify_git=context.repository is not None,
                 )
 
-            require_exhausted_structure(
-                state,
-                expected_limit,
-                lambda record, name, invocation_roots=bases: reader.json(
-                    _invocation_path(invocation_roots, record, name)
-                ),
-                verify_failed_validation=verify_failed_validation,
-                verify_iteration=verify_iteration,
-            )
-            continuation_input = reader.json(directory / "input.json")
-            continuation_state = validate_checkpoint(
-                reader.json(directory / "state.json")
-            )
-            validate_link(state, continuation_state, continuation_input, prior_output)
-            if continuation_state["status"] == "running":
-                if (
-                    index != len(directories) - 1
-                    or (directory / "output.json").exists()
-                ):
-                    raise RunValidationError(
-                        "continuation lineage has work after an active tail"
-                    )
-                active = ActiveTailFact(directory.name, directory, continuation_state)
-                break
-            continuation_output = validate_output(
-                reader.json(directory / "output.json")
-            )
-            require_terminal_pair(continuation_state, continuation_output)
+            return verify_failed_validation, verify_iteration
+
+        observed = observe_lineage(
+            coordinator,
+            state,
+            output,
+            request["max_responses"],
+            read_json=reader.json,
+            locate_component=_invocation_path,
+            exhaustion_verifiers=exhaustion_verifiers,
+            allow_running=True,
+        )
+        directories = list(observed.directories)
+        for item in observed.sealed:
             latest = _terminal(
-                directory.name, directory, continuation_state, continuation_output
+                item.directory.name, item.directory, item.state, item.output
             )
-            terminals[directory.name] = latest
-            retained_roots.append(directory)
-            state, output = continuation_state, continuation_output
-            expected_limit = continuation_input["effective_max_responses"]
-            prior_output = f"../{directory.name}/output.json"
+            terminals[item.directory.name] = latest
+        if observed.active is not None:
+            item = observed.active
+            active = ActiveTailFact(item.directory.name, item.directory, item.state)
         if selection == "latest":
             selected = latest
         else:
@@ -452,7 +427,7 @@ def _invocation_path(bases, record, name):
 
 def _verify_stage_provenance(reader, history, roots, context, assignment):
     """Deeply prove every completed cycle, not merely its final rows."""
-    from .stages import verify_change_lineage
+    from .stages import verify_change_lineage, verify_source
 
     successful = []
     reviews = {}
@@ -462,20 +437,54 @@ def _verify_stage_provenance(reader, history, roots, context, assignment):
         successful.append(row)
         directory = _invocation_path(roots, row, "output.json").parent
         if row["component"] == "change":
-            verify_change_lineage(
+            lineage = verify_change_lineage(
                 directory,
                 reader=reader,
                 repository=context.repository,
                 verify_git=context.repository is not None,
             )
+            _require_run_assignment(lineage.assignment, assignment, "Change")
         elif row["component"] == "validation":
             # A successful Validation is authoritative even while it is the
-            # active tail, before a Review exists to consume it.
-            load_passed_evidence(
-                directory,
-                reader=reader,
-                log_limit=MAX_VALIDATION_LOG_BYTES,
+            # active tail, before a Review exists to consume it. Bind it to the
+            # exact committed source which immediately preceded it rather than
+            # waiting for a later Review to establish that relationship.
+            source_row = next(
+                (
+                    item
+                    for item in reversed(successful[:-1])
+                    if item["component"] in {"attempt", "response"}
+                ),
+                None,
             )
+            if source_row is None:
+                raise RunValidationError("Validation lacks committed source provenance")
+            source = verify_source(
+                source_row["component"],
+                _invocation_path(roots, source_row, "output.json").parent,
+                reader=reader,
+                repository=context.repository,
+                verify_git=context.repository is not None,
+            )
+            _require_run_assignment(source.assignment, assignment, "Validation")
+            validation_input, validation_output, _stdout, _stderr = (
+                load_passed_evidence(
+                    directory,
+                    reader=reader,
+                    log_limit=MAX_VALIDATION_LOG_BYTES,
+                )
+            )
+            if (
+                Path(validation_input["workspace"]).absolute()
+                != Path(assignment["workspace"]).absolute()
+                or _subject(validation_output["repository"]["before"])
+                != _subject(source.after)
+                or _subject(validation_output["repository"]["after"])
+                != _subject(source.after)
+            ):
+                raise RunValidationError(
+                    "Validation subject does not match its committed source"
+                )
         elif row["component"] == "review":
             change_row = next(
                 (
@@ -512,6 +521,11 @@ def _verify_stage_provenance(reader, history, roots, context, assignment):
             _verify_assessment(
                 reader, roots, row, review_row, reviews[review_row["sequence"]]
             )
+
+
+def _require_run_assignment(stage_assignment, run_assignment, stage):
+    if stage_assignment != run_assignment:
+        raise RunValidationError(f"{stage} provenance does not match Assignment")
 
 
 def _related_ids(reader, reference):

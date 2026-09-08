@@ -7,9 +7,32 @@ a different meaning depending on who reads it.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from afk_coordinate.contract import validate_continuation
+from afk_coordinate.contract import (
+    validate_checkpoint,
+    validate_continuation,
+    validate_output,
+)
+
+
+@dataclass(frozen=True)
+class ObservedContinuation:
+    directory: Path
+    input: dict[str, Any]
+    state: dict[str, Any]
+    output: dict[str, Any] | None
+
+
+@dataclass(frozen=True)
+class ContinuationObservation:
+    sealed: tuple[ObservedContinuation, ...]
+    active: ObservedContinuation | None
+    selected: ObservedContinuation | None
+    directories: tuple[Path, ...]
 
 
 def continuation_directories(root: Path) -> list[Path]:
@@ -43,6 +66,78 @@ def validate_link(prior_state, continuation_state, continuation_input, prior_out
         or continuation_state["next_sequence"] < prior_state["next_sequence"]
     ):
         raise ValueError("continuation lineage does not match its predecessor")
+
+
+def observe_lineage(
+    coordinator: Path,
+    initial_state,
+    initial_output,
+    initial_max_responses,
+    *,
+    read_json: Callable[[Path], dict[str, Any]],
+    locate_component: Callable[[tuple[Path, ...], dict[str, Any], str], Path],
+    exhaustion_verifiers=None,
+    allow_running=True,
+    terminal_continuation=None,
+):
+    """Observe, validate, and optionally select a complete continuation chain.
+
+    Callers retain their own bounded reader and deep stage-proof policy while
+    this function is the single owner of ordering, predecessor linkage,
+    exhaustion arithmetic, active-tail rules, and historical selection.
+    """
+    directories = tuple(continuation_directories(coordinator / "continuations"))
+    state = initial_state
+    require_terminal_pair(initial_state, initial_output)
+    expected_limit = initial_max_responses
+    prior_output = "../../output.json"
+    retained_roots = [coordinator]
+    sealed = []
+    active = None
+    selected = None
+    for index, directory in enumerate(directories):
+        roots = tuple(retained_roots)
+        failed_verifier = iteration_verifier = None
+        if exhaustion_verifiers is not None:
+            failed_verifier, iteration_verifier = exhaustion_verifiers(roots)
+        require_exhausted_structure(
+            state,
+            expected_limit,
+            lambda record, name, current_roots=roots: read_json(
+                locate_component(current_roots, record, name)
+            ),
+            verify_failed_validation=failed_verifier,
+            verify_iteration=iteration_verifier,
+        )
+        continuation_input = validate_continuation(read_json(directory / "input.json"))
+        continuation_state = validate_checkpoint(read_json(directory / "state.json"))
+        validate_link(state, continuation_state, continuation_input, prior_output)
+        if continuation_state["status"] == "running":
+            if (
+                not allow_running
+                or index != len(directories) - 1
+                or (directory / "output.json").exists()
+            ):
+                raise ValueError("newest continuation is not terminal")
+            active = ObservedContinuation(
+                directory, continuation_input, continuation_state, None
+            )
+            break
+        continuation_output = validate_output(read_json(directory / "output.json"))
+        require_terminal_pair(continuation_state, continuation_output)
+        item = ObservedContinuation(
+            directory, continuation_input, continuation_state, continuation_output
+        )
+        sealed.append(item)
+        if directory.name == terminal_continuation:
+            selected = item
+        retained_roots.append(directory)
+        state = continuation_state
+        expected_limit = continuation_input["effective_max_responses"]
+        prior_output = f"../{directory.name}/output.json"
+    if terminal_continuation is not None and selected is None:
+        raise ValueError("selected continuation is not a sealed terminal")
+    return ContinuationObservation(tuple(sealed), active, selected, directories)
 
 
 def output_from_state(state):

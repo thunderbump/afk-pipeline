@@ -9,7 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
-from afk_evidence import TrustedContext, read_run
+from afk_evidence import RunValidationError, TrustedContext, read_run
 from afk_related_work import build_snapshot, reference
 
 ROOT = Path(__file__).parents[1]
@@ -168,6 +168,81 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         for directory in [item["directory"] for item in expected_history]:
             self.assertTrue((run / directory / "output.json").is_file())
+
+    def test_reader_rejects_stage_lineage_from_a_different_assignment(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        run = self.root / "foreign-assignment-run"
+        completed = self.invoke(request_path, run)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        attempt_input = json.loads((run / "01-attempt/input.json").read_text())
+        attempt_input["objective"] = "A different frozen objective."
+        self.write_json(run / "01-attempt/input.json", attempt_input)
+        change_output = json.loads((run / "03-change/output.json").read_text())
+        change_output["objective"] = attempt_input["objective"]
+        self.write_json(run / "03-change/output.json", change_output)
+
+        with self.assertRaisesRegex(RunValidationError, "Assignment"):
+            read_run(
+                run,
+                "latest",
+                TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+            )
+
+    def test_reader_binds_passed_validation_without_a_later_review(self):
+        _assignment_path, request_path = self.prepare_run(max_responses=1)
+        run = self.root / "validation-tail-run"
+        completed = self.invoke(request_path, run)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+        validation = json.loads((run / "02-validation/output.json").read_text())
+        unrelated = dict(validation["repository"]["before"])
+        unrelated["head"] = self.git("rev-parse", "HEAD^")
+        validation["repository"] = {
+            "before": unrelated,
+            "after": unrelated,
+            "head_changed": False,
+        }
+        self.write_json(run / "02-validation/output.json", validation)
+
+        history = json.loads((run / "state.json").read_text())["history"][:4]
+        history[-1]["outcome"] = "failed"
+        self.write_json(
+            run / "04-review/output.json", {"schema_version": 1, "outcome": "failed"}
+        )
+        terminal = {
+            "failed_component": "review",
+            "component_outcome": "failed",
+            "exit_code": 1,
+        }
+        self.write_json(
+            run / "state.json",
+            {
+                "schema_version": 1,
+                "status": "failed",
+                "next_sequence": 5,
+                "next_component": None,
+                "active_invocation": None,
+                "history": history,
+                "terminal": terminal,
+            },
+        )
+        self.write_json(
+            run / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "failed",
+                **terminal,
+                "history": history,
+            },
+        )
+
+        with self.assertRaisesRegex(RunValidationError, "Validation subject"):
+            read_run(
+                run,
+                "latest",
+                TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+            )
 
     def test_actionable_run_responds_and_exhausts_at_the_caller_limit(self):
         assignment_path, request_path = self.prepare_run(max_responses=1)

@@ -16,17 +16,10 @@ from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
     validate_component_output,
-    validate_continuation,
     validate_output,
     validate_request,
 )
-from afk_evidence.continuation import (
-    continuation_directories,
-    require_exhausted_structure,
-)
-from afk_evidence.continuation import (
-    validate_link as validate_continuation_link,
-)
+from afk_evidence.continuation import observe_lineage, output_from_state
 from afk_plan.contract import validate_input as validate_plan_input
 from afk_plan.contract import validate_planner_output
 from afk_plan_accept.contract import validate_policy_output
@@ -774,56 +767,43 @@ def load_continuation_lineage(
     allow_running=False,
     terminal_continuation=None,
 ):
-    """Validate the full lineage and select one sealed terminal when requested."""
-    directories = continuation_directories(coordinator / "continuations")
-    prior_output = "../../output.json"
-    expected_max_responses = request["max_responses"]
-    observed = []
-    terminal_directory = coordinator
-    selected = None
-    for directory in directories:
-        require_exhausted_structure(
+    """Compatibility adapter over the shared structural Run observer."""
+    try:
+        observed = observe_lineage(
+            coordinator,
             state,
-            expected_max_responses,
-            lambda record, name, current=terminal_directory: read_json(
-                locate_invocation_file(
-                    coordinator,
-                    [*observed, current],
-                    record,
-                    name,
-                )
+            output,
+            request["max_responses"],
+            read_json=read_json,
+            locate_component=lambda roots, record, name: locate_invocation_file(
+                coordinator, roots[1:], record, name
             ),
+            allow_running=allow_running,
+            terminal_continuation=terminal_continuation,
         )
-        continuation_input = validate_continuation(read_json(directory / "input.json"))
-        continuation_state = validate_checkpoint(read_json(directory / "state.json"))
-        validate_continuation_link(
-            state, continuation_state, continuation_input, prior_output
-        )
-        if continuation_state["status"] == "running":
-            if (
-                not allow_running
-                or directory != directories[-1]
-                or (directory / "output.json").exists()
-            ):
-                raise ExportError("newest continuation is not terminal")
-            observed.append(directory)
-            break
-        continuation_output = validate_output(read_json(directory / "output.json"))
-        if continuation_output != output_from_state(continuation_state):
-            raise ExportError("continuation terminal evidence disagrees")
-        state = continuation_state
-        output = continuation_output
-        terminal_directory = directory
-        observed.append(directory)
-        expected_max_responses = continuation_input["effective_max_responses"]
-        prior_output = f"../{directory.name}/output.json"
-        if directory.name == terminal_continuation:
-            selected = (state, output, terminal_directory, list(observed))
+    except ValueError as error:
+        raise ExportError(str(error)) from error
+
     if terminal_continuation is not None:
-        if selected is None:
-            raise ExportError("selected continuation is not a sealed terminal")
-        return selected
-    return state, output, terminal_directory, observed
+        selected = observed.selected
+        return (
+            selected.state,
+            selected.output,
+            selected.directory,
+            [
+                item.directory
+                for item in observed.sealed
+                if item.directory.name <= selected.directory.name
+            ],
+        )
+
+    continuations = [item.directory for item in observed.sealed]
+    if observed.active is not None:
+        continuations.append(observed.active.directory)
+    if observed.sealed:
+        terminal = observed.sealed[-1]
+        return terminal.state, terminal.output, terminal.directory, continuations
+    return state, output, coordinator, continuations
 
 
 def locate_invocation_file(coordinator, continuation_directories, record, name):
@@ -2958,24 +2938,6 @@ def event_counts(text):
             event_type = None
         counts[event_type if event_type in EVENT_TYPES else "unknown"] += 1
     return counts
-
-
-def output_from_state(state):
-    if state["status"] == "completed":
-        return {
-            "schema_version": 1,
-            "outcome": "completed",
-            **state["terminal"],
-            "history": state["history"],
-        }
-    if state["status"] == "failed":
-        return {
-            "schema_version": 1,
-            "outcome": "failed",
-            **state["terminal"],
-            "history": state["history"],
-        }
-    raise ExportError("Coordinator is not terminal")
 
 
 def validate_identity(project, run_id):
