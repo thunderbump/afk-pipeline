@@ -137,16 +137,24 @@ class MetricsPublicationTests(unittest.TestCase):
             ):
                 build_publication(request)
 
-    def test_semantic_comparison_does_not_admit_source_artifacts(self):
+    def test_semantic_comparison_remains_artifact_free_while_evidence_is_sealed(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
+            calls = []
+            actual_normalize = afk_export.normalize_run_v2
+
+            def record_normalization(*args, **kwargs):
+                calls.append(kwargs.get("include_artifacts", True))
+                return actual_normalize(*args, **kwargs)
+
             with mock.patch(
-                "afk_export.public_artifacts",
-                side_effect=AssertionError("artifact catalog was traversed"),
+                "afk_metrics.publication.normalize_run_v2",
+                side_effect=record_normalization,
             ):
                 publication = build_publication(request)
             self.assertEqual(len(publication["runs"]), 1)
+            self.assertEqual(calls, [False, True, False, True])
 
     def test_source_change_during_metrics_projection_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -181,6 +189,47 @@ class MetricsPublicationTests(unittest.TestCase):
                 self.assertRaisesRegex(PublicationError, "changed"),
             ):
                 build_publication(request)
+
+    def test_metric_evidence_change_during_projection_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            actual_summarize = __import__(
+                "afk_metrics.publication", fromlist=["summarize_source"]
+            ).summarize_source
+
+            def summarize_then_change(*args, **kwargs):
+                summary = actual_summarize(*args, **kwargs)
+                events = source / "coordinator" / "01-attempt" / "events.jsonl"
+                events.write_bytes(events.read_bytes() + b'{"type":"noop"}\n')
+                return summary
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.summarize_source",
+                    side_effect=summarize_then_change,
+                ),
+                self.assertRaisesRegex(PublicationError, "changed"),
+            ):
+                build_publication(request)
+
+    def test_publication_input_read_is_bounded_and_requires_a_regular_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            oversized = root / "oversized.json"
+            with oversized.open("wb") as stream:
+                stream.truncate(1024 * 1024 + 1)
+            with self.assertRaisesRegex(PublicationError, "size limit"):
+                load_publication_request(oversized)
+
+            directory = root / "directory"
+            directory.mkdir()
+            with self.assertRaisesRegex(PublicationError, "regular file"):
+                load_publication_request(directory)
+            zero = Path("/dev/zero")
+            if zero.exists():
+                with self.assertRaisesRegex(PublicationError, "regular file"):
+                    load_publication_request(zero)
 
     def test_duplicate_identity_and_count_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:

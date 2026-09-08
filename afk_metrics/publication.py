@@ -72,12 +72,44 @@ def load_publication_request(path: Path) -> dict[str, Any]:
     path = Path(path)
     if not path.is_absolute():
         raise PublicationError("publication input path must be absolute")
+    descriptor = None
     try:
-        raw = path.read_bytes()
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise PublicationError("publication input must be a regular file")
+        # Reject known-oversized files before allocating for their contents,
+        # while retaining a bounded read for synthetic/proc-style regular files
+        # whose reported size may not describe their readable bytes.
+        if before.st_size > MAX_INPUT_BYTES:
+            raise PublicationError("publication input exceeds size limit")
+        with os.fdopen(descriptor, "rb") as stream:
+            descriptor = None
+            raw = stream.read(MAX_INPUT_BYTES + 1)
+            after = os.fstat(stream.fileno())
+        if len(raw) > MAX_INPUT_BYTES:
+            raise PublicationError("publication input exceeds size limit")
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise PublicationError("publication input changed while being read")
+    except PublicationError:
+        raise
     except OSError as error:
         raise PublicationError("publication input is unavailable") from error
-    if len(raw) > MAX_INPUT_BYTES:
-        raise PublicationError("publication input exceeds size limit")
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
     value = _json_object(raw, "publication input")
     runs = value.get("runs")
     if (
@@ -418,9 +450,12 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             observed = load_source_v2(
                 source, project, None, None, terminal_continuation=terminal
             )
-            # Publication compares the semantic Run only. Artifact catalogs
-            # and payload admission are deliberately outside this boundary.
+            # The bundle comparison below uses only the artifact-free semantic
+            # Run. Separately retain Export's authenticated artifact and
+            # inference-session projection to bracket every evidence source
+            # consumed by the metrics report (including receipts and events).
             expected, _ = normalize_run_v2(observed, include_artifacts=False)
+            evidence_checkpoint, _ = normalize_run_v2(observed, include_artifacts=True)
             publication_digest = _publication_evidence_digest(source, observed)
         except (
             OSError,
@@ -453,6 +488,9 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
                 source, project, None, None, terminal_continuation=terminal
             )
             confirmed_record, _ = normalize_run_v2(confirmed, include_artifacts=False)
+            confirmed_evidence_checkpoint, _ = normalize_run_v2(
+                confirmed, include_artifacts=True
+            )
             confirmed_publication_digest = _publication_evidence_digest(
                 source, confirmed
             )
@@ -467,6 +505,7 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             raise PublicationError("source Run changed during metrics read") from error
         if (
             confirmed_record != expected
+            or confirmed_evidence_checkpoint != evidence_checkpoint
             or confirmed_publication_digest != publication_digest
         ):
             raise PublicationError("source Run changed during metrics read")
