@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ from afk_coordinate.contract import (
     validate_request,
     validation_repair_source,
 )
+from afk_evidence.access import EvidenceReader
 from afk_evidence.continuation import continuation_directories
 from afk_evidence.continuation import (
     validate_link as shared_validate_continuation_link,
@@ -172,6 +174,13 @@ def main():
             seal_json(state_path, state)
 
             progress(f"starting {component} invocation {directory_name}")
+            environment = os.environ.copy()
+            roots = [str(run_directory.absolute())]
+            related = assignment.get("related_work")
+            related_path = related.get("path") if isinstance(related, dict) else None
+            if isinstance(related_path, str) and Path(related_path).is_absolute():
+                roots.append(str(Path(related_path).parent))
+            environment["AFK_STAGE_EVIDENCE_ROOTS"] = json.dumps(roots)
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -181,6 +190,7 @@ def main():
                     str(run_directory / directory_name),
                 ],
                 check=False,
+                env=environment,
             )
             exit_code = completed.returncode
         else:
@@ -264,6 +274,7 @@ def start_continuation(
             state,
             expected_max_responses,
             check_workspace=False,
+            related_work=request.get("related_work"),
         )
         continuation_input = validate_continuation(
             read_json(continuation_directory / "input.json")
@@ -301,7 +312,12 @@ def start_continuation(
 
     if abandon_active:
         raise ValueError("there is no active invocation to abandon")
-    require_exhausted(run_directory, state, expected_max_responses)
+    require_exhausted(
+        run_directory,
+        state,
+        expected_max_responses,
+        related_work=request.get("related_work"),
+    )
     completed_responses = sum(
         record["component"] == "response" and record["outcome"] == "completed"
         for record in state["history"]
@@ -375,6 +391,7 @@ def require_exhausted(
     state,
     expected_max_responses,
     check_workspace=True,
+    related_work=None,
 ):
     if state["status"] != "completed" or state["terminal"] != {"decision": "exhausted"}:
         raise ValueError("only an exhausted Coordinator Run can be continued")
@@ -402,9 +419,14 @@ def require_exhausted(
         return
     iteration = latest(state, "iteration")
     iteration_directory = run_directory / iteration["directory"]
+    roots = [run_directory]
+    related_path = related_work.get("path") if isinstance(related_work, dict) else None
+    if isinstance(related_path, str) and Path(related_path).is_absolute():
+        roots.append(Path(related_path).parent)
     iteration_input, policy, lineage = validate_sealed_result(
         read_json(iteration_directory / "input.json"),
         read_json(iteration_directory / "output.json"),
+        reader=EvidenceReader(roots),
     )
     if (
         policy["max_responses"] != expected_max_responses

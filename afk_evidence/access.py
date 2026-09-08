@@ -25,20 +25,20 @@ class EvidenceReader:
 
     def __init__(self, roots):
         self.roots = tuple(self._safe_root(Path(root)) for root in roots)
-        self.exact_files = set()
         self.identities = {}
 
     def authorize_directory(self, path):
-        """Add one explicitly referenced evidence directory to this call."""
-        root = self._safe_root(Path(path))
-        if root not in self.roots:
-            self.roots += (root,)
+        """Confirm that a referenced directory is within caller authority.
+
+        References found in evidence never enlarge the immutable root set.  The
+        directory itself need not exist yet: a later read classifies that as
+        unavailable evidence rather than as a malformed trusted root.
+        """
+        self.relative(path)
 
     def authorize_file(self, path):
-        """Authorize exactly one explicitly referenced regular file."""
-        absolute = Path(path).absolute()
-        self._safe_root(absolute.parent)
-        self.exact_files.add(absolute)
+        """Confirm that a referenced file is within caller authority."""
+        self.relative(path)
 
     @staticmethod
     def _safe_root(root):
@@ -60,8 +60,6 @@ class EvidenceReader:
 
     def relative(self, path):
         absolute = Path(path).absolute()
-        if absolute in self.exact_files:
-            return absolute.parent, Path(absolute.name)
         for root in self.roots:
             try:
                 return root, absolute.relative_to(root)

@@ -1,8 +1,10 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_evidence.iteration import (
     evaluate_policy,
     validate_input,
@@ -39,7 +41,27 @@ def main():
     policy_input = validate_input(json.loads(input_path.read_text()))
     progress("iteration-policy input accepted")
     progress("loading and verifying Finding Assessment evidence")
-    policy, lineage, protected_directories = evaluate_policy(policy_input)
+    # Both paths are direct CLI arguments (the latter through POLICY_JSON), so
+    # their narrow common container is caller-authorized; transitive records
+    # still cannot enlarge this reader's immutable authority.
+    evidence_root = Path(
+        os.path.commonpath(
+            (input_path.absolute().parent, Path(policy_input["assessment_directory"]))
+        )
+    )
+    configured_roots = os.environ.get("AFK_STAGE_EVIDENCE_ROOTS")
+    roots = (evidence_root,)
+    if configured_roots is not None:
+        decoded_roots = json.loads(configured_roots)
+        if not isinstance(decoded_roots, list) or not all(
+            isinstance(root, str) and Path(root).is_absolute() for root in decoded_roots
+        ):
+            raise ValueError("invalid configured Iteration evidence roots")
+        roots = tuple(Path(root) for root in decoded_roots)
+    policy, lineage, protected_directories = evaluate_policy(
+        policy_input,
+        reader=EvidenceReader(roots),
+    )
     validate_result_location(
         result_directory,
         Path(lineage.assignment["workspace"]),
@@ -61,6 +83,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (
         OSError,
+        EvidenceUnavailable,
         TypeError,
         ValueError,
         KeyError,

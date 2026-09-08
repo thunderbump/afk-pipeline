@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from afk_review.contract import REVIEW_AUDIT
+from afk_validate.evidence import evidence_identity
 
 ROOT = Path(__file__).parents[1]
 
@@ -56,6 +57,11 @@ class IterationPolicyCliTest(unittest.TestCase):
         self.git("commit", "--quiet", "-m", "Implementation")
         self.implementation = self.state()
         (self.root / "02-validation").mkdir()
+        self.validation_identities = {
+            "02-validation": self.write_validation(
+                self.root / "02-validation", self.implementation
+            )
+        }
         self.assessment = self.make_assessment(worth_addressing=False)
 
     def test_no_actionable_findings_stop_without_using_remaining_budget(self):
@@ -361,6 +367,9 @@ class IterationPolicyCliTest(unittest.TestCase):
             },
         )
         (self.root / "07-validation").mkdir()
+        self.validation_identities["07-validation"] = self.write_validation(
+            self.root / "07-validation", response_state
+        )
         review = self.root / "09-review"
         review.mkdir()
         self.write_json(
@@ -398,6 +407,7 @@ class IterationPolicyCliTest(unittest.TestCase):
                     "after": response_state,
                     "unchanged": True,
                 },
+                "validation_evidence": self.validation_identities["07-validation"],
             },
         )
         assessment = self.root / "10-assessment"
@@ -521,6 +531,7 @@ class IterationPolicyCliTest(unittest.TestCase):
                     "after": self.implementation,
                     "unchanged": True,
                 },
+                "validation_evidence": self.validation_identities["02-validation"],
             },
         )
         assessment = self.root / "05-assessment"
@@ -563,6 +574,29 @@ class IterationPolicyCliTest(unittest.TestCase):
             },
         )
         return assessment
+
+    def write_validation(self, directory, state):
+        validation_input = {
+            "schema_version": 1,
+            "workspace": str(self.workspace),
+            "command": ["true"],
+            "timeout_seconds": 60,
+        }
+        validation_output = {
+            "schema_version": 1,
+            "outcome": "passed",
+            "started_at": "2025-01-01T00:00:00Z",
+            "finished_at": "2025-01-01T00:00:01Z",
+            "duration_seconds": 1,
+            "process": {"exit_code": 0, "signal": None},
+            "repository": {"before": state, "after": state, "head_changed": False},
+            "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+        }
+        self.write_json(directory / "input.json", validation_input)
+        self.write_json(directory / "output.json", validation_output)
+        (directory / "stdout.log").write_text("")
+        (directory / "stderr.log").write_text("")
+        return evidence_identity(validation_input, validation_output, "", "")
 
     def run_policy(self, max_responses):
         value = {

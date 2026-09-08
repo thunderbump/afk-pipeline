@@ -5,6 +5,11 @@ import unittest
 from pathlib import Path
 
 from afk_evidence import RunValidationError, TrustedContext, read_run
+from afk_evidence.access import (
+    EvidenceAccessError,
+    EvidenceReader,
+    EvidenceUnavailable,
+)
 
 
 class RunSnapshotTest(unittest.TestCase):
@@ -67,6 +72,19 @@ class RunSnapshotTest(unittest.TestCase):
 
     def write(self, relative, value):
         (self.run / relative).write_text(json.dumps(value))
+
+    def test_recorded_paths_cannot_expand_caller_authority(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        reader = EvidenceReader((self.run,))
+
+        with self.assertRaises(EvidenceAccessError):
+            reader.authorize_directory(outside)
+
+        missing = self.run / "retained" / "missing.json"
+        reader.authorize_directory(missing.parent)
+        with self.assertRaises(EvidenceUnavailable):
+            reader.json(missing)
 
     def test_failed_run_is_a_verified_observation_not_a_success(self):
         before = {

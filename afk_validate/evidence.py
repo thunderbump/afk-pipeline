@@ -34,6 +34,9 @@ def evidence_identity(
 
 def load_passed_evidence(
     validation_directory: Path,
+    *,
+    reader=None,
+    log_limit: int = 25 * 1024 * 1024,
 ) -> tuple[dict[str, object], dict[str, object], str, str]:
     """Load and validate one passed Validation and its identified logs.
 
@@ -41,11 +44,19 @@ def load_passed_evidence(
     function rather than treating files found there as trusted evidence.
     """
     directory = Path(validation_directory)
-    if directory.is_symlink() or not directory.is_dir():
-        raise ValueError("Validation evidence directory is unavailable")
-    directory = directory.resolve()
-    validation_input = _read_validation_object(directory / "input.json", "input")
-    validation_output = _read_validation_object(directory / "output.json", "output")
+    if reader is None:
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError("Validation evidence directory is unavailable")
+        directory = directory.resolve()
+        validation_input = _read_validation_object(directory / "input.json", "input")
+        validation_output = _read_validation_object(directory / "output.json", "output")
+    else:
+        validation_input = reader.json(directory / "input.json")
+        validation_output = reader.json(directory / "output.json")
+        if not isinstance(validation_input, dict) or not isinstance(
+            validation_output, dict
+        ):
+            raise TypeError("passed Validation input and output must be objects")
 
     if validation_input.get("schema_version") != 1:
         raise ValueError("Validation input must use schema_version 1")
@@ -113,6 +124,12 @@ def load_passed_evidence(
     logs = []
     for name in (artifacts["stdout"], artifacts["stderr"]):
         path = directory / name
+        if reader is not None:
+            try:
+                logs.append(reader.bytes(path, log_limit).decode("utf-8"))
+            except UnicodeDecodeError as error:
+                raise ValueError("passed Validation logs are unavailable") from error
+            continue
         try:
             facts = path.lstat()
             if not stat.S_ISREG(facts.st_mode):

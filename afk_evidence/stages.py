@@ -19,7 +19,11 @@ from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import validate_input as validate_response_input
 from afk_review.contract import validate_review
 from afk_runtime import git
-from afk_validate.evidence import validate_repairable_failure
+from afk_validate.evidence import (
+    evidence_identity,
+    load_passed_evidence,
+    validate_repairable_failure,
+)
 
 from .access import (
     MAX_RELATED_WORK_BYTES,
@@ -158,10 +162,7 @@ def _committed_response(source_directory, visited, lineage):
             review_input, "validation_directory"
         )
         lineage.include(change_directory, referenced=True)
-        # Review validation is checked by Run-level provenance.  Standalone
-        # Change projection does not broaden authority merely because Review
-        # records a (possibly retained elsewhere) validation location.
-        lineage.evidence_directories.add(validation_directory.absolute())
+        lineage.include(validation_directory, referenced=True)
         assignment, _source_before, source_after = _committed_change(
             change_directory, visited, lineage
         )
@@ -192,6 +193,28 @@ def _committed_response(source_directory, visited, lineage):
                 "Finding Assessment must use the Review related-work snapshot"
             )
         related_work_ids = _snapshot_ids(lineage, review_related)
+        validation_input, validation_output, validation_stdout, validation_stderr = (
+            load_passed_evidence(
+                validation_directory,
+                reader=lineage.reader,
+                log_limit=MAX_VALIDATION_LOG_BYTES,
+            )
+        )
+        if review_output.get("validation_evidence") != evidence_identity(
+            validation_input,
+            validation_output,
+            validation_stdout,
+            validation_stderr,
+        ):
+            raise ValueError("Review-bound Validation evidence identity disagrees")
+        if (
+            Path(validation_input["workspace"]).resolve() != workspace.resolve()
+            or subject_state(validation_output["repository"]["before"])
+            != subject_state(source_after)
+            or subject_state(validation_output["repository"]["after"])
+            != subject_state(source_after)
+        ):
+            raise ValueError("Validation and reviewed Change subjects disagree")
         reviewed = validate_review(
             review_value, workspace, before["head"], related_work_ids
         )
@@ -306,15 +329,15 @@ def validate_transition(workspace, before, after, repository, lineage):
         or not all(isinstance(commit, str) and commit for commit in recorded)
     ):
         raise ValueError("committed change requires a recorded commit range")
+    revisions = (before["head"], after["head"], *recorded)
+    if any(
+        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision) is None
+        for revision in revisions
+    ):
+        raise ValueError(
+            "Committed Change revisions must be canonical commit object IDs"
+        )
     if lineage.verify_git:
-        revisions = (before["head"], after["head"], *recorded)
-        if any(
-            re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", revision) is None
-            for revision in revisions
-        ):
-            raise ValueError(
-                "Committed Change revisions must be canonical commit object IDs"
-            )
         # Probe every recorded object before graph operations. A locally missing
         # intermediate object is unavailable proof, not malformed lineage.
         for revision in revisions:
