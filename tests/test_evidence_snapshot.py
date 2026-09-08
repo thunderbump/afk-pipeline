@@ -3,6 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 from afk_evidence import RunValidationError, TrustedContext, read_run
@@ -17,6 +18,7 @@ from afk_evidence.continuation import (
     validate_link,
 )
 from afk_evidence.iteration import read_object
+from afk_evidence.snapshot import _verify_stage_provenance
 
 
 class RunSnapshotTest(unittest.TestCase):
@@ -180,6 +182,98 @@ class RunSnapshotTest(unittest.TestCase):
                 0,
                 read_json=lambda path: json.loads(path.read_text()),
                 locate_component=lambda *_args: self.run,
+            )
+
+    def test_deferred_exhaustion_proof_does_not_hide_bad_continuation_link(self):
+        continuation = self.run / "continuations" / "01"
+        continuation.mkdir(parents=True)
+        continuation_input = {
+            "schema_version": 1,
+            "additional_responses": 1,
+            "completed_responses": 0,
+            "effective_max_responses": 1,
+            "prior_output": "wrong-output.json",
+        }
+        continued_state = {
+            "schema_version": 1,
+            "status": "failed",
+            "next_sequence": 2,
+            "next_component": None,
+            "active_invocation": None,
+            "history": self.history,
+            "terminal": self.state["terminal"],
+            "continuation": continuation_input,
+        }
+        continued_output = {**self.output, "history": self.history}
+        (continuation / "input.json").write_text(json.dumps(continuation_input))
+        (continuation / "state.json").write_text(json.dumps(continued_state))
+        (continuation / "output.json").write_text(json.dumps(continued_output))
+        exhausted_state = {
+            "schema_version": 1,
+            "status": "completed",
+            "next_sequence": 1,
+            "next_component": None,
+            "active_invocation": None,
+            "history": [],
+            "terminal": {"decision": "exhausted"},
+        }
+        exhausted_output = {
+            "schema_version": 1,
+            "outcome": "completed",
+            "decision": "exhausted",
+            "history": [],
+        }
+
+        unavailable = EvidenceUnavailable("missing evidence", "iteration/output.json")
+        with (
+            mock.patch(
+                "afk_evidence.continuation.require_exhausted_structure",
+                side_effect=unavailable,
+            ),
+            self.assertRaisesRegex(ValueError, "lineage"),
+        ):
+            observe_lineage(
+                self.run,
+                exhausted_state,
+                exhausted_output,
+                0,
+                read_json=lambda path: json.loads(path.read_text()),
+                locate_component=lambda *_args: self.run,
+                defer_error=lambda error: isinstance(error, EvidenceUnavailable),
+            )
+
+    def test_unavailable_stage_proof_does_not_hide_later_stage_corruption(self):
+        history = [
+            {"sequence": 1, "component": "attempt", "outcome": "succeeded"},
+            {"sequence": 2, "component": "validation", "outcome": "passed"},
+            {"sequence": 3, "component": "change", "outcome": "completed"},
+            {"sequence": 4, "component": "review", "outcome": "completed"},
+        ]
+        for row in history:
+            row["directory"] = f"{row['sequence']:02d}-{row['component']}"
+        assignment = {"workspace": str(self.root / "workspace")}
+        source = SimpleNamespace(assignment=assignment, after={})
+        lineage = SimpleNamespace(assignment=assignment)
+
+        with (
+            mock.patch(
+                "afk_evidence.stages.verify_change_lineage", return_value=lineage
+            ),
+            mock.patch("afk_evidence.stages.verify_source", return_value=source),
+            mock.patch(
+                "afk_evidence.snapshot.load_passed_evidence",
+                side_effect=EvidenceUnavailable(
+                    "missing evidence", "validation/stdout.log"
+                ),
+            ),
+            mock.patch(
+                "afk_evidence.snapshot._verify_review",
+                side_effect=RunValidationError("later Review is corrupt"),
+            ),
+            self.assertRaisesRegex(RunValidationError, "later Review is corrupt"),
+        ):
+            _verify_stage_provenance(
+                mock.Mock(), history, (self.run,), TrustedContext(), assignment
             )
 
     def test_sealed_continuation_must_append_an_invocation(self):

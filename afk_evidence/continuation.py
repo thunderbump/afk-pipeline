@@ -33,6 +33,7 @@ class ContinuationObservation:
     active: ObservedContinuation | None
     selected: ObservedContinuation | None
     directories: tuple[Path, ...]
+    deferred_errors: tuple[Exception, ...] = ()
 
 
 def continuation_directories(root: Path) -> list[Path]:
@@ -90,6 +91,7 @@ def observe_lineage(
     exhaustion_verifiers=None,
     allow_running=True,
     terminal_continuation=None,
+    defer_error: Callable[[Exception], bool] | None = None,
 ):
     """Observe, validate, and optionally select a complete continuation chain.
 
@@ -106,20 +108,29 @@ def observe_lineage(
     sealed = []
     active = None
     selected = None
+    deferred_errors = []
     for index, directory in enumerate(directories):
         roots = tuple(retained_roots)
         failed_verifier = iteration_verifier = None
         if exhaustion_verifiers is not None:
             failed_verifier, iteration_verifier = exhaustion_verifiers(roots)
-        require_exhausted_structure(
-            state,
-            expected_limit,
-            lambda record, name, current_roots=roots: read_json(
-                locate_component(current_roots, record, name)
-            ),
-            verify_failed_validation=failed_verifier,
-            verify_iteration=iteration_verifier,
-        )
+        try:
+            require_exhausted_structure(
+                state,
+                expected_limit,
+                lambda record, name, current_roots=roots: read_json(
+                    locate_component(current_roots, record, name)
+                ),
+                verify_failed_validation=failed_verifier,
+                verify_iteration=iteration_verifier,
+            )
+        except Exception as error:
+            # An observer may defer non-authoritative proof availability while
+            # continuing to validate the retained chain. Structural errors are
+            # never deferred, and execution callers retain fail-fast behavior.
+            if defer_error is None or not defer_error(error):
+                raise
+            deferred_errors.append(error)
         continuation_input = validate_continuation(read_json(directory / "input.json"))
         continuation_state = validate_checkpoint(read_json(directory / "state.json"))
         validate_link(state, continuation_state, continuation_input, prior_output)
@@ -149,7 +160,9 @@ def observe_lineage(
         prior_output = f"../{directory.name}/output.json"
     if terminal_continuation is not None and selected is None:
         raise ValueError("selected continuation is not a sealed terminal")
-    return ContinuationObservation(tuple(sealed), active, selected, directories)
+    return ContinuationObservation(
+        tuple(sealed), active, selected, directories, tuple(deferred_errors)
+    )
 
 
 def output_from_state(state):

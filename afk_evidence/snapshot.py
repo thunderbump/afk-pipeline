@@ -212,6 +212,7 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
             locate_component=_invocation_path,
             exhaustion_verifiers=exhaustion_verifiers,
             allow_running=True,
+            defer_error=lambda error: isinstance(error, _Unavailable),
         )
         directories = list(observed.directories)
         for item in observed.sealed:
@@ -238,7 +239,9 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
         # covers the newest retained history, including an active tail.
         proof_roots = [coordinator, *directories]
         proof_state = active.state if active is not None else latest.state
-        unavailable_proof = None
+        unavailable_proof = (
+            observed.deferred_errors[0] if observed.deferred_errors else None
+        )
         for record in proof_state["history"]:
             if record["outcome"] == "abandoned":
                 continue
@@ -455,101 +458,135 @@ def _invocation_path(bases, record, name):
 
 
 def _verify_stage_provenance(reader, history, roots, context, assignment):
-    """Deeply prove every completed cycle, not merely its final rows."""
+    """Deeply prove every completed cycle, not merely its final rows.
+
+    Availability failures are accumulated so they cannot conceal corruption in
+    a later successful stage. Any structural contradiction still fails the
+    complete snapshot immediately.
+    """
     from .stages import verify_change_lineage, verify_source
 
     successful = []
     reviews = {}
+    unavailable_proof = None
     for row in history:
         if row["outcome"] != COMPONENT_TOPOLOGY[row["component"]]["success"]:
             continue
         successful.append(row)
         directory = _invocation_path(roots, row, "output.json").parent
-        if row["component"] == "change":
-            lineage = verify_change_lineage(
-                directory,
-                reader=reader,
-                repository=context.repository,
-                verify_git=context.repository is not None,
-            )
-            _require_run_assignment(lineage.assignment, assignment, "Change")
-        elif row["component"] == "validation":
-            # A successful Validation is authoritative even while it is the
-            # active tail, before a Review exists to consume it. Bind it to the
-            # exact committed source which immediately preceded it rather than
-            # waiting for a later Review to establish that relationship.
-            source_row = next(
-                (
-                    item
-                    for item in reversed(successful[:-1])
-                    if item["component"] in {"attempt", "response"}
-                ),
-                None,
-            )
-            if source_row is None:
-                raise RunValidationError("Validation lacks committed source provenance")
-            source = verify_source(
-                source_row["component"],
-                _invocation_path(roots, source_row, "output.json").parent,
-                reader=reader,
-                repository=context.repository,
-                verify_git=context.repository is not None,
-            )
-            _require_run_assignment(source.assignment, assignment, "Validation")
-            validation_input, validation_output, _stdout, _stderr = (
-                load_passed_evidence(
+        try:
+            if row["component"] == "change":
+                lineage = verify_change_lineage(
                     directory,
                     reader=reader,
-                    log_limit=MAX_VALIDATION_LOG_BYTES,
+                    repository=context.repository,
+                    verify_git=context.repository is not None,
                 )
-            )
-            if (
-                Path(validation_input["workspace"]).absolute()
-                != Path(assignment["workspace"]).absolute()
-                or _subject(validation_output["repository"]["before"])
-                != _subject(source.after)
-                or _subject(validation_output["repository"]["after"])
-                != _subject(source.after)
-            ):
-                raise RunValidationError(
-                    "Validation subject does not match its committed source"
+                _require_run_assignment(lineage.assignment, assignment, "Change")
+            elif row["component"] == "validation":
+                # A successful Validation is authoritative even while it is the
+                # active tail, before a Review exists to consume it.
+                source_row = next(
+                    (
+                        item
+                        for item in reversed(successful[:-1])
+                        if item["component"] in {"attempt", "response"}
+                    ),
+                    None,
                 )
-        elif row["component"] == "review":
-            change_row = next(
-                (
-                    item
-                    for item in reversed(successful[:-1])
-                    if item["component"] == "change"
-                ),
-                None,
-            )
-            validation_row = next(
-                (
-                    item
-                    for item in reversed(successful[:-1])
-                    if item["component"] == "validation"
-                ),
-                None,
-            )
-            if change_row is None or validation_row is None:
-                raise RunValidationError("Review lacks Change or Validation provenance")
-            reviews[row["sequence"]] = _verify_review(
-                reader, roots, row, change_row, validation_row, assignment
-            )
-        elif row["component"] == "assessment":
-            review_row = next(
-                (
-                    item
-                    for item in reversed(successful[:-1])
-                    if item["component"] == "review"
-                ),
-                None,
-            )
-            if review_row is None:
-                raise RunValidationError("Assessment lacks Review provenance")
-            _verify_assessment(
-                reader, roots, row, review_row, reviews[review_row["sequence"]]
-            )
+                if source_row is None:
+                    raise RunValidationError(
+                        "Validation lacks committed source provenance"
+                    )
+                source = verify_source(
+                    source_row["component"],
+                    _invocation_path(roots, source_row, "output.json").parent,
+                    reader=reader,
+                    repository=context.repository,
+                    verify_git=context.repository is not None,
+                )
+                _require_run_assignment(source.assignment, assignment, "Validation")
+                validation_input, validation_output, _stdout, _stderr = (
+                    load_passed_evidence(
+                        directory,
+                        reader=reader,
+                        log_limit=MAX_VALIDATION_LOG_BYTES,
+                    )
+                )
+                if (
+                    Path(validation_input["workspace"]).absolute()
+                    != Path(assignment["workspace"]).absolute()
+                    or _subject(validation_output["repository"]["before"])
+                    != _subject(source.after)
+                    or _subject(validation_output["repository"]["after"])
+                    != _subject(source.after)
+                ):
+                    raise RunValidationError(
+                        "Validation subject does not match its committed source"
+                    )
+            elif row["component"] == "review":
+                change_row = next(
+                    (
+                        item
+                        for item in reversed(successful[:-1])
+                        if item["component"] == "change"
+                    ),
+                    None,
+                )
+                validation_row = next(
+                    (
+                        item
+                        for item in reversed(successful[:-1])
+                        if item["component"] == "validation"
+                    ),
+                    None,
+                )
+                if change_row is None or validation_row is None:
+                    raise RunValidationError(
+                        "Review lacks Change or Validation provenance"
+                    )
+                reviews[row["sequence"]] = _verify_review(
+                    reader, roots, row, change_row, validation_row, assignment
+                )
+            elif row["component"] == "assessment":
+                review_row = next(
+                    (
+                        item
+                        for item in reversed(successful[:-1])
+                        if item["component"] == "review"
+                    ),
+                    None,
+                )
+                if review_row is None:
+                    raise RunValidationError("Assessment lacks Review provenance")
+                review_facts = reviews.get(review_row["sequence"])
+                if review_facts is None:
+                    # The Review's proof may have been unavailable. Re-check it
+                    # rather than converting that condition into a KeyError.
+                    change_row = next(
+                        item
+                        for item in reversed(successful)
+                        if item["component"] == "change"
+                    )
+                    validation_row = next(
+                        item
+                        for item in reversed(successful)
+                        if item["component"] == "validation"
+                    )
+                    review_facts = _review_local_facts(
+                        reader,
+                        roots,
+                        review_row,
+                        change_row,
+                        validation_row,
+                        assignment,
+                    )
+                _verify_assessment(reader, roots, row, review_row, review_facts)
+        except _Unavailable as unavailable:
+            if unavailable_proof is None:
+                unavailable_proof = unavailable
+    if unavailable_proof is not None:
+        raise unavailable_proof
 
 
 def _require_run_assignment(stage_assignment, run_assignment, stage):
@@ -567,7 +604,10 @@ def _related_ids(reader, reference):
     return {json.loads(line)["id"] for line in raw.splitlines()}
 
 
-def _verify_review(reader, roots, review_row, change_row, validation_row, assignment):
+def _review_local_facts(
+    reader, roots, review_row, change_row, validation_row, assignment
+):
+    """Validate Review facts that do not depend on Validation log access."""
     review_dir = _invocation_path(roots, review_row, "output.json").parent
     change_dir = _invocation_path(roots, change_row, "output.json").parent
     validation_dir = _invocation_path(roots, validation_row, "output.json").parent
@@ -584,36 +624,24 @@ def _verify_review(reader, roots, review_row, change_row, validation_row, assign
         if Path(value).absolute() != expected.absolute():
             raise RunValidationError(f"Review {field} does not match history")
     change = validate_change_output(reader.json(change_dir / "output.json"))
-    validation_input, validation_output, validation_stdout, validation_stderr = (
-        load_passed_evidence(
-            validation_dir,
-            reader=reader,
-            log_limit=MAX_VALIDATION_LOG_BYTES,
-        )
-    )
-    if review_output.get("validation_evidence") != evidence_identity(
-        validation_input, validation_output, validation_stdout, validation_stderr
-    ):
-        raise RunValidationError("Review-bound Validation evidence identity disagrees")
     repository = review_output.get("repository")
     if not isinstance(repository, dict):
         raise RunValidationError("invalid Review repository evidence")
     subject = _subject(change["repository"]["after"])
-    states = [
-        _subject(validation_output["repository"][key]) for key in ("before", "after")
-    ]
-    states += [_subject(repository.get(key)) for key in ("before", "after")]
+    review_states = [_subject(repository.get(key)) for key in ("before", "after")]
+    workspace = review_input.get("workspace")
+    # Check facts local to Change and Review before reading transitive
+    # Validation proof. Missing Validation logs must not hide a contradictory
+    # later Review subject or workspace.
     if (
         review_output.get("outcome") != "completed"
         or repository.get("unchanged") is not True
-        or any(state != subject for state in states)
+        or any(state != subject for state in review_states)
     ):
-        raise RunValidationError("Change, Validation and Review subjects disagree")
-    workspace = review_input.get("workspace")
+        raise RunValidationError("Change and Review subjects disagree")
     if (
         not isinstance(workspace, str)
         or Path(workspace).absolute() != Path(change["workspace"]).absolute()
-        or Path(validation_input["workspace"]).absolute() != Path(workspace).absolute()
     ):
         raise RunValidationError("stage workspaces disagree")
     related = review_input.get("related_work")
@@ -626,6 +654,36 @@ def _verify_review(reader, roots, review_row, change_row, validation_row, assign
         _related_ids(reader, related),
     )
     return review_dir, review_input, review_output, review, subject
+
+
+def _verify_review(reader, roots, review_row, change_row, validation_row, assignment):
+    facts = _review_local_facts(
+        reader, roots, review_row, change_row, validation_row, assignment
+    )
+    _review_dir, review_input, review_output, _review, subject = facts
+    validation_dir = _invocation_path(roots, validation_row, "output.json").parent
+    validation_input, validation_output, validation_stdout, validation_stderr = (
+        load_passed_evidence(
+            validation_dir,
+            reader=reader,
+            log_limit=MAX_VALIDATION_LOG_BYTES,
+        )
+    )
+    if review_output.get("validation_evidence") != evidence_identity(
+        validation_input, validation_output, validation_stdout, validation_stderr
+    ):
+        raise RunValidationError("Review-bound Validation evidence identity disagrees")
+    validation_states = [
+        _subject(validation_output["repository"][key]) for key in ("before", "after")
+    ]
+    if any(state != subject for state in validation_states):
+        raise RunValidationError("Change, Validation and Review subjects disagree")
+    if (
+        Path(validation_input["workspace"]).absolute()
+        != Path(review_input["workspace"]).absolute()
+    ):
+        raise RunValidationError("stage workspaces disagree")
+    return facts
 
 
 def _verify_assessment(reader, roots, row, review_row, review_facts):
