@@ -92,6 +92,85 @@ process, protocol, validation, terminal response, and outcome. Run preparation
 freezes Pi adapter family `pi` and contract version `1` in every inference role
 setting; continuation consumes that frozen setting rather than mutable config.
 
+## Optional retained-Run metrics
+
+Generate a read-only local report from one or more retained prepared Runs:
+
+```sh
+python3 -m afk_metrics --destination /new/report-directory \
+  /path/to/run-a /path/to/run-b
+cat /new/report-directory/comparison.txt
+jq . /new/report-directory/summary.json
+```
+
+This command is explicitly opt-in. The destination must not already exist and
+must not equal or be nested beneath any source Run. It writes `summary.json`
+(schema version 1) and `comparison.txt`; it does not mutate, seal, publish, or change the status
+of source evidence. Replaying the same sealed inputs produces the same summary
+(the report deliberately has no generation timestamp). Repeated source inputs
+and shared continuation evidence are deduplicated by stable Run and invocation
+identities. An integrity failure is retained as an `invalid` source with no
+trusted inference totals, causes exit status 1, and never includes source paths
+or source content in the human report. Existing destinations and invalid CLI
+usage exit 2.
+
+The projection uses the exporter's existing verified prepared-Run and
+continuation traversal, including sealed invocation evidence retained by a
+component later marked abandoned. Pi Inference Receipts and their hash-bound
+event streams are authenticated at the existing export boundary. JSONL is
+streamed in bounded memory with a 1 MiB per-record limit (oversized records fail
+source integrity), and reports contain no prompts, message text, tool payloads,
+logs, credentials, or raw events. Finalized assistant `message_end` usage is counted
+once by its stable message identity. Cumulative `message_update`, `turn_end`, and
+`agent_end` copies are not summed. `compaction_end.result.usage` is shown as a
+separate aggregate because it may represent several requests. Input, output,
+cache-read, cache-write, total-token, and optional reasoning categories are
+preserved; reasoning is not added to `totalTokens`. Retries, failed responses,
+or compactions that prevent exact request accounting mark coverage partial.
+Unsupported adapters and absent usage are unavailable and do not impose a new
+adapter capability.
+
+`usage.cost` is labeled a **Pi-reported estimate from model rates**, not a billed
+charge. Currency, Pi version, and historical price-table date remain unknown
+unless retained evidence establishes them; this increment neither fetches
+prices nor queries billing. Missing or subscription pricing is unavailable,
+never zero, and no historical estimate is recomputed.
+
+Timing distinguishes Run wall span, preparation, inference invocation elapsed,
+trusted in-process response-validator time, and repository Validation time.
+Invocation elapsed includes adapter, Pi runtime, tools, and related process work
+and is not pure model latency. Nested response validation is not added to the
+repository Validation total. The machine report qualifies both validator totals
+with adjacent `response_validator_coverage` and
+`repository_validation_coverage` values (`complete`, `partial`, or
+`unavailable`), so a sum of only the retained measurements is never presented
+as complete. Change and Iteration currently have no structured durations and are
+explicitly unavailable. Continuation wait gaps and
+publication are likewise unavailable when no timestamps establish them.
+Unattributed time is only produced when known non-overlapping intervals fit in
+the Run span; nested durations are not subtracted twice.
+
+Pairwise comparison checks frozen objective digest, base commit, and Validation
+conditions. Differences are warnings and suppress a ranking rather than
+presenting a confounded result. The report carries terminal outcome,
+Validation outcomes, repair/retry counts, and acceptance/integration fields when
+available; it does not infer semantic acceptance from completion. These
+observations do not prove output quality or lower code complexity.
+
+Event interpretation follows Pi 0.84.2, upstream commit
+[`914cf1472e715297caa30db4b9535d534a9eb718`](https://github.com/earendil-works/pi/tree/914cf1472e715297caa30db4b9535d534a9eb718),
+notably
+[`json-event.ts`](https://github.com/earendil-works/pi/blob/914cf1472e715297caa30db4b9535d534a9eb718/packages/coding-agent/src/modes/json-event.ts),
+[`print-mode.ts`](https://github.com/earendil-works/pi/blob/914cf1472e715297caa30db4b9535d534a9eb718/packages/coding-agent/src/modes/print-mode.ts),
+[`models.ts`](https://github.com/earendil-works/pi/blob/914cf1472e715297caa30db4b9535d534a9eb718/packages/ai/src/models.ts), and
+[`compaction.ts`](https://github.com/earendil-works/pi/blob/914cf1472e715297caa30db4b9535d534a9eb718/packages/coding-agent/src/core/compaction/compaction.ts).
+There is no telemetry, instrumentation, pricing fetch, model router, UI, or
+Copilot-specific behavior in this report path.
+
+Metrics do not infer completion acceptance or Git integration from datastore
+publication. Those fields remain unavailable until independently supported
+completion and integration evidence is consumed.
+
 ## Acceptance Planner
 
 Route one frozen Bead directly to the existing pipeline or propose a small
