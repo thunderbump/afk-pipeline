@@ -40,6 +40,9 @@ class EvidenceReader:
         self.roots = tuple(path for path, _descriptor in opened)
         self._root_descriptors = {path: descriptor for path, descriptor in opened}
         self.identities = {}
+        # Retain the first observation for every pathname for the lifetime of
+        # this reader. A later open must describe the same file and bytes.
+        self._observations = {}
 
     def close(self):
         descriptors = getattr(self, "_root_descriptors", {})
@@ -170,9 +173,20 @@ class EvidenceReader:
                 after.st_mtime_ns,
             ) or len(raw) != before.st_size:
                 raise EvidenceAccessError("evidence changed while it was read")
-            self.identities[str(Path(path).absolute())] = hashlib.sha256(
-                raw
-            ).hexdigest()
+            pathname = str(Path(path).absolute())
+            digest = hashlib.sha256(raw).hexdigest()
+            observation = (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+                digest,
+            )
+            previous = self._observations.get(pathname)
+            if previous is not None and previous != observation:
+                raise EvidenceAccessError(f"evidence changed between reads: {path}")
+            self._observations[pathname] = observation
+            self.identities[pathname] = digest
             return raw
         finally:
             for item in reversed(opened):

@@ -30,8 +30,9 @@ not turn unavailable private proof into verified authority.
 `trusted_context` supplies the configured local Git repository and permitted
 evidence roots. Recorded absolute paths never add authority: all transitive
 reads must remain under those roots. Reads open path components without
-following symlinks, require regular files, detect replacement/size changes, and
-are repeated independently on every call. JSON proof records are limited to 1
+following symlinks, require regular files, and reject replacement, metadata, or
+size changes both during a read and between repeated reads of one pathname.
+Calls are revalidated independently with no cross-call cache. JSON proof records are limited to 1
 MiB, related-work snapshots to 256 KiB, and each private Validation log to the
 named 25 MiB bound. Oversized proof is unavailable rather than truncated. Git
 checks use exact canonical commits in the configured local repository and do
@@ -42,7 +43,11 @@ publication, or external actions. Raw inference events and prompt artifacts rema
 than required stage proof.
 
 Coordinator and Exporter share the pure continuation verifier in
-`afk_evidence.continuation`; Change and Iteration use the shared stage lineage
+`afk_evidence.continuation`; a sealed continuation must append at least one
+invocation and cannot merely revise its predecessor's terminal decision. Review
+and Assessment persisted inputs are rechecked against their complete pure stage
+contracts, including schema, positive timeout, runtime-owned inference policy,
+and workspace lineage. Change and Iteration use the shared stage lineage
 implementation in `afk_evidence.stages` and the bounded no-follow reader.
 Standalone stages authorize only their caller-owned Run/evidence neighborhood,
 not arbitrary roots named by records. Compatibility imports retain existing CLI

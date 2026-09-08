@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from afk_assess.contract import validate_assessment
+from afk_assess.contract import validate_input as validate_assessment_input
 from afk_attempt.contract import validate_assignment
 from afk_change.contract import validate_change_output, validate_repository_state
 from afk_coordinate.contract import (
@@ -19,6 +20,7 @@ from afk_coordinate.contract import (
     validate_request,
 )
 from afk_related_work import validate_snapshot_bytes
+from afk_review.contract import validate_input as validate_review_input
 from afk_review.contract import validate_review
 from afk_validate.evidence import (
     evidence_identity,
@@ -542,7 +544,7 @@ def _verify_review(reader, roots, review_row, change_row, validation_row, assign
     review_dir = _invocation_path(roots, review_row, "output.json").parent
     change_dir = _invocation_path(roots, change_row, "output.json").parent
     validation_dir = _invocation_path(roots, validation_row, "output.json").parent
-    review_input = reader.json(review_dir / "input.json")
+    review_input = validate_review_input(reader.json(review_dir / "input.json"))
     review_output = reader.json(review_dir / "output.json")
     for field, expected in (
         ("change_directory", change_dir),
@@ -602,7 +604,7 @@ def _verify_review(reader, roots, review_row, change_row, validation_row, assign
 def _verify_assessment(reader, roots, row, review_row, review_facts):
     review_dir, review_input, _review_output, review, subject = review_facts
     directory = _invocation_path(roots, row, "output.json").parent
-    input_value = reader.json(directory / "input.json")
+    input_value = validate_assessment_input(reader.json(directory / "input.json"))
     output = reader.json(directory / "output.json")
     reference = input_value.get("review_directory")
     repository = output.get("repository")
@@ -614,6 +616,8 @@ def _verify_assessment(reader, roots, row, review_row, review_facts):
         or repository.get("unchanged") is not True
         or _subject(repository.get("before")) != subject
         or _subject(repository.get("after")) != subject
+        or Path(input_value["workspace"]).absolute()
+        != Path(review_input["workspace"]).absolute()
     ):
         raise RunValidationError("Assessment subject does not match Review")
     if input_value.get("related_work") != review_input.get("related_work"):

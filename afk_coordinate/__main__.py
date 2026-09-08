@@ -11,13 +11,16 @@ from afk_coordinate.contract import (
     expected_input_sources,
     validate_checkpoint,
     validate_component_output,
-    validate_continuation,
     validate_output,
     validate_request,
     validation_repair_source,
 )
 from afk_evidence.access import EvidenceReader
-from afk_evidence.continuation import continuation_directories
+from afk_evidence.continuation import (
+    continuation_directories,
+    observe_lineage,
+    require_exhausted_structure,
+)
 from afk_evidence.continuation import (
     validate_link as shared_validate_continuation_link,
 )
@@ -265,58 +268,58 @@ def start_continuation(
     """Create one explicit continuation without changing the original terminal."""
     validate_terminal_pair(state, run_directory / "output.json")
     continuation_root = run_directory / "continuations"
-    continuation_directories = existing_continuations(continuation_root)
-    prior_output = "../../output.json"
-    expected_max_responses = request["max_responses"]
-    for index, continuation_directory in enumerate(continuation_directories):
-        require_exhausted(
-            run_directory,
-            state,
-            expected_max_responses,
-            check_workspace=False,
-            related_work=request.get("related_work"),
+    access_roots = [run_directory]
+    related = request.get("related_work")
+    if isinstance(related, dict) and isinstance(related.get("path"), str):
+        access_roots.append(Path(related["path"]).parent)
+    reader = EvidenceReader(access_roots)
+
+    def locate(roots, record, name):
+        for base in reversed(roots):
+            candidate = base / record["directory"] / name
+            if candidate.exists() or candidate.is_symlink():
+                return candidate
+        return roots[0] / record["directory"] / name
+
+    def verifiers(roots):
+        failed, iteration, _facts = exhaustion_verifiers(reader, roots, locate)
+        return failed, iteration
+
+    observed = observe_lineage(
+        run_directory,
+        state,
+        validate_output(read_json(run_directory / "output.json")),
+        request["max_responses"],
+        read_json=reader.json,
+        locate_component=locate,
+        exhaustion_verifiers=verifiers,
+        allow_running=True,
+    )
+    continuation_directories = list(observed.directories)
+    if observed.active is not None:
+        active = observed.active
+        if active.input["additional_responses"] != additional_responses:
+            raise ValueError("active continuation ADDITIONAL_RESPONSES does not match")
+        return continuation_runtime(
+            request, active.state, active.directory, active.input
         )
-        continuation_input = validate_continuation(
-            read_json(continuation_directory / "input.json")
-        )
-        continuation_state = validate_checkpoint(
-            read_json(continuation_directory / "state.json")
-        )
-        validate_continuation_link(
-            state,
-            continuation_state,
-            continuation_input,
-            prior_output,
-        )
-        if continuation_state["status"] == "running":
-            if index != len(continuation_directories) - 1:
-                raise ValueError("continuation lineage has work after a running entry")
-            if continuation_input["additional_responses"] != additional_responses:
-                raise ValueError(
-                    "active continuation ADDITIONAL_RESPONSES does not match"
-                )
-            if (continuation_directory / "output.json").exists():
-                raise ValueError("running continuation has terminal output")
-            return continuation_runtime(
-                request,
-                continuation_state,
-                continuation_directory,
-                continuation_input,
-            )
-        validate_terminal_pair(
-            continuation_state, continuation_directory / "output.json"
-        )
-        state = continuation_state
-        expected_max_responses = continuation_input["effective_max_responses"]
-        prior_output = f"../{continuation_directory.name}/output.json"
+    if observed.sealed:
+        latest_continuation = observed.sealed[-1]
+        state = latest_continuation.state
+        expected_max_responses = latest_continuation.input["effective_max_responses"]
+    else:
+        expected_max_responses = request["max_responses"]
 
     if abandon_active:
         raise ValueError("there is no active invocation to abandon")
+    invocation_roots = [run_directory, *continuation_directories]
     require_exhausted(
-        run_directory,
         state,
         expected_max_responses,
-        related_work=request.get("related_work"),
+        reader,
+        invocation_roots,
+        locate,
+        check_workspace=True,
     )
     completed_responses = sum(
         record["component"] == "response" and record["outcome"] == "completed"
@@ -327,6 +330,11 @@ def start_continuation(
         continuation_root / f"{len(continuation_directories) + 1:02d}"
     )
     continuation_directory.mkdir()
+    prior_output = (
+        f"../{observed.sealed[-1].directory.name}/output.json"
+        if observed.sealed
+        else "../../output.json"
+    )
     continuation_input = {
         "schema_version": 1,
         "additional_responses": additional_responses,
@@ -386,63 +394,66 @@ def validate_terminal_pair(state, output_path):
         raise ValueError("terminal output does not match coordinator checkpoint")
 
 
+def exhaustion_verifiers(reader, roots, locate):
+    """Build Coordinator-specific deep proofs around shared structural rules."""
+    facts = {}
+
+    def verify_failed_validation(record):
+        directory = locate(roots, record, "output.json").parent
+        facts["validation"] = validate_repairable_failure(directory, reader=reader)
+
+    def verify_iteration(record):
+        directory = locate(roots, record, "output.json").parent
+        facts["iteration"] = validate_sealed_result(
+            reader.json(directory / "input.json"),
+            reader.json(directory / "output.json"),
+            reader=reader,
+        )
+
+    return verify_failed_validation, verify_iteration, facts
+
+
 def require_exhausted(
-    run_directory,
     state,
     expected_max_responses,
+    reader,
+    roots,
+    locate,
     check_workspace=True,
-    related_work=None,
 ):
-    if state["status"] != "completed" or state["terminal"] != {"decision": "exhausted"}:
-        raise ValueError("only an exhausted Coordinator Run can be continued")
-    validation = validation_repair_source(state["history"])
-    if validation is not None:
-        completed_responses = sum(
-            record["component"] == "response" and record["outcome"] == "completed"
-            for record in state["history"]
-        )
-        if completed_responses != expected_max_responses:
-            raise ValueError(
-                "exhausted continuation requires matching Validation repair evidence"
-            )
-        validation_directory = run_directory / validation["directory"]
-        validation_input, _validation_output = validate_repairable_failure(
-            validation_directory
-        )
-        if check_workspace:
-            workspace = Path(validation_input["workspace"])
-            validate_repairable_failure(
-                validation_directory,
-                workspace,
-                repository_state(workspace),
-            )
-        return
-    iteration = latest(state, "iteration")
-    iteration_directory = run_directory / iteration["directory"]
-    roots = [run_directory]
-    related_path = related_work.get("path") if isinstance(related_work, dict) else None
-    if isinstance(related_path, str) and Path(related_path).is_absolute():
-        roots.append(Path(related_path).parent)
-    iteration_input, policy, lineage = validate_sealed_result(
-        read_json(iteration_directory / "input.json"),
-        read_json(iteration_directory / "output.json"),
-        reader=EvidenceReader(roots),
+    """Delegate retained exhaustion proof to the shared evidence authority."""
+    failed, iteration, facts = exhaustion_verifiers(reader, roots, locate)
+    require_exhausted_structure(
+        state,
+        expected_max_responses,
+        lambda record, name: reader.json(locate(roots, record, name)),
+        verify_failed_validation=failed,
+        verify_iteration=iteration,
     )
-    if (
-        policy["max_responses"] != expected_max_responses
-        or policy["decision"] != "exhausted"
-    ):
-        raise ValueError("exhausted continuation requires matching Iteration evidence")
-    if check_workspace:
-        assessment_output = read_json(
-            Path(iteration_input["assessment_directory"]) / "output.json"
+    if not check_workspace:
+        return
+    if "validation" in facts:
+        validation_input, _validation_output = facts["validation"]
+        validation = validation_repair_source(state["history"])
+        directory = locate(roots, validation, "output.json").parent
+        workspace = Path(validation_input["workspace"])
+        validate_repairable_failure(
+            directory,
+            workspace,
+            repository_state(workspace),
+            reader=reader,
         )
-        assessed_state = subject_state(assessment_output["repository"]["after"])
-        if (
-            subject_state(repository_state(Path(lineage.assignment["workspace"])))
-            != assessed_state
-        ):
-            raise ValueError("workspace must match the assessed repository state")
+        return
+    iteration_input, _policy, lineage = facts["iteration"]
+    assessment_output = reader.json(
+        Path(iteration_input["assessment_directory"]) / "output.json"
+    )
+    assessed_state = subject_state(assessment_output["repository"]["after"])
+    if (
+        subject_state(repository_state(Path(lineage.assignment["workspace"])))
+        != assessed_state
+    ):
+        raise ValueError("workspace must match the assessed repository state")
 
 
 def load_checkpoint(run_directory, request, assignment):

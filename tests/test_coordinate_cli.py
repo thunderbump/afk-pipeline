@@ -283,6 +283,17 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertEqual(self.git("status", "--porcelain"), "")
         self.assertTrue(assignment_path.is_file())
+        snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        self.assertIn(
+            "response", {item["component"] for item in snapshot.invocation_identities}
+        )
+        self.assertIsNotNone(snapshot.candidate_commit)
+        self.assertTrue(snapshot.evidence_identities)
 
     def test_exhausted_run_adds_responses_without_repeating_attempt(self):
         _assignment_path, request_path = self.prepare_run(max_responses=0)
@@ -518,6 +529,14 @@ class CoordinatorCliTest(unittest.TestCase):
         os.kill(coordinator.pid, signal.SIGKILL)
         coordinator.wait(timeout=5)
         self.wait_for_file(run / "07-response" / "output.json")
+        active_snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(active_snapshot.proof.status, "verified")
+        self.assertEqual(active_snapshot.selected_terminal.continuation_id, None)
+        self.assertEqual(active_snapshot.active_tail.continuation_id, "01")
 
         resumed = self.invoke(
             request_path,
@@ -712,6 +731,15 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "continuations" / "01" / "output.json").read_bytes(),
             first_output,
         )
+        snapshot = read_run(
+            run,
+            "01",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        self.assertEqual(snapshot.selected_terminal.continuation_id, "01")
+        self.assertEqual(snapshot.latest_sealed_terminal.continuation_id, "02")
+        self.assertIsNone(snapshot.active_tail)
 
         # Publication can select an immutable predecessor while still validating
         # the complete retained lineage.
@@ -1258,6 +1286,14 @@ class CoordinatorCliTest(unittest.TestCase):
         )
         self.assertEqual(output["history"][1]["outcome"], "failed")
         self.assertTrue((bundle / "workflow-run.json").is_file())
+        snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        self.assertEqual(snapshot.selected_terminal.continuation_id, "01")
+        self.assertIn("failed", snapshot.recorded_outcomes)
 
     def test_validation_launch_error_cannot_allocate_repair(self):
         _assignment_path, request_path = self.prepare_run(max_responses=1)

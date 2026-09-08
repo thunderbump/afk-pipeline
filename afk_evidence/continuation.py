@@ -64,6 +64,13 @@ def validate_link(prior_state, continuation_state, continuation_input, prior_out
         or continuation_state["history"][: len(prior_history)] != prior_history
         or len(continuation_state["history"]) < len(prior_history)
         or continuation_state["next_sequence"] < prior_state["next_sequence"]
+        # A sealed continuation is evidence of newly performed work, not a
+        # second terminal opinion over an unchanged predecessor checkpoint.
+        or continuation_state["status"] != "running"
+        and (
+            len(continuation_state["history"]) == len(prior_history)
+            or continuation_state["next_sequence"] == prior_state["next_sequence"]
+        )
     ):
         raise ValueError("continuation lineage does not match its predecessor")
 

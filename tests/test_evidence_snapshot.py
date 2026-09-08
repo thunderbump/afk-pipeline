@@ -10,6 +10,7 @@ from afk_evidence.access import (
     EvidenceReader,
     EvidenceUnavailable,
 )
+from afk_evidence.continuation import validate_link
 
 
 class RunSnapshotTest(unittest.TestCase):
@@ -85,6 +86,34 @@ class RunSnapshotTest(unittest.TestCase):
         reader.authorize_directory(missing.parent)
         with self.assertRaises(EvidenceUnavailable):
             reader.json(missing)
+
+    def test_reader_rejects_replacement_between_reads_in_one_snapshot(self):
+        reader = EvidenceReader((self.run,))
+        path = self.run / "state.json"
+        self.assertEqual(reader.json(path), self.state)
+        replacement = self.run / "replacement.json"
+        replacement.write_bytes(path.read_bytes())
+        replacement.replace(path)
+
+        with self.assertRaisesRegex(EvidenceAccessError, "between reads"):
+            reader.json(path)
+
+    def test_sealed_continuation_must_append_an_invocation(self):
+        continuation_input = {
+            "schema_version": 1,
+            "additional_responses": 1,
+            "completed_responses": 0,
+            "effective_max_responses": 1,
+            "prior_output": "../../output.json",
+        }
+        continued = {
+            **self.state,
+            "continuation": continuation_input,
+        }
+        with self.assertRaisesRegex(ValueError, "lineage"):
+            validate_link(
+                self.state, continued, continuation_input, "../../output.json"
+            )
 
     def test_reader_pins_root_before_an_ancestor_is_replaced_by_a_symlink(self):
         reader = EvidenceReader((self.run,))

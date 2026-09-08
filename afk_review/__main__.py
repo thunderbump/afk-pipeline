@@ -8,6 +8,7 @@ from pathlib import Path
 from afk_change.contract import validate_change_output, validate_git_transition
 from afk_inference import invoke
 from afk_related_work import SELECTION_GUIDANCE, validate_reference, validate_snapshot
+from afk_review.contract import validate_input as validate_input_contract
 from afk_review.task import build_task
 from afk_runtime import (
     git,
@@ -151,20 +152,10 @@ def main() -> int:
 
 
 def validate_input(value: object) -> None:
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
-        raise ValueError("review must use schema_version 1")
-    if "inference" in value:
-        raise ValueError("review input cannot override inference policy")
-    for field in ("workspace", "change_directory", "validation_directory"):
-        path = value.get(field)
-        if not isinstance(path, str) or not Path(path).is_absolute():
-            raise ValueError(f"review {field} must be an absolute path")
+    validate_input_contract(value)
     if "related_work" in value:
         validate_reference(value["related_work"])
         validate_snapshot(value["related_work"]["path"], value["related_work"])
-    timeout = value.get("timeout_seconds")
-    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
-        raise ValueError("review timeout_seconds must be a positive integer")
 
 
 def load_evidence(review_input: dict[str, object]) -> dict[str, object]:
