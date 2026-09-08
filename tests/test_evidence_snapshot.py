@@ -86,6 +86,17 @@ class RunSnapshotTest(unittest.TestCase):
         with self.assertRaises(EvidenceUnavailable):
             reader.json(missing)
 
+    def test_reader_pins_root_before_an_ancestor_is_replaced_by_a_symlink(self):
+        reader = EvidenceReader((self.run,))
+        retained = self.root / "retained-run"
+        self.run.rename(retained)
+        outside = self.root / "outside"
+        outside.mkdir()
+        (outside / "state.json").write_text('{"redirected":true}')
+        self.run.symlink_to(outside, target_is_directory=True)
+
+        self.assertEqual(reader.json(self.run / "state.json"), self.state)
+
     def test_failed_run_is_a_verified_observation_not_a_success(self):
         before = {
             path: path.read_bytes() for path in self.run.rglob("*") if path.is_file()

@@ -20,7 +20,11 @@ from afk_coordinate.contract import (
 )
 from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_review
-from afk_validate.evidence import evidence_identity, validate_repairable_failure
+from afk_validate.evidence import (
+    evidence_identity,
+    load_passed_evidence,
+    validate_repairable_failure,
+)
 
 from .access import (
     MAX_RELATED_WORK_BYTES,
@@ -261,7 +265,9 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
                 raise RunValidationError(
                     "component outcome disagrees with Coordinator history"
                 )
-        _verify_stage_provenance(reader, proof_state["history"], proof_roots, context)
+        _verify_stage_provenance(
+            reader, proof_state["history"], proof_roots, context, assignment
+        )
     except _Unavailable as unavailable:
         proof = ProofResult("unavailable", unavailable.reason, unavailable.identity)
     except (KeyError, TypeError, ValueError) as error:
@@ -444,7 +450,7 @@ def _invocation_path(bases, record, name):
     return Path(bases[0]) / record["directory"] / name
 
 
-def _verify_stage_provenance(reader, history, roots, context):
+def _verify_stage_provenance(reader, history, roots, context, assignment):
     """Deeply prove every completed cycle, not merely its final rows."""
     from .stages import verify_change_lineage
 
@@ -461,6 +467,14 @@ def _verify_stage_provenance(reader, history, roots, context):
                 reader=reader,
                 repository=context.repository,
                 verify_git=context.repository is not None,
+            )
+        elif row["component"] == "validation":
+            # A successful Validation is authoritative even while it is the
+            # active tail, before a Review exists to consume it.
+            load_passed_evidence(
+                directory,
+                reader=reader,
+                log_limit=MAX_VALIDATION_LOG_BYTES,
             )
         elif row["component"] == "review":
             change_row = next(
@@ -482,7 +496,7 @@ def _verify_stage_provenance(reader, history, roots, context):
             if change_row is None or validation_row is None:
                 raise RunValidationError("Review lacks Change or Validation provenance")
             reviews[row["sequence"]] = _verify_review(
-                reader, roots, row, change_row, validation_row
+                reader, roots, row, change_row, validation_row, assignment
             )
         elif row["component"] == "assessment":
             review_row = next(
@@ -510,7 +524,7 @@ def _related_ids(reader, reference):
     return {json.loads(line)["id"] for line in raw.splitlines()}
 
 
-def _verify_review(reader, roots, review_row, change_row, validation_row):
+def _verify_review(reader, roots, review_row, change_row, validation_row, assignment):
     review_dir = _invocation_path(roots, review_row, "output.json").parent
     change_dir = _invocation_path(roots, change_row, "output.json").parent
     validation_dir = _invocation_path(roots, validation_row, "output.json").parent
@@ -527,18 +541,15 @@ def _verify_review(reader, roots, review_row, change_row, validation_row):
         if Path(value).absolute() != expected.absolute():
             raise RunValidationError(f"Review {field} does not match history")
     change = validate_change_output(reader.json(change_dir / "output.json"))
-    validation_input = reader.json(validation_dir / "input.json")
-    validation_output = reader.json(validation_dir / "output.json")
-    _validate_passed_validation(validation_input, validation_output)
-    logs = []
-    for name in ("stdout.log", "stderr.log"):
-        raw = reader.bytes(validation_dir / name, MAX_VALIDATION_LOG_BYTES)
-        try:
-            logs.append(raw.decode("utf-8"))
-        except UnicodeDecodeError as error:
-            raise RunValidationError("Validation log is not UTF-8") from error
+    validation_input, validation_output, validation_stdout, validation_stderr = (
+        load_passed_evidence(
+            validation_dir,
+            reader=reader,
+            log_limit=MAX_VALIDATION_LOG_BYTES,
+        )
+    )
     if review_output.get("validation_evidence") != evidence_identity(
-        validation_input, validation_output, *logs
+        validation_input, validation_output, validation_stdout, validation_stderr
     ):
         raise RunValidationError("Review-bound Validation evidence identity disagrees")
     repository = review_output.get("repository")
@@ -563,6 +574,8 @@ def _verify_review(reader, roots, review_row, change_row, validation_row):
     ):
         raise RunValidationError("stage workspaces disagree")
     related = review_input.get("related_work")
+    if assignment.get("related_work") != related:
+        raise RunValidationError("stage related-work evidence must match Assignment")
     review = validate_review(
         review_output.get("review"),
         Path(workspace),
@@ -603,41 +616,6 @@ def _verify_assessment(reader, roots, row, review_row, review_facts):
 def _subject(value):
     state = validate_repository_state(value)
     return {field: state[field] for field in ("head", "dirty", "status")}
-
-
-def _validate_passed_validation(validation_input, validation_output):
-    if (
-        not isinstance(validation_input, dict)
-        or validation_input.get("schema_version") != 1
-        or not isinstance(validation_input.get("workspace"), str)
-        or not Path(validation_input["workspace"]).is_absolute()
-        or not isinstance(validation_input.get("command"), list)
-        or not validation_input["command"]
-        or not all(isinstance(item, str) for item in validation_input["command"])
-        or not isinstance(validation_input.get("timeout_seconds"), int)
-        or isinstance(validation_input.get("timeout_seconds"), bool)
-        or validation_input["timeout_seconds"] <= 0
-    ):
-        raise RunValidationError("invalid passed Validation input")
-    repository = (
-        validation_output.get("repository")
-        if isinstance(validation_output, dict)
-        else None
-    )
-    if (
-        validation_output.get("schema_version") != 1
-        or validation_output.get("outcome") != "passed"
-        or validation_output.get("process") != {"exit_code": 0, "signal": None}
-        or validation_output.get("artifacts")
-        != {"stdout": "stdout.log", "stderr": "stderr.log"}
-        or not isinstance(repository, dict)
-        or repository.get("head_changed") is not False
-    ):
-        raise RunValidationError("invalid passed Validation output")
-    before = _subject(repository.get("before"))
-    after = _subject(repository.get("after"))
-    if before != after:
-        raise RunValidationError("passed Validation changed repository content")
 
 
 def _candidate_commit(reader, terminal, context, current_proof, coordinator):

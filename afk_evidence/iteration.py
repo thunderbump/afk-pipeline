@@ -6,12 +6,14 @@ from pathlib import Path
 from afk_assess.contract import subject_state, validate_assessment
 from afk_evidence.access import (
     MAX_RELATED_WORK_BYTES,
+    MAX_VALIDATION_LOG_BYTES,
     EvidenceReader,
     EvidenceUnavailable,
 )
 from afk_evidence.stages import verify_change_lineage
 from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_review
+from afk_validate.evidence import evidence_identity, load_passed_evidence
 
 
 def evaluate_policy(policy_input, *, reader=None, repository=None, verify_git=True):
@@ -114,7 +116,9 @@ def verified_assessment(
         reader, review_directory / "output.json", "Review output"
     )
     change_directory = Path(review_input["change_directory"])
+    validation_directory = Path(review_input["validation_directory"])
     reader.authorize_directory(change_directory)
+    reader.authorize_directory(validation_directory)
     lineage = verify_change_lineage(
         change_directory,
         reader=reader,
@@ -156,6 +160,28 @@ def verified_assessment(
     review_related = review_input.get("related_work")
     if assessment_input.get("related_work") != review_related:
         raise ValueError("Finding Assessment must use the Review related-work snapshot")
+    if lineage.assignment.get("related_work") != review_related:
+        raise ValueError("stage related-work evidence must match the Assignment")
+    validation_input, validation_output, validation_stdout, validation_stderr = (
+        load_passed_evidence(
+            validation_directory,
+            reader=reader,
+            log_limit=MAX_VALIDATION_LOG_BYTES,
+        )
+    )
+    if review_output.get("validation_evidence") != evidence_identity(
+        validation_input,
+        validation_output,
+        validation_stdout,
+        validation_stderr,
+    ):
+        raise ValueError("Review-bound Validation evidence identity disagrees")
+    if (
+        Path(validation_input["workspace"]).resolve() != workspace.resolve()
+        or subject_state(validation_output["repository"]["before"]) != assessment_after
+        or subject_state(validation_output["repository"]["after"]) != assessment_after
+    ):
+        raise ValueError("Validation and reviewed Change subjects disagree")
     related_work_ids = _snapshot_ids(reader, review_related)
     review = validate_review(
         review_value, workspace, review_after["head"], related_work_ids
@@ -163,7 +189,7 @@ def verified_assessment(
     evidence_directories = {
         assessment_directory.resolve(),
         review_directory.resolve(),
-        Path(review_input["validation_directory"]).resolve(),
+        validation_directory.resolve(),
         *lineage.evidence_directories,
     }
     return (

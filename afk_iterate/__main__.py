@@ -41,16 +41,11 @@ def main():
     policy_input = validate_input(json.loads(input_path.read_text()))
     progress("iteration-policy input accepted")
     progress("loading and verifying Finding Assessment evidence")
-    # Both paths are direct CLI arguments (the latter through POLICY_JSON), so
-    # their narrow common container is caller-authorized; transitive records
-    # still cannot enlarge this reader's immutable authority.
-    evidence_root = Path(
-        os.path.commonpath(
-            (input_path.absolute().parent, Path(policy_input["assessment_directory"]))
-        )
-    )
+    # Keep authority to the two caller-supplied evidence neighborhoods.  A
+    # lexical common ancestor can be / and must never become an implicit root.
+    assessment_directory = Path(policy_input["assessment_directory"])
     configured_roots = os.environ.get("AFK_STAGE_EVIDENCE_ROOTS")
-    roots = (evidence_root,)
+    roots = (input_path.absolute().parent, assessment_directory.absolute())
     if configured_roots is not None:
         decoded_roots = json.loads(configured_roots)
         if not isinstance(decoded_roots, list) or not all(

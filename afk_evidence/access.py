@@ -24,8 +24,34 @@ class EvidenceReader:
     """Per-call reader that opens every component without following symlinks."""
 
     def __init__(self, roots):
-        self.roots = tuple(self._safe_root(Path(root)) for root in roots)
+        opened = []
+        seen = set()
+        try:
+            for root in roots:
+                absolute = Path(root).absolute()
+                if absolute in seen:
+                    continue
+                seen.add(absolute)
+                opened.append(self._open_root(absolute))
+        except Exception:
+            for _path, descriptor in opened:
+                os.close(descriptor)
+            raise
+        self.roots = tuple(path for path, _descriptor in opened)
+        self._root_descriptors = {path: descriptor for path, descriptor in opened}
         self.identities = {}
+
+    def close(self):
+        descriptors = getattr(self, "_root_descriptors", {})
+        self._root_descriptors = {}
+        for descriptor in descriptors.values():
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+    def __del__(self):
+        self.close()
 
     def authorize_directory(self, path):
         """Confirm that a referenced directory is within caller authority.
@@ -41,22 +67,29 @@ class EvidenceReader:
         self.relative(path)
 
     @staticmethod
-    def _safe_root(root):
+    def _open_root(root):
+        """Open and pin a trusted root without following any path component."""
         absolute = root.absolute()
-        current = Path(absolute.anchor)
-        for part in absolute.parts[1:]:
-            current /= part
-            try:
-                facts = current.lstat()
-            except OSError as error:
-                raise EvidenceAccessError(
-                    "trusted evidence root is unavailable"
-                ) from error
-            if stat.S_ISLNK(facts.st_mode):
-                raise EvidenceAccessError("trusted evidence root contains a symlink")
-        if not absolute.is_dir():
-            raise EvidenceAccessError("trusted evidence root is not a directory")
-        return absolute
+        descriptor = None
+        try:
+            descriptor = os.open(
+                absolute.anchor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+            )
+            for part in absolute.parts[1:]:
+                next_descriptor = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                    dir_fd=descriptor,
+                )
+                os.close(descriptor)
+                descriptor = next_descriptor
+        except OSError as error:
+            if descriptor is not None:
+                os.close(descriptor)
+            raise EvidenceAccessError(
+                "trusted evidence root is unavailable or unsafe"
+            ) from error
+        return absolute, descriptor
 
     def relative(self, path):
         absolute = Path(path).absolute()
@@ -73,7 +106,10 @@ class EvidenceReader:
         root, relative = self.relative(path)
         if not relative.parts:
             raise EvidenceAccessError("evidence reference is not a file")
-        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            descriptor = os.dup(self._root_descriptors[root])
+        except (KeyError, OSError) as error:
+            raise EvidenceAccessError("trusted evidence root is unavailable") from error
         opened = [descriptor]
         try:
             for part in relative.parts[:-1]:

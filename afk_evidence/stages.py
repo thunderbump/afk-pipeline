@@ -192,6 +192,8 @@ def _committed_response(source_directory, visited, lineage):
             raise ValueError(
                 "Finding Assessment must use the Review related-work snapshot"
             )
+        if assignment.get("related_work") != review_related:
+            raise ValueError("stage related-work evidence must match the Assignment")
         related_work_ids = _snapshot_ids(lineage, review_related)
         validation_input, validation_output, validation_stdout, validation_stderr = (
             load_passed_evidence(

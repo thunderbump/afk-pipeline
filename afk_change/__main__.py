@@ -36,7 +36,9 @@ def main() -> int:
     progress("committed-change input accepted")
     source_directory = Path(source["directory"])
     progress(f"loading and verifying {source['kind']} evidence")
-    roots = (input_path.absolute().parent,)
+    # Both the source JSON and SOURCE_JSON are explicit caller inputs.  Admit
+    # those narrow neighborhoods without relying on Coordinator-only settings.
+    roots = (input_path.absolute().parent, source_directory)
     configured_roots = os.environ.get("AFK_STAGE_EVIDENCE_ROOTS")
     if configured_roots is not None:
         decoded_roots = json.loads(configured_roots)

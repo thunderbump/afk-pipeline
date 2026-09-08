@@ -93,6 +93,15 @@ class IterationPolicyCliTest(unittest.TestCase):
         )
         self.assertFalse((result / "output.json.tmp").exists())
 
+    def test_validation_logs_are_revalidated_before_iteration(self):
+        (self.root / "02-validation" / "stdout.log").write_text("tampered\n")
+
+        result, completed = self.run_policy(max_responses=3)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("Validation evidence identity disagrees", completed.stderr)
+        self.assertFalse(result.exists())
+
     def test_unknown_scope_stays_in_evidence_without_triggering_repair(self):
         output_path = self.assessment / "output.json"
         output = json.loads(output_path.read_text())
