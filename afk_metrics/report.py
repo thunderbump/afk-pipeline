@@ -11,7 +11,9 @@ import json
 import math
 import os
 import re
+import sqlite3
 import stat
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +44,7 @@ TOKEN_FIELDS = (
 # metadata-rich but should never approach this limit; rejecting an oversized
 # record prevents a corrupt artifact from materializing an unbounded line.
 MAX_JSONL_RECORD_BYTES = 1024 * 1024
+MAX_REPORTED_IDENTITIES = 128
 
 # Identity labels are the only event strings emitted by this projection. Keep
 # them deliberately narrower than arbitrary Pi strings so an event cannot use a
@@ -125,9 +128,6 @@ def parse_pi_events(
     missing = 0
     retries = 0
     compactions = 0
-    seen_messages: set[str] = set()
-    seen_compactions: set[str] = set()
-    identities: set[tuple[str | None, str | None]] = set()
     digest = hashlib.sha256()
     if isinstance(path, int):
         descriptor = os.dup(path)
@@ -138,9 +138,41 @@ def parse_pi_events(
     else:
         descriptor = None
         before = None
+    # Exact event de-duplication can itself be attacker-controlled input. Keep
+    # its growing index in a temporary SQLite database rather than Python sets,
+    # so resident memory does not grow with a large retained stream.
     with (
-        os.fdopen(descriptor, "rb") if descriptor is not None else Path(path).open("rb")
-    ) as stream:
+        closing(sqlite3.connect("")) as dedupe,
+        (
+            os.fdopen(descriptor, "rb")
+            if descriptor is not None
+            else Path(path).open("rb")
+        ) as stream,
+    ):
+        dedupe.executescript(
+            """
+            PRAGMA temp_store=FILE;
+            PRAGMA cache_size=-1024;
+            CREATE TABLE seen (kind TEXT NOT NULL, identity BLOB NOT NULL,
+                               PRIMARY KEY (kind, identity)) WITHOUT ROWID;
+            CREATE TABLE retry_pending (attempt BLOB PRIMARY KEY, copies INTEGER NOT NULL)
+                WITHOUT ROWID;
+            CREATE TABLE identities (identity BLOB PRIMARY KEY, provider TEXT, model TEXT)
+                WITHOUT ROWID;
+            """
+        )
+
+        def stable_key(value: Any) -> bytes:
+            return hashlib.sha256(
+                json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            ).digest()
+
+        def first_seen(kind: str, value: Any) -> bool:
+            cursor = dedupe.execute(
+                "INSERT OR IGNORE INTO seen VALUES (?, ?)", (kind, stable_key(value))
+            )
+            return cursor.rowcount == 1
+
         line_number = 0
         while line := stream.readline(MAX_JSONL_RECORD_BYTES + 1):
             digest.update(line)
@@ -157,33 +189,56 @@ def parse_pi_events(
                 raise TypeError(f"invalid JSONL event shape at line {line_number}")
             kind = event["type"]
             if kind in {"auto_retry_start", "auto_retry_end"}:
-                # start is preferred; old streams may have only end. Stable keys
-                # prevent counting both copies of one provider retry.
-                attempt = event.get("attempt")
-                key = f"{attempt}" if attempt is not None else f"line:{line_number}"
-                # Keep retries separate from message identities with a prefix.
-                retry_key = "retry:" + key
-                if retry_key not in seen_messages:
-                    seen_messages.add(retry_key)
+                # Attempt numbers restart for each provider request. Pair each
+                # end with an open start, rather than globally de-duplicating on
+                # that number; an end without a start is old but valid evidence.
+                attempt_key = stable_key(event.get("attempt"))
+                pending = dedupe.execute(
+                    "SELECT copies FROM retry_pending WHERE attempt = ?",
+                    (attempt_key,),
+                ).fetchone()
+                if kind == "auto_retry_start":
                     retries += 1
+                    if pending is None:
+                        dedupe.execute(
+                            "INSERT INTO retry_pending VALUES (?, 1)", (attempt_key,)
+                        )
+                    else:
+                        dedupe.execute(
+                            "UPDATE retry_pending SET copies = copies + 1 WHERE attempt = ?",
+                            (attempt_key,),
+                        )
+                elif pending is None:
+                    retries += 1
+                elif pending[0] == 1:
+                    dedupe.execute(
+                        "DELETE FROM retry_pending WHERE attempt = ?", (attempt_key,)
+                    )
+                else:
+                    dedupe.execute(
+                        "UPDATE retry_pending SET copies = copies - 1 WHERE attempt = ?",
+                        (attempt_key,),
+                    )
             if kind == "message_end":
                 message, raw_usage = _message_usage(event)
                 if message is None:
                     continue
                 identity = message.get("id")
-                key = (
-                    f"message:{identity}"
-                    if isinstance(identity, str) and identity
-                    else f"event:{line_number}"
-                )
-                if key in seen_messages:
+                if (
+                    isinstance(identity, str)
+                    and identity
+                    and not first_seen("message", identity)
+                ):
                     continue
-                seen_messages.add(key)
                 finalized += 1
                 provider = _identity_label(message.get("provider"))
                 model = _identity_label(message.get("model"))
                 if provider is not None or model is not None:
-                    identities.add((provider, model))
+                    identity_key = stable_key([provider, model])
+                    dedupe.execute(
+                        "INSERT OR IGNORE INTO identities VALUES (?, ?, ?)",
+                        (identity_key, provider, model),
+                    )
                 measured = _usage(raw_usage)
                 amount = _reported_cost(raw_usage)
                 if amount is not None:
@@ -206,10 +261,8 @@ def parse_pi_events(
                 identity = event.get("id")
                 # No upstream id is guaranteed. Distinct un-identified events
                 # may be equal aggregates, so only an upstream id deduplicates.
-                key = str(identity) if identity is not None else f"event:{line_number}"
-                if key in seen_compactions:
+                if identity is not None and not first_seen("compaction", identity):
                     continue
-                seen_compactions.add(key)
                 compactions += 1
                 if measured:
                     _add(compact_usage, measured)
@@ -227,8 +280,14 @@ def parse_pi_events(
                 or before.st_ctime_ns != after.st_ctime_ns
             ):
                 raise ValueError("Pi event evidence changed while being parsed")
+        identity_rows = dedupe.execute(
+            "SELECT provider, model FROM identities ORDER BY provider, model LIMIT ?",
+            (MAX_REPORTED_IDENTITIES + 1,),
+        ).fetchall()
     if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
         raise ValueError("Pi event evidence hash disagrees with receipt")
+    identities_complete = len(identity_rows) <= MAX_REPORTED_IDENTITIES
+    identity_rows = identity_rows[:MAX_REPORTED_IDENTITIES]
     partial = missing > 0 or retries > 0
     coverage = (
         "partial"
@@ -263,11 +322,13 @@ def parse_pi_events(
         },
         "compaction_cost": compact_cost if compaction_has_cost else None,
         "cost_measurements": cost_measurements,
+        "identity_coverage": (
+            "unavailable"
+            if not identity_rows
+            else ("complete" if identities_complete else "partial")
+        ),
         "identities": [
-            {"provider": provider, "model": model}
-            for provider, model in sorted(
-                identities, key=lambda item: (item[0] or "", item[1] or "")
-            )
+            {"provider": provider, "model": model} for provider, model in identity_rows
         ],
     }
 
@@ -645,6 +706,100 @@ def _verify_unsupported_receipt(
             raise ValueError("unsupported adapter attempt contract disagrees")
 
 
+def _validator_seconds(attempts: list[Any]) -> float | None:
+    """Sum available response-validator measurements, preserving measured zero."""
+    values = []
+    for attempt in attempts:
+        validation = attempt.get("validation") if isinstance(attempt, dict) else None
+        if isinstance(validation, dict) and "validator_duration_seconds" in validation:
+            value = _number(validation["validator_duration_seconds"])
+            if value is None:
+                raise ValueError("receipt validator timing is invalid")
+            values.append(float(value))
+    return sum(values) if values else None
+
+
+def _validate_pi_metric_receipt(receipt: dict[str, Any]) -> None:
+    """Validate runtime fields newly treated as trusted report evidence."""
+    timing = receipt.get("timing")
+    attempts = receipt.get("attempts")
+    outcome = receipt.get("outcome")
+    count = receipt.get("attempt_count")
+    validation = receipt.get("validation")
+    if (
+        not isinstance(timing, dict)
+        or (duration := _number(timing.get("duration_seconds"))) is None
+        or _number(timing.get("timeout_seconds")) is None
+        or (wall := _seconds(timing.get("started_at"), timing.get("ended_at"))) is None
+        or not math.isclose(float(duration), wall, rel_tol=0.01, abs_tol=0.1)
+        or not isinstance(count, int)
+        or isinstance(count, bool)
+        or not isinstance(attempts, list)
+        or count != len(attempts)
+        or outcome
+        not in (
+            "succeeded",
+            "response_rejected",
+            "adapter_failed",
+            "validator_failed",
+            "timed_out",
+            "interrupted",
+        )
+        or not isinstance(validation, dict)
+        or validation.get("status")
+        not in (
+            "not_run",
+            "accepted",
+            "response_rejected",
+            "validator_failed",
+            "timed_out",
+            "interrupted",
+        )
+    ):
+        raise ValueError("Pi receipt outcome or timing contract is invalid")
+    validation_statuses = (
+        "accepted",
+        "response_rejected",
+        "validator_failed",
+        "timed_out",
+        "interrupted",
+    )
+    for index, attempt in enumerate(attempts, 1):
+        attempt_validation = (
+            attempt.get("validation") if isinstance(attempt, dict) else None
+        )
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("attempt_number") != index
+            or _number(attempt.get("duration_seconds")) is None
+            or not isinstance(attempt.get("protocol"), dict)
+            or not isinstance(attempt["protocol"].get("status"), str)
+            or (
+                attempt_validation is not None
+                and (
+                    not isinstance(attempt_validation, dict)
+                    or attempt_validation.get("status") not in validation_statuses
+                    or attempt_validation.get("attempt_number") != index
+                )
+            )
+        ):
+            raise ValueError("Pi receipt attempt contract is invalid")
+    _validator_seconds(attempts)
+    expected_protocol = (
+        attempts[-1]["protocol"] if attempts else {"status": "not_started"}
+    )
+    expected_validation = {
+        "succeeded": "accepted",
+        "response_rejected": "response_rejected",
+        "validator_failed": "validator_failed",
+    }.get(outcome)
+    if receipt.get("protocol") != expected_protocol or (
+        expected_validation is not None
+        and validation.get("status") != expected_validation
+    ):
+        raise ValueError("Pi receipt terminal contract is invalid")
+
+
 def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     receipt = _safe_evidence_json(root, relative, "receipt.json")
     identity = (
@@ -678,15 +833,7 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     attempts = (
         receipt.get("attempts") if isinstance(receipt.get("attempts"), list) else []
     )
-    validator = sum(
-        float(value)
-        for attempt in attempts
-        if isinstance(attempt, dict)
-        and isinstance(attempt.get("validation"), dict)
-        and (value := _number(attempt["validation"].get("validator_duration_seconds")))
-        is not None
-    )
-    base["response_validator_seconds"] = validator if validator else None
+    base["response_validator_seconds"] = _validator_seconds(attempts)
     if family != "pi":
         # Fixture receipts have a repository-known contract and can be fully
         # authenticated. Other retained adapter families are deliberately an
@@ -698,9 +845,9 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             _verify_generic_receipt(root / relative, receipt)
         else:
             _verify_unsupported_receipt(root, relative, receipt, invocation, purpose)
-        # Adapter-specific validation payloads are not part of the authenticated
-        # common contract and therefore cannot contribute report metrics.
-        base["response_validator_seconds"] = None
+            # Adapter-specific validator payloads are not authenticated by the
+            # common unsupported-adapter boundary.
+            base["response_validator_seconds"] = None
         return {
             **base,
             "metrics": {
@@ -721,6 +868,7 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     # opened without following links and parsed from the same descriptor whose
     # bytes are checked against the exact validated receipt.
     def consume_events(directory_descriptor: int, authenticated: dict[str, Any]):
+        _validate_pi_metric_receipt(authenticated)
         values = []
         authenticated_attempts = authenticated.get("attempts", [])
         for attempt in authenticated_attempts:
@@ -772,15 +920,7 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             },
         }
     )
-    validator = sum(
-        float(value)
-        for attempt in attempts
-        if isinstance(attempt, dict)
-        and isinstance(attempt.get("validation"), dict)
-        and (value := _number(attempt["validation"].get("validator_duration_seconds")))
-        is not None
-    )
-    base["response_validator_seconds"] = validator if validator else None
+    base["response_validator_seconds"] = _validator_seconds(attempts)
     if (
         any(item["coverage"] == "partial" for item in parsed)
         or len(parsed) < len(attempts)
@@ -841,12 +981,23 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             "price_table_date": None,
         },
     }
+    identity_coverages = [
+        item.get("identity_coverage", "unavailable") for item in parsed
+    ]
+    identities_complete = bool(identity_coverages) and all(
+        value == "complete" for value in identity_coverages
+    )
+    merged["identity_coverage"] = (
+        "partial"
+        if any(value == "partial" for value in identity_coverages)
+        else ("complete" if identities_complete else "unavailable")
+    )
     observed_identities = {
         (identity["provider"], identity["model"])
         for item in parsed
         for identity in item["identities"]
     }
-    if len(observed_identities) == 1:
+    if identities_complete and len(observed_identities) == 1:
         provider, event_model = next(iter(observed_identities))
         base["provider"] = provider
         if base["model"] is None:
@@ -1172,7 +1323,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
     usage_coverages = [
         metrics.get("coverage", "unavailable") for metrics in receipt_metrics
     ]
-    if not total_usage and not total_compaction_usage:
+    if any(value == "partial" for value in usage_coverages):
+        usage_coverage = "partial"
+    elif not total_usage and not total_compaction_usage:
         usage_coverage = "unavailable"
     elif usage_coverages and all(value == "complete" for value in usage_coverages):
         usage_coverage = "complete"

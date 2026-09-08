@@ -11,9 +11,12 @@ from afk_inference import Capability, FixtureAdapter, InferenceRuntime, Scripted
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
     MAX_JSONL_RECORD_BYTES,
+    MAX_REPORTED_IDENTITIES,
     _invocation,
     _seconds,
+    _validate_pi_metric_receipt,
     _validated_publication,
+    _validator_seconds,
     _verify_generic_receipt,
     build_report,
     parse_pi_events,
@@ -93,6 +96,41 @@ class MetricsEventTests(unittest.TestCase):
         self.assertEqual(result["compaction"]["usage"]["input"], 20)
         self.assertIsNone(result["cost"]["amount"])
         self.assertFalse(result["request_count_exact"])
+
+    def test_retry_attempt_numbers_are_scoped_to_each_retry_episode(self):
+        events = [
+            {"type": "auto_retry_start", "attempt": 1},
+            {"type": "auto_retry_end", "attempt": 1, "success": True},
+            {"type": "auto_retry_start", "attempt": 1},
+            {"type": "auto_retry_end", "attempt": 1, "success": True},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            result = parse_pi_events(path)
+        self.assertEqual(result["retry_count"], 2)
+
+    def test_reported_identities_are_bounded_for_large_unique_streams(self):
+        events = [
+            {
+                "type": "message_end",
+                "message": {
+                    "id": f"message-{index}",
+                    "role": "assistant",
+                    "provider": "provider",
+                    "model": f"model-{index}",
+                    "usage": {"input": 1},
+                },
+            }
+            for index in range(MAX_REPORTED_IDENTITIES + 20)
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            result = parse_pi_events(path)
+        self.assertEqual(len(result["identities"]), MAX_REPORTED_IDENTITIES)
+        self.assertEqual(result["identity_coverage"], "partial")
+        self.assertEqual(result["usage"]["input"], len(events))
 
     def test_retry_makes_cost_coverage_partial_even_with_a_measured_final(self):
         events = [
@@ -193,6 +231,37 @@ class MetricsEventTests(unittest.TestCase):
 
 
 class MetricsIntegrityTests(unittest.TestCase):
+    def test_pi_metric_receipt_rejects_malformed_trusted_fields(self):
+        receipt = {
+            "timing": {
+                "started_at": "2026-01-01T00:00:00Z",
+                "ended_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1,
+                "timeout_seconds": 2,
+            },
+            "attempt_count": 0,
+            "attempts": [],
+            "protocol": {"status": "not_started"},
+            "validation": {"status": "not_run"},
+            "outcome": "adapter_failed",
+        }
+        _validate_pi_metric_receipt(receipt)
+        receipt["outcome"] = {"untrusted": "content"}
+        with self.assertRaisesRegex(ValueError, "outcome or timing"):
+            _validate_pi_metric_receipt(receipt)
+
+    def test_zero_validator_duration_is_available(self):
+        attempts = [
+            {
+                "validation": {
+                    "status": "accepted",
+                    "attempt_number": 1,
+                    "validator_duration_seconds": 0,
+                }
+            }
+        ]
+        self.assertEqual(_validator_seconds(attempts), 0)
+
     def test_unsupported_adapter_is_preserved_with_unavailable_metrics(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -425,6 +494,18 @@ class MetricsReportTests(unittest.TestCase):
                 ) as invoke,
             ):
                 report = summarize_source(root)
+
+            def missing_usage(_root, relative, purpose):
+                value = invocation(_root, relative, purpose)
+                value["metrics"]["coverage"] = "partial"
+                value["metrics"]["usage"] = {}
+                return value
+
+            with (
+                mock.patch("afk_metrics.report.load_source", return_value=observed),
+                mock.patch("afk_metrics.report._invocation", side_effect=missing_usage),
+            ):
+                missing_report = summarize_source(root)
         self.assertEqual(invoke.call_count, 1)
         self.assertEqual(len(report["inference"]["invocations"]), 2)
         self.assertEqual(
@@ -434,6 +515,9 @@ class MetricsReportTests(unittest.TestCase):
         self.assertIsNone(report["inference"]["totals"]["elapsed_seconds"])
         self.assertEqual(report["inference"]["totals"]["usage"], {"input": 1})
         self.assertEqual(report["inference"]["totals"]["usage_coverage"], "partial")
+        self.assertEqual(
+            missing_report["inference"]["totals"]["usage_coverage"], "partial"
+        )
         self.assertEqual(report["timing"]["unattributed_seconds"], 8)
 
     def test_validation_component_symlink_is_invalid_evidence(self):
