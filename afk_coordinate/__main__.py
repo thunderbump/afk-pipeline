@@ -19,7 +19,7 @@ from afk_evidence.continuation import continuation_directories
 from afk_evidence.continuation import (
     validate_link as shared_validate_continuation_link,
 )
-from afk_iterate.__main__ import validate_sealed_result
+from afk_evidence.iteration import validate_sealed_result
 from afk_related_work import validate_snapshot
 from afk_runtime import progress, repository_state, seal_json, write_json
 from afk_validate.evidence import validate_repairable_failure
