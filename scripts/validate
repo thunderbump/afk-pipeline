@@ -3,6 +3,9 @@
 status=0
 
 pre-commit run --all-files || status=$?
+# Validation can itself run as an AFK stage.  Its evidence authority must not
+# leak into subprocess-based tests, whose fixtures use isolated temporary roots.
+unset AFK_STAGE_EVIDENCE_ROOTS
 python3 -m unittest -v || status=$?
 
 exit "$status"
