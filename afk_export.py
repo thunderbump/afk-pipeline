@@ -1252,6 +1252,11 @@ def artifact_candidates(observed):
     root = observed["run_root"]
     result = []
     seen = set()
+    # Publication reuses this exact authenticated observation while calculating
+    # metrics.  Retain the abandoned-inference state seen by this checkpoint so
+    # the report cannot discover a directory created after artifact admission.
+    abandoned_inference_states = {}
+    observed["_metrics_abandoned_inference_states"] = abandoned_inference_states
 
     def add(
         relative,
@@ -1424,9 +1429,37 @@ def artifact_candidates(observed):
                 "response": "feedback_response",
             }.get(entry["component"], entry["component"])
             inference_path = root / inference_relative
-            if evidence_path.is_file() or (
-                entry["outcome"] != "abandoned"
-                and (inference_path.exists() or inference_path.is_symlink())
+            receipt_is_file = evidence_path.is_file()
+            inference_exists = inference_path.exists() or inference_path.is_symlink()
+            if entry["outcome"] == "abandoned":
+                evidence_state = (
+                    "sealed"
+                    if receipt_is_file
+                    else ("unsealed" if inference_exists else "absent")
+                )
+                abandoned_inference_states[inference_relative] = evidence_state
+                if not receipt_is_file:
+                    # No receipt means there are no admissible inference bytes,
+                    # but the presence/absence state is itself consumed by the
+                    # report. Represent it in the normalized checkpoint without
+                    # publishing the private directory.
+                    marker = json.dumps(
+                        {"state": evidence_state},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    add(
+                        inference_relative,
+                        f"component:{entry['sequence']}:{entry['component']}",
+                        "inference_evidence_checkpoint",
+                        "application/json",
+                        0,
+                        validated_raw=marker,
+                        expected_sha256=digest(marker),
+                        private_source=True,
+                    )
+            if receipt_is_file or (
+                entry["outcome"] != "abandoned" and inference_exists
             ):
                 for item in receipt_bound_inference_artifacts(
                     root,

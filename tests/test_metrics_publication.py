@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -311,6 +312,32 @@ class MetricsPublicationTests(unittest.TestCase):
                 self.assertRaisesRegex(PublicationError, "changed"),
             ):
                 build_publication(request)
+
+            # An abandoned invocation with no receipt is represented by its
+            # checkpointed availability state. A directory created only while
+            # metrics are calculated must not become a new interrupted stage.
+            shutil.rmtree(inference)
+
+            def summarize_with_transient_directory(*args, **kwargs):
+                inference.mkdir(parents=True)
+                try:
+                    return actual_summarize(*args, **kwargs)
+                finally:
+                    shutil.rmtree(inference)
+
+            with mock.patch(
+                "afk_metrics.publication.summarize_source",
+                side_effect=summarize_with_transient_directory,
+            ):
+                publication = build_publication(request)
+            self.assertFalse(
+                any(
+                    invocation["purpose"] == "feedback_response"
+                    for invocation in publication["runs"][0]["summary"]["inference"][
+                        "invocations"
+                    ]
+                )
+            )
 
     def test_publication_input_read_is_bounded_and_requires_a_regular_file(self):
         with tempfile.TemporaryDirectory() as temporary:

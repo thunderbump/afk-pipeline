@@ -1303,7 +1303,20 @@ def summarize_source(
         )
         inference_path = receipt_path.parent
         relative = relative_evidence(inference_path)
-        if inference_path.exists() or inference_path.is_symlink():
+        checkpoint_states = observed.get("_metrics_abandoned_inference_states")
+        if (
+            entry.get("outcome") == "abandoned"
+            and isinstance(checkpoint_states, dict)
+            and relative in checkpoint_states
+        ):
+            # Bound publication installs this map while admitting artifacts.
+            # Do not discover an abandoned inference directory that appeared
+            # after that checkpoint; retain an admitted unsealed directory as
+            # an unavailable invocation even if it subsequently disappears.
+            inference_exists = checkpoint_states[relative] != "absent"
+        else:
+            inference_exists = inference_path.exists() or inference_path.is_symlink()
+        if inference_exists:
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
