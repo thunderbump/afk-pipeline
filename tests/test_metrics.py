@@ -286,6 +286,7 @@ class MetricsIntegrityTests(unittest.TestCase):
 
     def test_pi_metric_receipt_rejects_malformed_trusted_fields(self):
         receipt = {
+            "policy": {"max_attempts": 1},
             "timing": {
                 "started_at": "2026-01-01T00:00:00Z",
                 "ended_at": "2026-01-01T00:00:01Z",
@@ -306,6 +307,7 @@ class MetricsIntegrityTests(unittest.TestCase):
 
     def test_pi_metric_receipt_binds_timeout_to_invocation(self):
         receipt = {
+            "policy": {"max_attempts": 1},
             "timing": {
                 "started_at": "2026-01-01T00:00:00Z",
                 "ended_at": "2026-01-01T00:00:01Z",
@@ -326,6 +328,7 @@ class MetricsIntegrityTests(unittest.TestCase):
 
     def test_pi_validator_time_cannot_exceed_invocation_elapsed(self):
         receipt = {
+            "policy": {"max_attempts": 1},
             "timing": {
                 "started_at": "2026-01-01T00:00:00Z",
                 "ended_at": "2026-01-01T00:00:01Z",
@@ -434,7 +437,7 @@ class MetricsIntegrityTests(unittest.TestCase):
             ):
                 read_bytes(path, 100)
 
-    def test_pi_runtime_attempt_retries_are_added_to_stream_retries(self):
+    def test_pi_rejects_impossible_multiple_runtime_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             evidence = root / "inference"
@@ -472,6 +475,7 @@ class MetricsIntegrityTests(unittest.TestCase):
                     }
                 )
             receipt = {
+                "policy": {"max_attempts": 1},
                 "identity": {"adapter_family": "pi", "adapter": "pi-v1"},
                 "hashes": {"invocation_sha256": "a" * 64},
                 "timing": {
@@ -508,11 +512,9 @@ class MetricsIntegrityTests(unittest.TestCase):
                     "afk_metrics.report.receipt_bound_inference_artifacts",
                     side_effect=consume_bound,
                 ),
+                self.assertRaisesRegex(ValueError, "Pi receipt"),
             ):
-                result = _invocation(root, "inference", "feedback_response")
-        # One runtime retry plus one Pi-internal auto retry.
-        self.assertEqual(result["metrics"]["retry_count"], 2)
-        self.assertEqual(result["metrics"]["coverage"], "partial")
+                _invocation(root, "inference", "feedback_response")
 
     def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -570,6 +572,12 @@ class MetricsIntegrityTests(unittest.TestCase):
 
 
 class MetricsReportTests(unittest.TestCase):
+    def test_ambiguous_timezone_intervals_are_unavailable_without_crashing(self):
+        naive = ("2026-01-01T00:00:00", "2026-01-01T00:00:01")
+        aware = ("2026-01-01T00:00:00Z", "2026-01-01T00:00:02Z")
+        self.assertIsNone(_seconds(*naive))
+        self.assertEqual(_union_seconds([naive, aware]), 2)
+
     def test_reversed_timestamps_are_invalid_not_zero_duration(self):
         self.assertIsNone(_seconds("2026-01-01T00:00:02Z", "2026-01-01T00:00:01Z"))
 

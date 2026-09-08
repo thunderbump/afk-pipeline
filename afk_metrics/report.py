@@ -349,10 +349,11 @@ def _seconds(start: Any, end: Any) -> float | None:
     if not isinstance(start, str) or not isinstance(end, str):
         return None
     try:
-        seconds = (
-            datetime.fromisoformat(end.replace("Z", "+00:00"))
-            - datetime.fromisoformat(start.replace("Z", "+00:00"))
-        ).total_seconds()
+        begin = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        finish = datetime.fromisoformat(end.replace("Z", "+00:00"))
+        if begin.utcoffset() is None or finish.utcoffset() is None:
+            return None
+        seconds = (finish - begin).total_seconds()
         return seconds if seconds >= 0 else None
     except (TypeError, ValueError):
         return None
@@ -821,6 +822,10 @@ def _validate_pi_metric_receipt(
         or isinstance(count, bool)
         or not isinstance(attempts, list)
         or count != len(attempts)
+        or count not in (0, 1)
+        or not isinstance(receipt.get("policy"), dict)
+        or isinstance(receipt["policy"].get("max_attempts"), bool)
+        or receipt["policy"].get("max_attempts") != 1
         or outcome
         not in (
             "succeeded",
@@ -1037,11 +1042,8 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         "finalized_requests": sum(item["finalized_requests"] for item in parsed),
         "request_count_exact": merged_coverage == "complete"
         and all(item["request_count_exact"] for item in parsed),
-        # Runtime attempts represent distinct adapter invocations. Pi's
-        # auto_retry events represent retries *within* those attempts, so both
-        # sources are additive rather than alternatives.
-        "retry_count": max(receipt["attempt_count"] - 1, 0)
-        + sum(item["retry_count"] for item in parsed),
+        # Pi has one runtime attempt; provider retries live in its event stream.
+        "retry_count": sum(item["retry_count"] for item in parsed),
         "coverage": merged_coverage,
         "usage": _sum_usage(parsed),
         "compaction": {
