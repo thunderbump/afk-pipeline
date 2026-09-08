@@ -353,6 +353,34 @@ def _seconds(start: Any, end: Any) -> float | None:
         return None
 
 
+def _union_seconds(intervals: list[tuple[Any, Any]]) -> float:
+    """Return the duration of the union of valid timestamp intervals."""
+    parsed = []
+    for start, end in intervals:
+        if _seconds(start, end) is None:
+            continue
+        parsed.append(
+            (
+                datetime.fromisoformat(start.replace("Z", "+00:00")),
+                datetime.fromisoformat(end.replace("Z", "+00:00")),
+            )
+        )
+    parsed.sort()
+    total = 0.0
+    left = right = None
+    for begin, finish in parsed:
+        if left is None:
+            left, right = begin, finish
+        elif begin > right:
+            total += (right - left).total_seconds()
+            left, right = begin, finish
+        elif finish > right:
+            right = finish
+    if left is not None:
+        total += (right - left).total_seconds()
+    return total
+
+
 def _nonoverlapping_seconds(
     start: Any, end: Any, occupied: list[tuple[Any, Any]]
 ) -> float | None:
@@ -1004,7 +1032,11 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         "finalized_requests": sum(item["finalized_requests"] for item in parsed),
         "request_count_exact": merged_coverage == "complete"
         and all(item["request_count_exact"] for item in parsed),
-        "retry_count": sum(item["retry_count"] for item in parsed),
+        # Runtime attempts represent distinct adapter invocations. Pi's
+        # auto_retry events represent retries *within* those attempts, so both
+        # sources are additive rather than alternatives.
+        "retry_count": max(receipt["attempt_count"] - 1, 0)
+        + sum(item["retry_count"] for item in parsed),
         "coverage": merged_coverage,
         "usage": _sum_usage(parsed),
         "compaction": {
@@ -1255,6 +1287,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
     ) as error:
         return _invalid_source(source, error, identity, assignment)
     validation_durations = []
+    validation_intervals: list[tuple[str, str]] = []
     validation_duration_missing = 0
     validation_results = []
     try:
@@ -1281,6 +1314,12 @@ def summarize_source(source: Path) -> dict[str, Any]:
                     validation_durations.append(duration)
                 else:
                     validation_duration_missing += 1
+                validation_start = output.get("started_at")
+                validation_end = output.get("finished_at")
+                if validation_start is not None or validation_end is not None:
+                    if _seconds(validation_start, validation_end) is None:
+                        raise ValueError("invalid Validation timestamp interval")
+                    validation_intervals.append((validation_start, validation_end))
                 validation_results.append(output["outcome"])
     except (
         OSError,
@@ -1297,9 +1336,6 @@ def summarize_source(source: Path) -> dict[str, Any]:
         sum(elapsed_values)
         if elapsed_values and all(value is not None for value in elapsed_values)
         else None
-    )
-    known_invocation_seconds = sum(
-        value for value in elapsed_values if value is not None
     )
     prep = observed.get("preparation")
     timestamps = prep.get("timestamps", {}) if isinstance(prep, dict) else {}
@@ -1330,6 +1366,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 for item in invocations
                 if isinstance(item.get("elapsed"), dict)
             )
+            occupied.extend(validation_intervals)
             publication_nonoverlap_seconds = _nonoverlapping_seconds(
                 publication["started_at"], publication["finished_at"], occupied
             )
@@ -1354,18 +1391,30 @@ def summarize_source(source: Path) -> dict[str, Any]:
         for item in invocations
         if isinstance(item.get("elapsed"), dict)
     )
+    run_end_candidates.extend(end for _start, end in validation_intervals)
     candidate_spans = [
         value
         for end in run_end_candidates
         if (value := _seconds(run_started_at, end)) is not None
     ]
     run_span = max(candidate_spans) if candidate_spans else None
-    known_nonoverlap = (
-        (prep_seconds or 0)
-        + known_invocation_seconds
-        + sum(validation_durations)
-        + (publication_nonoverlap_seconds or 0)
+    # Attribute wall time from the union of authenticated intervals. Summing
+    # component durations would double-count concurrent retries, continuations,
+    # Validation, preparation, or publication.
+    measured_intervals: list[tuple[Any, Any]] = [
+        (run_started_at, timestamps.get("prepared_at"))
+    ]
+    measured_intervals.extend(
+        (item["elapsed"].get("started_at"), item["elapsed"].get("ended_at"))
+        for item in invocations
+        if isinstance(item.get("elapsed"), dict)
     )
+    measured_intervals.extend(validation_intervals)
+    if publication_value is not None:
+        measured_intervals.append(
+            (publication_value.get("started_at"), publication_value.get("finished_at"))
+        )
+    known_active_wall_seconds = _union_seconds(measured_intervals)
     active_intervals = []
     if prep_seconds is not None:
         active_intervals.append({"kind": "preparation", "seconds": prep_seconds})
@@ -1507,11 +1556,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
             },
             "continuation_wait_gaps": "unavailable",
             "unattributed_seconds": (
-                max(0, run_span - known_nonoverlap)
-                if run_span is not None and known_nonoverlap <= run_span
+                max(0, run_span - known_active_wall_seconds)
+                if run_span is not None and known_active_wall_seconds <= run_span
                 else None
             ),
-            "overlap_note": "unattributed excludes known non-overlapping preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
+            "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
         },
     }
 
