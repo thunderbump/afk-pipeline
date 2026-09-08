@@ -12,6 +12,13 @@ SNAPSHOT_NAME = "related-work.jsonl"
 MAX_RECORDS = 64
 MAX_BYTES = 256 * 1024
 MAX_ANCESTORS = 3
+SELECTION_GUIDANCE = (
+    "Related-work context is bounded and may omit records. The subject's selection "
+    "metadata reports omitted records from the local neighborhood when present; "
+    "it is not ownership evidence. Absence from the snapshot does not prove that "
+    "other work does not exist. Only included record IDs may support related "
+    "ownership; use unknown when ownership cannot be established."
+)
 PLANNING_TEXT_FIELDS = (
     "title",
     "status",
@@ -168,48 +175,91 @@ def build_snapshot(
                     or RELATIONSHIP_ORDER[relationship] < RELATIONSHIP_ORDER[current]
                 ):
                     relationships[identifier] = relationship
-        if len(relationships) > max_records:
-            raise RelatedWorkError("related-work snapshot exceeds record limit")
 
     parent = parent_id(subject)
     if parent:
         add([parent], "parent")
-        parent_record = load(parent)
-        add(child_ids(parent_record) - {subject["id"]}, "sibling")
-    add(blocker_ids(subject), "blocker")
-    add(dependent_ids(subject), "dependent")
+        add(child_ids(load(parent)) - {subject["id"]}, "sibling")
+    blockers = blocker_ids(subject)
+    dependents = dependent_ids(subject)
+    add(blockers, "blocker")
+    add(dependents, "dependent")
+    required = {subject["id"], *blockers, *dependents}
+    if parent:
+        required.add(parent)
+    if len(required) > max_records:
+        raise RelatedWorkError(
+            "required related-work context exceeds record limit; reduce direct relationships"
+        )
 
     ancestor = parent_id(load(parent)) if parent else None
-    depth = 0
-    while ancestor and depth < MAX_ANCESTORS:
+    ancestors = {}
+    while ancestor and len(ancestors) < MAX_ANCESTORS and ancestor not in ancestors:
+        ancestors[ancestor] = len(ancestors)
         add([ancestor], "ancestor")
         ancestor = parent_id(load(ancestor))
-        depth += 1
 
-    ordered = sorted(
-        relationships.items(), key=lambda item: (RELATIONSHIP_ORDER[item[1]], item[0])
-    )
-    filtered = [
-        safe_record(load(identifier), relationship)
-        for identifier, relationship in ordered
-    ]
-    raw = b"".join(
+    filtered = {
+        identifier: safe_record(load(identifier), relationship)
+        for identifier, relationship in relationships.items()
+    }
+
+    def encode(selected):
+        rows = [filtered[identifier] for identifier in selected]
+        omitted = len(filtered) - len(rows)
+        if omitted:
+            rows = [
+                {**row, "selection": {"version": 1, "omitted_records": omitted}}
+                if row["id"] == subject["id"]
+                else row
+                for row in rows
+            ]
+        rows.sort(key=lambda row: (RELATIONSHIP_ORDER[row["relationship"]], row["id"]))
+        return canonical_bytes(rows)
+
+    # Retain the legacy bytes when the entire neighborhood fits.
+    all_raw = encode(filtered)
+    if len(filtered) <= max_records and len(all_raw) <= max_bytes:
+        selected, raw = set(filtered), all_raw
+    else:
+        selected = set(required)
+        raw = encode(selected)
+        if len(raw) > max_bytes:
+            raise RelatedWorkError(
+                "required related-work context exceeds byte limit; shorten required planning records"
+            )
+
+        def priority(identifier):
+            record = records[identifier]
+            if relationships[identifier] == "sibling":
+                return (2 if record.get("status") == "closed" else 0, 0, identifier)
+            return (1, ancestors.get(identifier, MAX_ANCESTORS), identifier)
+
+        for identifier in sorted(set(filtered) - required, key=priority):
+            if len(selected) >= max_records:
+                break
+            trial = encode(selected | {identifier})
+            if len(trial) <= max_bytes:
+                selected.add(identifier)
+                raw = trial
+    return raw, {
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "media_type": MEDIA_TYPE,
+        "record_count": len(selected),
+        "bytes": len(raw),
+    }
+
+
+def canonical_bytes(records):
+    return b"".join(
         (
             json.dumps(
                 record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
             )
             + "\n"
         ).encode()
-        for record in filtered
+        for record in records
     )
-    if len(raw) > max_bytes:
-        raise RelatedWorkError("related-work snapshot exceeds byte limit")
-    return raw, {
-        "sha256": hashlib.sha256(raw).hexdigest(),
-        "media_type": MEDIA_TYPE,
-        "record_count": len(filtered),
-        "bytes": len(raw),
-    }
 
 
 def reference(path, facts):
@@ -266,12 +316,24 @@ def validate_snapshot(path, value):
         record = json.loads(line)
         if (
             not isinstance(record, dict)
-            or set(record) - {"id", "relationship", *SAFE_FIELDS}
+            or set(record) - {"id", "relationship", "selection", *SAFE_FIELDS}
             or not isinstance(record.get("id"), str)
             or not record["id"]
             or record.get("relationship") not in RELATIONSHIP_ORDER
         ):
             raise RelatedWorkError("related-work snapshot contains unsafe fields")
+        if "selection" in record:
+            selection = record["selection"]
+            if (
+                record["relationship"] != "subject"
+                or not isinstance(selection, dict)
+                or set(selection) != {"version", "omitted_records"}
+                or type(selection["version"]) is not int
+                or selection["version"] != 1
+                or type(selection["omitted_records"]) is not int
+                or not 1 <= selection["omitted_records"] <= 2**63 - 1
+            ):
+                raise RelatedWorkError("related-work selection metadata is malformed")
         for field in PLANNING_TEXT_FIELDS:
             if field in record and not isinstance(record[field], str):
                 raise RelatedWorkError("related-work snapshot contains unsafe fields")
@@ -288,15 +350,7 @@ def validate_snapshot(path, value):
         records,
         key=lambda record: (RELATIONSHIP_ORDER[record["relationship"]], record["id"]),
     )
-    canonical = b"".join(
-        (
-            json.dumps(
-                record, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-            )
-            + "\n"
-        ).encode()
-        for record in records
-    )
+    canonical = canonical_bytes(records)
     if (
         not records
         or records[0]["relationship"] != "subject"

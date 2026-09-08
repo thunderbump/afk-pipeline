@@ -32,8 +32,8 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             [
                 "0bc2c611c5ad00a462bb682eed013fc79ffb5dc40e261384bb73a461aab0fee3",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
-                "c0d24375befff6cdee15d447daf34236addf4f73e4065e01d6a1df6f4962f989",
-                "126e63cf0f9c82d7e6e8c49c074e1062bfc8b25e7470a3aa06c165e56039626b",
+                "6930d4456f742302722b12aa2c766bbac691c24c66e48f0b407670ee30407fbe",
+                "595490c492f5c13c0d85fa9875f067d9ff0467e6a24b8cc45e78db0acd6baa9b",
                 "1bb5670cf37f6bf319e199db9a63e549efc8a566e16d9146bf386a8cc8c18c94",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],
@@ -130,7 +130,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         for task, capability in expected:
             with self.subTest(purpose=task.purpose):
                 expected_version = (
-                    2 if task.purpose in {"review", "finding_assessment"} else 1
+                    3 if task.purpose in {"review", "finding_assessment"} else 1
                 )
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)

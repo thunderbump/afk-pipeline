@@ -450,21 +450,36 @@ Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
 `coordinator-request.json`, versioned `preparation.json`, a deterministic
 `related-work.jsonl`, and a reserved `coordinator/` directory. The bounded
-related-work snapshot contains only safe planning fields for the subject, its
-parent and siblings, direct blockers and dependents, and short ancestor
-breadcrumbs. Its count, byte size, SHA-256 digest, and media type are bound into
-Preparation, Assignment, and Coordinator evidence; exceeding either limit
-refuses preparation rather than publishing partial context. Implementer receives
-the snapshot path and may query it with `jq` or `rg` only for scope or ownership
-orientation. Review and Finding Assessment revalidate that same frozen reference,
-parse its bounded records, and include them as untrusted inference data so scope
-claims and related IDs can be checked against the exact snapshot. The Assignment
-remains authoritative and related prose is data rather than instructions.
-Continuations revalidate and reuse the frozen reference.
-Runs also contain `planner-input.json`,
-`policy-input.json`, and complete `planner/` and `policy/` results. Run Preparer
-fails closed before Coordinator when that admission evidence is incomplete or
-malformed.
+related-work snapshot contains only safe planning fields and retains the subject, parent and direct blockers/dependents
+before optional context. Within the existing 64-record and 256 KiB limits,
+optional selection prefers non-closed siblings (including unknown status), then
+up to three nearest ancestors, then closed siblings. IDs break sibling ties;
+whole records that exceed remaining bytes are skipped so smaller records can
+still fit. Required context alone exceeding either limit fails with an explicit
+reason. Record identities are deduplicated before selection; canonical output
+ordering remains unchanged.
+
+When the complete local neighborhood fits, its bytes retain the original
+format. Otherwise the subject record contains `selection` metadata with
+`version: 1` and `omitted_records`, the count of discovered neighborhood records
+not selected. Ancestors beyond the existing three-level traversal are outside
+that neighborhood. This bounded metadata is covered by the existing snapshot
+digest, counts toward its byte budget, and creates no additional record ID.
+Legacy snapshots without metadata remain valid; continuations reuse their
+original snapshot bytes. Metadata is not ownership evidence, and absence from
+a bounded snapshot never proves that other work does not exist. Only included
+record IDs may support related ownership. Review and Assessment task contract
+version 3 and new Assignment guidance state that limitation; their semantic
+result schemas are unchanged. Publication retains the exact validated JSONL.
+The count, byte size, digest and media type remain bound into Preparation,
+Assignment and Coordinator evidence. Implementer can query the frozen path;
+Review and Assessment validate and include the bounded records as untrusted
+data. The Assignment remains authoritative.
+
+Runs also contain `planner-input.json`, `policy-input.json`, and complete
+`planner/` and `policy/` results. Run Preparer fails closed before Coordinator
+when that admission evidence is incomplete or malformed.
+
 
 For a validated sealed Coordinator output, `preparation.json` records `stop` or
 `exhausted` in `coordinator.decision`; failed or malformed output leaves that
@@ -774,7 +789,7 @@ Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
 the single read-only inference invocation receipt, and an atomically sealed
 `output.json`. The output also records SHA-256 content identities for the
 Validation input, output, stdout, and stderr evidence supplied to Review, so a
-later role can reject replaced evidence. Review task contract version 2 composes five fixed,
+later role can reject replaced evidence. Review task contract version 3 composes five fixed,
 language-neutral instruction packets in this order: common, Behavior, Design,
 Standards, and output contract. The packet constants, declared tuple, pure
 composition function, and exact composed instructions are directly inspectable

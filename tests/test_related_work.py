@@ -11,7 +11,9 @@ from afk_export import ExportError, derive_public_artifact
 from afk_related_work import (
     RelatedWorkError,
     build_snapshot,
+    canonical_bytes,
     reference,
+    snapshot_ids,
     validate_snapshot,
 )
 from afk_review.__main__ import related_work_guidance as review_guidance
@@ -128,6 +130,100 @@ class RelatedWorkSnapshotTest(unittest.TestCase):
         self.assertNotIn("notes", record)
         self.assertEqual(facts["sha256"], hashlib.sha256(raw).hexdigest())
 
+    def test_large_epic_reserves_required_context_and_reports_omissions(self):
+        records = {
+            "task": {"id": "task", "parent": "epic", "blockers": ["closed-00"]},
+            "epic": {"id": "epic", "children": ["task"]},
+        }
+        for index in range(67):
+            key = f"closed-{index:02d}" if index < 59 else f"active-{index:02d}"
+            records[key] = {"id": key, "status": "closed" if index < 59 else "open"}
+            records["epic"]["children"].append(key)
+        raw, facts = build_snapshot(records["task"], records.__getitem__)
+        rows = list(map(json.loads, raw.splitlines()))
+        ids = {row["id"] for row in rows}
+        self.assertEqual(facts["record_count"], 64)
+        self.assertTrue({"task", "epic", "closed-00"} <= ids)
+        self.assertTrue({f"active-{i:02d}" for i in range(59, 67)} <= ids)
+        self.assertEqual(rows[0]["selection"], {"version": 1, "omitted_records": 5})
+        records["epic"]["children"].reverse()
+        self.assertEqual(build_snapshot(records["task"], records.__getitem__)[0], raw)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.jsonl"
+            path.write_bytes(raw)
+            self.assertEqual(validate_snapshot(path, reference(path, facts)), raw)
+
+    def test_optional_bytes_skip_whole_records_and_keep_smaller_records(self):
+        records = {
+            "task": {"id": "task", "parent": "epic"},
+            "epic": {"id": "epic", "children": ["large", "small"]},
+            "large": {"id": "large", "description": "x" * 1000},
+            "small": {"id": "small", "description": "retained exactly"},
+        }
+        raw, _ = build_snapshot(records["task"], records.__getitem__, max_bytes=400)
+        rows = list(map(json.loads, raw.splitlines()))
+        self.assertEqual({row["id"] for row in rows}, {"task", "epic", "small"})
+        self.assertEqual(rows[0]["selection"]["omitted_records"], 1)
+        self.assertEqual(rows[-1]["description"], "retained exactly")
+
+    def test_required_dependencies_deduplicate_before_optional_selection(self):
+        records = self.records
+        records["task"]["blockers"] = ["sibling", "block", "sibling"]
+        raw, _ = build_snapshot(records["task"], records.__getitem__, max_records=5)
+        rows = list(map(json.loads, raw.splitlines()))
+        self.assertEqual(
+            {row["id"] for row in rows}, {"task", "epic", "sibling", "block", "follow"}
+        )
+        self.assertEqual(rows[0]["selection"]["omitted_records"], 1)
+
+    def test_active_siblings_then_nearest_ancestors_then_closed_history(self):
+        records = self.records
+        records["sibling"]["status"] = "closed"
+        raw, _ = build_snapshot(records["task"], records.__getitem__, max_records=5)
+        self.assertEqual(
+            {row["id"] for row in map(json.loads, raw.splitlines())},
+            {"task", "epic", "block", "follow", "root"},
+        )
+        records["sibling"]["status"] = "in_progress"
+        raw, _ = build_snapshot(records["task"], records.__getitem__, max_records=5)
+        self.assertIn(
+            "sibling", {row["id"] for row in map(json.loads, raw.splitlines())}
+        )
+        self.assertNotIn(
+            "root", {row["id"] for row in map(json.loads, raw.splitlines())}
+        )
+
+    def test_omission_metadata_is_digest_bound_and_not_a_record_identity(self):
+        raw, facts = build_snapshot(
+            self.records["task"], self.records.__getitem__, max_records=4
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "snapshot.jsonl"
+            path.write_bytes(raw)
+            ref = reference(path, facts)
+            self.assertEqual(snapshot_ids(ref), {"task", "epic", "block", "follow"})
+            rows = list(map(json.loads, raw.splitlines()))
+            rows[0]["selection"]["omitted_records"] += 1
+            path.write_bytes(canonical_bytes(rows))
+            with self.assertRaisesRegex(RelatedWorkError, "digest"):
+                validate_snapshot(path, ref)
+            for selection in (
+                {"version": 2, "omitted_records": 1},
+                {"version": 1, "omitted_records": True},
+                {"version": 1, "omitted_records": 0},
+                {"version": 1, "omitted_records": 1, "ids": ["fake"]},
+            ):
+                rows[0]["selection"] = selection
+                changed = canonical_bytes(rows)
+                path.write_bytes(changed)
+                changed_ref = {
+                    **ref,
+                    "bytes": len(changed),
+                    "sha256": hashlib.sha256(changed).hexdigest(),
+                }
+                with self.assertRaisesRegex(RelatedWorkError, "selection metadata"):
+                    validate_snapshot(path, changed_ref)
+
     def test_limits_fail_closed(self):
         with self.assertRaisesRegex(RelatedWorkError, "record limit"):
             build_snapshot(
@@ -177,11 +273,19 @@ class RelatedWorkSnapshotTest(unittest.TestCase):
             self.assertEqual(assessment["related_work"], related)
             for guidance in (review_guidance(review), assessment_guidance(assessment)):
                 self.assertIn("authoritative", guidance)
+                self.assertIn("may omit records", guidance)
                 self.assertIn("jq or rg", guidance)
                 self.assertNotIn("Sibling-owned migration", guidance)
 
     def test_publication_uses_the_exact_validated_jsonl(self):
-        raw, facts = build_snapshot(self.records["task"], self.records.__getitem__)
+        for limit in (4, 64):
+            with self.subTest(max_records=limit):
+                self.check_publication(limit)
+
+    def check_publication(self, limit):
+        raw, facts = build_snapshot(
+            self.records["task"], self.records.__getitem__, max_records=limit
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             path = root / "related-work.jsonl"
