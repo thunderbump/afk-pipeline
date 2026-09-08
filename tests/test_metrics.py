@@ -245,10 +245,28 @@ class MetricsIntegrityTests(unittest.TestCase):
             "validation": {"status": "not_run"},
             "outcome": "adapter_failed",
         }
-        _validate_pi_metric_receipt(receipt)
+        invocation = {"timeout_seconds": 2}
+        _validate_pi_metric_receipt(receipt, invocation)
         receipt["outcome"] = {"untrusted": "content"}
         with self.assertRaisesRegex(ValueError, "outcome or timing"):
-            _validate_pi_metric_receipt(receipt)
+            _validate_pi_metric_receipt(receipt, invocation)
+
+    def test_pi_metric_receipt_binds_timeout_to_invocation(self):
+        receipt = {
+            "timing": {
+                "started_at": "2026-01-01T00:00:00Z",
+                "ended_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1,
+                "timeout_seconds": 2,
+            },
+            "attempt_count": 0,
+            "attempts": [],
+            "protocol": {"status": "not_started"},
+            "validation": {"status": "not_run"},
+            "outcome": "adapter_failed",
+        }
+        with self.assertRaisesRegex(ValueError, "outcome or timing"):
+            _validate_pi_metric_receipt(receipt, {"timeout_seconds": 3})
 
     def test_zero_validator_duration_is_available(self):
         attempts = [
@@ -477,7 +495,7 @@ class MetricsReportTests(unittest.TestCase):
                     "source_event_identity": relative,
                     "purpose": purpose,
                     "elapsed": {"seconds": seconds},
-                    "response_validator_seconds": None,
+                    "response_validator_seconds": 0,
                     "metrics": {
                         "retry_count": 0,
                         "coverage": "complete",
@@ -513,6 +531,7 @@ class MetricsReportTests(unittest.TestCase):
             "unsealed_abandoned_invocation",
         )
         self.assertIsNone(report["inference"]["totals"]["elapsed_seconds"])
+        self.assertEqual(report["timing"]["response_validator_seconds"], 0)
         self.assertEqual(report["inference"]["totals"]["usage"], {"input": 1})
         self.assertEqual(report["inference"]["totals"]["usage_coverage"], "partial")
         self.assertEqual(

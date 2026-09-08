@@ -719,7 +719,9 @@ def _validator_seconds(attempts: list[Any]) -> float | None:
     return sum(values) if values else None
 
 
-def _validate_pi_metric_receipt(receipt: dict[str, Any]) -> None:
+def _validate_pi_metric_receipt(
+    receipt: dict[str, Any], invocation: dict[str, Any]
+) -> None:
     """Validate runtime fields newly treated as trusted report evidence."""
     timing = receipt.get("timing")
     attempts = receipt.get("attempts")
@@ -728,8 +730,10 @@ def _validate_pi_metric_receipt(receipt: dict[str, Any]) -> None:
     validation = receipt.get("validation")
     if (
         not isinstance(timing, dict)
+        or not isinstance(invocation, dict)
         or (duration := _number(timing.get("duration_seconds"))) is None
-        or _number(timing.get("timeout_seconds")) is None
+        or (timeout := _number(timing.get("timeout_seconds"))) is None
+        or timeout != _number(invocation.get("timeout_seconds"))
         or (wall := _seconds(timing.get("started_at"), timing.get("ended_at"))) is None
         or not math.isclose(float(duration), wall, rel_tol=0.01, abs_tol=0.1)
         or not isinstance(count, int)
@@ -867,8 +871,12 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     # Keep Export's authenticated directory open through parsing. Each stream is
     # opened without following links and parsed from the same descriptor whose
     # bytes are checked against the exact validated receipt.
-    def consume_events(directory_descriptor: int, authenticated: dict[str, Any]):
-        _validate_pi_metric_receipt(authenticated)
+    def consume_events(
+        directory_descriptor: int,
+        authenticated: dict[str, Any],
+        authenticated_invocation: dict[str, Any],
+    ):
+        _validate_pi_metric_receipt(authenticated, authenticated_invocation)
         values = []
         authenticated_attempts = authenticated.get("attempts", [])
         for attempt in authenticated_attempts:
@@ -897,7 +905,10 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         return authenticated, values
 
     _catalog, consumed = receipt_bound_inference_artifacts(
-        root, relative, purpose, None, consume_events
+        root,
+        relative,
+        purpose,
+        authenticated_context_consumer=consume_events,
     )
     receipt, parsed = consumed
     attempts = receipt.get("attempts", [])
@@ -1318,6 +1329,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
         )
         else "reported_estimate"
     )
+    validator_durations = [
+        duration
+        for item in invocations
+        if (duration := item["response_validator_seconds"]) is not None
+    ]
     total_usage = _sum_usage(receipt_metrics)
     total_compaction_usage = _sum_usage(receipt_metrics, "compaction")
     usage_coverages = [
@@ -1384,10 +1400,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "repository_validation_seconds": sum(validation_durations)
             if validation_durations
             else None,
-            "response_validator_seconds": sum(
-                item["response_validator_seconds"] or 0 for item in invocations
-            )
-            or None,
+            "response_validator_seconds": sum(validator_durations)
+            if validator_durations
+            else None,
             "deterministic_steps": {
                 "Validation": sum(validation_durations)
                 if validation_durations

@@ -1635,13 +1635,15 @@ def receipt_bound_inference_artifacts(
     purpose,
     expected_setting=None,
     authenticated_consumer=None,
+    authenticated_context_consumer=None,
 ):
     """Authenticate runtime evidence and optionally consume it through the held directory.
 
-    The consumer receives the no-follow directory descriptor and the exact
-    validated receipt before that descriptor is closed.  Consumers must still
-    verify each opened file against its receipt digest, since directory entries
-    can be replaced concurrently.
+    The legacy consumer receives the no-follow directory descriptor and exact
+    validated receipt.  The context consumer additionally receives the exact
+    validated invocation.  Consumers must still verify each additionally opened
+    file against its receipt digest, since directory entries can be replaced
+    concurrently.
     """
     try:
         directory_descriptor = open_directory_beneath(root, relative)
@@ -1651,9 +1653,14 @@ def receipt_bound_inference_artifacts(
         catalog = _receipt_bound_inference_artifacts(
             root, relative, purpose, expected_setting, directory_descriptor
         )
-        if authenticated_consumer is None:
+        if (
+            authenticated_consumer is not None
+            and authenticated_context_consumer is not None
+        ):
+            raise TypeError("provide only one authenticated consumer")
+        if authenticated_consumer is None and authenticated_context_consumer is None:
             return catalog
-        # _receipt_bound_inference_artifacts admitted this exact byte sequence.
+        # _receipt_bound_inference_artifacts admitted these exact byte sequences.
         receipt = json.loads(
             decode_text(
                 next(
@@ -1663,6 +1670,19 @@ def receipt_bound_inference_artifacts(
                 )
             )
         )
+        invocation = json.loads(
+            decode_text(
+                next(
+                    item["validated_raw"]
+                    for item in catalog
+                    if item["kind"] == "inference_invocation"
+                )
+            )
+        )
+        if authenticated_context_consumer is not None:
+            return catalog, authenticated_context_consumer(
+                directory_descriptor, receipt, invocation
+            )
         return catalog, authenticated_consumer(directory_descriptor, receipt)
     finally:
         os.close(directory_descriptor)
