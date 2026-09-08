@@ -247,6 +247,60 @@ class RunSnapshotTest(unittest.TestCase):
         self.assertEqual(snapshot.proof.status, "unavailable")
         self.assertIn("limit", snapshot.proof.reason)
 
+    def test_oversized_preparation_is_not_treated_as_a_standalone_run(self):
+        (self.run / "preparation.json").write_bytes(b" " * (1024 * 1024 + 1))
+
+        snapshot = read_run(self.run, "latest", {"evidence_roots": [self.run]})
+
+        self.assertEqual(snapshot.proof.status, "unavailable")
+        self.assertIn("limit", snapshot.proof.reason)
+        self.assertIsNone(snapshot.selected_terminal)
+
+    def test_unavailable_early_output_does_not_hide_later_corruption(self):
+        history = [
+            {
+                "sequence": 1,
+                "component": "attempt",
+                "directory": "01-attempt",
+                "input_from": {"assignment": "assignment.json"},
+                "outcome": "succeeded",
+            },
+            {
+                "sequence": 2,
+                "component": "validation",
+                "directory": "02-validation",
+                "input_from": {
+                    "workspace": "assignment.json",
+                    "change": "01-attempt",
+                },
+                "outcome": "failed",
+            },
+        ]
+        terminal = {
+            "failed_component": "validation",
+            "component_outcome": "failed",
+            "exit_code": 1,
+        }
+        state = {
+            **self.state,
+            "next_sequence": 3,
+            "history": history,
+            "terminal": terminal,
+        }
+        output = {
+            **self.output,
+            **terminal,
+            "history": history,
+        }
+        self.write("state.json", state)
+        self.write("output.json", output)
+        (self.run / "01-attempt/output.json").unlink()
+        (self.run / "02-validation").mkdir()
+        self.write("02-validation/output.json", {"malformed": True})
+
+        with self.assertRaisesRegex(RunValidationError, "invalid validation output"):
+            read_run(self.run, "latest", {"evidence_roots": [self.run]})
+
     def test_related_work_uses_the_full_canonical_membership_contract(self):
         raw = b'{"id":"task","relationship":"subject","secret":"x"}\n'
         related = self.run / "related-work.jsonl"

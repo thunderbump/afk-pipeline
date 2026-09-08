@@ -8,6 +8,7 @@ from pathlib import Path
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
+from afk_evidence.access import EvidenceUnavailable
 from afk_inference import invoke
 from afk_related_work import snapshot_ids
 from afk_respond.contract import actionable_findings, validate_input
@@ -365,6 +366,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (
         OSError,
+        EvidenceUnavailable,
         TypeError,
         ValueError,
         json.JSONDecodeError,

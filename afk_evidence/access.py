@@ -17,6 +17,9 @@ class EvidenceAccessError(ValueError):
 
 class EvidenceUnavailable(Exception):
     def __init__(self, reason, identity):
+        # Keep path identities available to trusted proof composition without
+        # leaking them through public CLI exception rendering.
+        super().__init__(reason)
         self.reason, self.identity = reason, identity
 
 

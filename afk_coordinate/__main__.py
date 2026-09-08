@@ -15,7 +15,7 @@ from afk_coordinate.contract import (
     validate_request,
     validation_repair_source,
 )
-from afk_evidence.access import EvidenceReader
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_evidence.continuation import (
     continuation_directories,
     observe_lineage,
@@ -704,6 +704,13 @@ def read_json(path):
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (OSError, TypeError, ValueError, KeyError, json.JSONDecodeError) as error:
+    except (
+        OSError,
+        EvidenceUnavailable,
+        TypeError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+    ) as error:
         print(f"afk-coordinate: {error}", file=sys.stderr)
         raise SystemExit(2)

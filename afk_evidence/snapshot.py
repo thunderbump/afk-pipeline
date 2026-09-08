@@ -138,7 +138,14 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
         preparation_path = root / "preparation.json"
         try:
             preparation = reader.json(preparation_path)
-        except _Unavailable:
+        except _Unavailable as unavailable:
+            # A missing preparation record selects the supported standalone
+            # layout.  An existing record that cannot be proof-read (for
+            # example because it is oversized) is still prepared-Run evidence
+            # and must make the proof unavailable rather than silently
+            # changing the layout being validated.
+            if unavailable.reason != "missing evidence":
+                raise
             preparation = None
         if preparation is not None:
             if (
@@ -231,20 +238,40 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
         # covers the newest retained history, including an active tail.
         proof_roots = [coordinator, *directories]
         proof_state = active.state if active is not None else latest.state
+        unavailable_proof = None
         for record in proof_state["history"]:
             if record["outcome"] == "abandoned":
                 continue
-            component_output = reader.json(
-                _invocation_path(proof_roots, record, "output.json")
-            )
-            outcome = validate_component_output(record["component"], component_output)
-            if outcome != record["outcome"]:
-                raise RunValidationError(
-                    "component outcome disagrees with Coordinator history"
+            try:
+                component_output = reader.json(
+                    _invocation_path(proof_roots, record, "output.json")
                 )
-        _verify_stage_provenance(
-            reader, proof_state["history"], proof_roots, context, assignment
-        )
+                outcome = validate_component_output(
+                    record["component"], component_output
+                )
+                if outcome != record["outcome"]:
+                    raise RunValidationError(
+                        "component outcome disagrees with Coordinator history"
+                    )
+            except _Unavailable as unavailable:
+                # Unavailable proof has lower precedence than corruption. Keep
+                # checking every retained invocation so an earlier missing or
+                # oversized artifact cannot conceal malformed later evidence.
+                if unavailable_proof is None:
+                    unavailable_proof = unavailable
+        try:
+            _verify_stage_provenance(
+                reader, proof_state["history"], proof_roots, context, assignment
+            )
+        except _Unavailable as unavailable:
+            if unavailable_proof is None:
+                unavailable_proof = unavailable
+        if unavailable_proof is not None:
+            proof = ProofResult(
+                "unavailable",
+                unavailable_proof.reason,
+                unavailable_proof.identity,
+            )
     except _Unavailable as unavailable:
         proof = ProofResult("unavailable", unavailable.reason, unavailable.identity)
     except (KeyError, TypeError, ValueError) as error:
