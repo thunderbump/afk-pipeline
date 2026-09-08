@@ -5,7 +5,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
+from afk_evidence.stages import verify_change_lineage, verify_source
 from afk_review.contract import REVIEW_AUDIT
+from afk_validate.evidence import evidence_identity
 
 ROOT = Path(__file__).parents[1]
 
@@ -176,6 +179,16 @@ class ChangeCliTest(unittest.TestCase):
                 self.assertEqual(completed.returncode, 2)
                 self.assertFalse(result.exists())
 
+    def test_rejects_changed_validation_logs_in_feedback_lineage(self):
+        response = self.make_feedback_response()
+        (self.root / "02-validation" / "stdout.log").write_text("changed\n")
+
+        result, completed = self.run_change("feedback_response", response)
+
+        self.assertEqual(completed.returncode, 2)
+        self.assertIn("identity disagrees", completed.stderr)
+        self.assertFalse(result.exists())
+
     def test_rejects_a_mismatched_feedback_response_evidence_chain(self):
         response = self.make_feedback_response()
         assessment_input = json.loads((self.assessment / "input.json").read_text())
@@ -199,6 +212,25 @@ class ChangeCliTest(unittest.TestCase):
         self.assertEqual(completed.returncode, 2)
         self.assertIn("requires a succeeded Attempt", completed.stderr)
         self.assertFalse(result.exists())
+
+    def test_missing_transitive_attempt_proof_remains_unavailable(self):
+        (self.attempt / "input.json").unlink()
+        reader = EvidenceReader((self.root,))
+
+        with self.assertRaises(EvidenceUnavailable) as caught:
+            verify_change_lineage(self.prior_change, reader=reader, verify_git=False)
+
+        self.assertEqual(caught.exception.reason, "missing evidence")
+        self.assertEqual(caught.exception.identity, str(self.attempt / "input.json"))
+
+    def test_canonical_heads_are_required_without_local_git_queries(self):
+        attempt_output = json.loads((self.attempt / "output.json").read_text())
+        attempt_output["repository"]["before"]["head"] = "HEAD~1"
+        attempt_output["repository"]["after"]["head"] = "HEAD"
+        self.write_json(self.attempt / "output.json", attempt_output)
+
+        with self.assertRaisesRegex(ValueError, "canonical commit object IDs"):
+            verify_source("attempt", self.attempt, verify_git=False)
 
     def test_rejects_symbolic_heads_instead_of_context_dependent_names(self):
         attempt_output = json.loads((self.attempt / "output.json").read_text())
@@ -248,6 +280,35 @@ class ChangeCliTest(unittest.TestCase):
         self.assertFalse((result / "input.json").exists())
 
     def make_feedback_response(self):
+        validation = self.root / "02-validation"
+        validation.mkdir()
+        validation_input = {
+            "schema_version": 1,
+            "workspace": str(self.workspace),
+            "command": ["true"],
+            "timeout_seconds": 60,
+        }
+        validation_output = {
+            "schema_version": 1,
+            "outcome": "passed",
+            "started_at": "2025-01-01T00:00:00Z",
+            "finished_at": "2025-01-01T00:00:01Z",
+            "duration_seconds": 1,
+            "process": {"exit_code": 0, "signal": None},
+            "repository": {
+                "before": self.implementation,
+                "after": self.implementation,
+                "head_changed": False,
+            },
+            "artifacts": {"stdout": "stdout.log", "stderr": "stderr.log"},
+        }
+        self.write_json(validation / "input.json", validation_input)
+        self.write_json(validation / "output.json", validation_output)
+        (validation / "stdout.log").write_text("")
+        (validation / "stderr.log").write_text("")
+        validation_identity = evidence_identity(
+            validation_input, validation_output, "", ""
+        )
         review = self.root / "04-review"
         review.mkdir()
         self.write_json(
@@ -285,6 +346,7 @@ class ChangeCliTest(unittest.TestCase):
                     "after": self.implementation,
                     "unchanged": True,
                 },
+                "validation_evidence": validation_identity,
             },
         )
         self.assessment = self.root / "05-assessment"

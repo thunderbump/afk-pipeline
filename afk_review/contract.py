@@ -14,6 +14,32 @@ REVIEW_AUDIT = {
 }
 
 
+def validate_input(value: object) -> dict[str, object]:
+    """Validate the complete persisted Review input contract without I/O."""
+    required = {
+        "schema_version",
+        "workspace",
+        "change_directory",
+        "validation_directory",
+        "timeout_seconds",
+    }
+    allowed = required | {"related_work"}
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("review must use schema_version 1")
+    if "inference" in value:
+        raise ValueError("review input cannot override inference policy")
+    for field in ("workspace", "change_directory", "validation_directory"):
+        path = value.get(field)
+        if not isinstance(path, str) or not Path(path).is_absolute():
+            raise ValueError(f"review {field} must be an absolute path")
+    if not set(value) <= allowed:
+        raise ValueError("review input fields are malformed")
+    timeout = value.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+        raise ValueError("review timeout_seconds must be a positive integer")
+    return value
+
+
 def validate_audit(value: object) -> dict[str, object]:
     """Validate the Review's declaration of the completed, ordered audit scopes."""
     if not isinstance(value, dict):

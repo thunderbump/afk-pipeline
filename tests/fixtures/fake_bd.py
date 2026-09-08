@@ -1,6 +1,7 @@
 """Small stateful Beads command fixture used only through the publisher CLI."""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -8,6 +9,12 @@ from pathlib import Path
 
 def value(arguments, flag):
     return arguments[arguments.index(flag) + 1]
+
+
+def write_state(path, state):
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(state))
+    temporary.replace(path)
 
 
 state_path = Path(sys.argv[1])
@@ -25,11 +32,11 @@ elif command == "list":
 elif command == "create":
     state["create_attempts"] = state.get("create_attempts", 0) + 1
     if state.get("sleep_create_attempt") == state["create_attempts"]:
-        state_path.write_text(json.dumps(state))
+        write_state(state_path, state)
         time.sleep(30)
     if state.get("fail_create_attempt") == state["create_attempts"]:
         state["fail_create_attempt"] = None
-        state_path.write_text(json.dumps(state))
+        write_state(state_path, state)
         print("injected create failure", file=sys.stderr)
         raise SystemExit(1)
     issue_id = f"central-child-{len(state['children']) + 1}"
@@ -52,28 +59,28 @@ elif command == "create":
         ],
     }
     state["children"].append(issue)
-    state_path.write_text(json.dumps(state))
+    write_state(state_path, state)
     print(json.dumps(issue))
 elif command == "update":
     if state.pop("fail_next_update", False):
-        state_path.write_text(json.dumps(state))
+        write_state(state_path, state)
         print("injected update failure", file=sys.stderr)
         raise SystemExit(1)
     issue = next(item for item in state["children"] if item["id"] == arguments[1])
     issue["description"] = value(arguments, "--description")
-    state_path.write_text(json.dumps(state))
+    write_state(state_path, state)
     print(json.dumps([issue]))
 elif command == "dep" and arguments[1] == "add":
     issue = next(item for item in state["children"] if item["id"] == arguments[2])
     dependency = {"id": arguments[3], "dependency_type": value(arguments, "--type")}
     if dependency not in issue["dependencies"]:
         issue["dependencies"].append(dependency)
-    state_path.write_text(json.dumps(state))
+    write_state(state_path, state)
     print(json.dumps(issue))
 elif command == "comments" and arguments[1] == "add":
     issue = next(item for item in state["children"] if item["id"] == arguments[2])
     issue.setdefault("comments", []).append(arguments[3])
-    state_path.write_text(json.dumps(state))
+    write_state(state_path, state)
     print(json.dumps(issue))
 elif command == "comments":
     issue = next(item for item in state["children"] if item["id"] == arguments[1])
@@ -82,15 +89,15 @@ elif command == "close":
     issue = next(item for item in state["children"] if item["id"] == arguments[1])
     if state.pop("close_then_fail", False):
         issue["status"] = "closed"
-        state_path.write_text(json.dumps(state))
+        write_state(state_path, state)
         print("injected lost close response", file=sys.stderr)
         raise SystemExit(1)
     if state.pop("fail_next_close", False):
-        state_path.write_text(json.dumps(state))
+        write_state(state_path, state)
         print("injected close failure", file=sys.stderr)
         raise SystemExit(1)
     issue["status"] = "closed"
-    state_path.write_text(json.dumps(state))
+    write_state(state_path, state)
     print(json.dumps(issue))
 else:
     print(f"unsupported fake bd command: {arguments}", file=sys.stderr)

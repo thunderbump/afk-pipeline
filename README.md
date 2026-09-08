@@ -3,6 +3,56 @@
 Small executable modules for running agent work, validating and reviewing its
 result, responding to feedback, and coordinating the accepted sequence.
 
+## Local Run Evidence
+
+`afk_evidence.read_run(run_root, selection, trusted_context)` is the shared,
+read-only interface for terminal prepared and standalone Coordinator Runs.
+`selection` is `"latest"` or a retained continuation number. The returned
+`RunSnapshot` keeps the selected terminal, latest sealed terminal, and active
+tail separate; historical selection still validates every later retained
+continuation. Proof reads every invocation and deeply verifies every completed
+Change/Validation/Review/Assessment cycle in that retained history, including
+active-tail history. It also reports ordered invocations and outcomes, frozen
+work and routing when present, repository/candidate identities, SHA-256
+identities of the bytes actually read, and a two-state `proof` result.
+
+`proof.status == "verified"` means that the observed evidence is internally
+consistent. It does **not** mean that a Run succeeded, that its work is
+semantically correct, or that it has been accepted. Missing records, unavailable
+local Git objects, supported legacy evidence without the newer proof, and
+oversized private proof produce `"unavailable"` with a bounded reason and the
+affected identity. Callers that continue execution must reject unavailable
+proof. Malformed records, contradictory subjects or digests, cycles, invalid
+continuations, and unsafe paths raise `RunValidationError`. Publication's
+existing legacy adapters may still produce their older partial schemas, but do
+not turn unavailable private proof into verified authority.
+
+`trusted_context` supplies the configured local Git repository and permitted
+evidence roots. Recorded absolute paths never add authority: all transitive
+reads must remain under those roots. Reads open path components without
+following symlinks, require regular files, and reject replacement, metadata, or
+size changes both during a read and between repeated reads of one pathname.
+Calls are revalidated independently with no cross-call cache. JSON proof records are limited to 1
+MiB, related-work snapshots to 256 KiB, and each private Validation log to the
+named 25 MiB bound. Oversized proof is unavailable rather than truncated. Git
+checks use exact canonical commits in the configured local repository and do
+not fetch. Frozen related-work is checked for safe fields, valid relationships,
+unique IDs, canonical ordering and selection metadata; Review and Assessment
+scope may name only included IDs. The reader performs no writes, inference,
+publication, or external actions. Raw inference events and prompt artifacts remain Exporter-owned rather
+than required stage proof.
+
+Coordinator and Exporter share the pure continuation verifier in
+`afk_evidence.continuation`; a sealed continuation must append at least one
+invocation and cannot merely revise its predecessor's terminal decision. Review
+and Assessment persisted inputs are rechecked against their complete pure stage
+contracts, including schema, positive timeout, runtime-owned inference policy,
+and workspace lineage. Change and Iteration use the shared stage lineage
+implementation in `afk_evidence.stages` and the bounded no-follow reader.
+Standalone stages authorize only their caller-owned Run/evidence neighborhood,
+not arbitrary roots named by records. Compatibility imports retain existing CLI
+and Python entry points.
+
 ## Inference Runtime
 
 `afk_inference` exposes a semantic invocation API: callers provide a purpose,

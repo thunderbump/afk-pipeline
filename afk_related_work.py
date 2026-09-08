@@ -305,7 +305,12 @@ def validate_snapshot(path, value):
     path = Path(path)
     if path.is_symlink() or not path.is_file():
         raise RelatedWorkError("related-work snapshot is not a regular file")
-    raw = path.read_bytes()
+    return validate_snapshot_bytes(path.read_bytes(), value)
+
+
+def validate_snapshot_bytes(raw, value):
+    """Validate already safely-read snapshot bytes against the canonical contract."""
+    validate_reference(value)
     if len(raw) != value["bytes"] or hashlib.sha256(raw).hexdigest() != value["sha256"]:
         raise RelatedWorkError("related-work snapshot digest disagrees")
     lines = raw.splitlines()

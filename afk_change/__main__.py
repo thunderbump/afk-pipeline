@@ -1,9 +1,11 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 from afk_change.evidence import verify_source
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_runtime import progress, seal_json, write_json
 
 USAGE = "usage: python3 -m afk_change SOURCE_JSON RESULT_DIRECTORY"
@@ -34,7 +36,20 @@ def main() -> int:
     progress("committed-change input accepted")
     source_directory = Path(source["directory"])
     progress(f"loading and verifying {source['kind']} evidence")
-    lineage = verify_source(source["kind"], source_directory)
+    # Both the source JSON and SOURCE_JSON are explicit caller inputs.  Admit
+    # those narrow neighborhoods without relying on Coordinator-only settings.
+    roots = (input_path.absolute().parent, source_directory)
+    configured_roots = os.environ.get("AFK_STAGE_EVIDENCE_ROOTS")
+    if configured_roots is not None:
+        decoded_roots = json.loads(configured_roots)
+        if not isinstance(decoded_roots, list) or not all(
+            isinstance(root, str) and Path(root).is_absolute() for root in decoded_roots
+        ):
+            raise ValueError("invalid configured stage evidence roots")
+        roots = tuple(Path(root) for root in decoded_roots)
+    lineage = verify_source(
+        source["kind"], source_directory, reader=EvidenceReader(roots)
+    )
     assignment = lineage.assignment
     before = lineage.before
     after = lineage.after
@@ -94,6 +109,7 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except (
         OSError,
+        EvidenceUnavailable,
         TypeError,
         ValueError,
         json.JSONDecodeError,

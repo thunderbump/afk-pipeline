@@ -1,5 +1,34 @@
 """Validate structured Finding Assessment results against an immutable Review."""
 
+from pathlib import Path
+
+
+def validate_input(value: object) -> dict[str, object]:
+    """Validate the complete persisted Assessment input contract without I/O."""
+    required = {
+        "schema_version",
+        "workspace",
+        "review_directory",
+        "timeout_seconds",
+    }
+    allowed = required | {"related_work"}
+    if not isinstance(value, dict) or value.get("schema_version") != 1:
+        raise ValueError("finding assessment must use schema_version 1")
+    if "inference" in value:
+        raise ValueError("finding assessment cannot override inference policy")
+    for field in ("workspace", "review_directory"):
+        path = value.get(field)
+        if not isinstance(path, str) or not Path(path).is_absolute():
+            raise ValueError(f"finding assessment {field} must be an absolute path")
+    if not set(value) <= allowed:
+        raise ValueError("finding assessment input fields are malformed")
+    timeout = value.get("timeout_seconds")
+    if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
+        raise ValueError(
+            "finding assessment timeout_seconds must be a positive integer"
+        )
+    return value
+
 
 def subject_state(state: dict[str, object]) -> dict[str, object]:
     if not isinstance(state, dict):
