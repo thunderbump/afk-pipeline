@@ -106,26 +106,49 @@ def load_publication_request(path: Path) -> dict[str, Any]:
     return value
 
 
-def _inventory_paths(descriptor: int, prefix: str = "") -> set[str]:
-    """Inventory a bundle through no-follow descriptors, rejecting odd nodes."""
-    paths: set[str] = set()
-    for name in os.listdir(descriptor):
-        relative = f"{prefix}/{name}" if prefix else name
-        facts = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-        if stat.S_ISREG(facts.st_mode):
-            paths.add(relative)
-        elif stat.S_ISDIR(facts.st_mode):
-            paths.add(f"{relative}/")
-            child = os.open(
-                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
-            )
+def _inventory_matches(descriptor: int, expected: set[str]) -> bool:
+    """Compare inventory lazily, without descending into undeclared trees."""
+    remaining = set(expected)
+    pending = [(os.dup(descriptor), "")]
+    visited = 0
+    try:
+        while pending:
+            current, prefix = pending.pop()
             try:
-                paths.update(_inventory_paths(child, relative))
+                with os.scandir(current) as entries:
+                    for entry in entries:
+                        relative = f"{prefix}/{entry.name}" if prefix else entry.name
+                        facts = entry.stat(follow_symlinks=False)
+                        if stat.S_ISREG(facts.st_mode):
+                            inventory_path = relative
+                            child = None
+                        elif stat.S_ISDIR(facts.st_mode):
+                            inventory_path = f"{relative}/"
+                            child = relative
+                        else:
+                            raise PublicationError(
+                                "bundle contains an unsafe filesystem entry"
+                            )
+                        visited += 1
+                        # At most the declared inventory plus one unexpected
+                        # entry is examined. In particular, an undeclared
+                        # directory is never recursively inventoried.
+                        if visited > len(expected) or inventory_path not in remaining:
+                            return False
+                        remaining.remove(inventory_path)
+                        if child is not None:
+                            child_descriptor = os.open(
+                                entry.name,
+                                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                dir_fd=current,
+                            )
+                            pending.append((child_descriptor, child))
             finally:
-                os.close(child)
-        else:
-            raise PublicationError("bundle contains an unsafe filesystem entry")
-    return paths
+                os.close(current)
+        return not remaining
+    finally:
+        for current, _prefix in pending:
+            os.close(current)
 
 
 def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
@@ -148,7 +171,8 @@ def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
             ):
                 raise PublicationError("bundle manifest identity is invalid")
 
-            payloads: dict[str, bytes] = {}
+            declared_paths: set[str] = set()
+            workflow_raw = None
             total = len(manifest_raw)
             for row in files:
                 if (
@@ -157,34 +181,45 @@ def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
                     or not isinstance(row.get("path"), str)
                     or not safe_relative(row["path"])
                     or row["path"] == "manifest.json"
-                    or row["path"] in payloads
+                    or row["path"] in declared_paths
                     or not isinstance(row.get("bytes"), int)
                     or isinstance(row.get("bytes"), bool)
                     or row["bytes"] < 0
                     or SHA256.fullmatch(str(row.get("sha256"))) is None
                 ):
                     raise PublicationError("bundle manifest file inventory is invalid")
-                raw = read_bytes_beneath(descriptor, row["path"], V2_MAX_BUNDLE_BYTES)
-                total += len(raw)
+                remaining = V2_MAX_BUNDLE_BYTES - total
+                if row["bytes"] > remaining:
+                    raise PublicationError("bundle exceeds admission limits")
+                if (
+                    row["path"] == "workflow-run.json"
+                    and row["bytes"] > MAX_INCLUDED_BYTES
+                ):
+                    raise PublicationError(
+                        "bundle workflow Run is missing or oversized"
+                    )
+                # Bound this read by both the declared size and the remaining
+                # aggregate budget. A lying or oversized entry is rejected by
+                # fstat before its contents can be accumulated.
+                raw = read_bytes_beneath(descriptor, row["path"], row["bytes"])
                 if (
                     row["bytes"] != len(raw)
                     or row["sha256"] != hashlib.sha256(raw).hexdigest()
                 ):
                     raise PublicationError("bundle file hash or size disagrees")
-                payloads[row["path"]] = raw
-            expected_inventory = {"manifest.json", *payloads}
-            for path in payloads:
+                total += len(raw)
+                declared_paths.add(row["path"])
+                if row["path"] == "workflow-run.json":
+                    workflow_raw = raw
+            expected_inventory = {"manifest.json", *declared_paths}
+            for path in declared_paths:
                 parts = path.split("/")
                 expected_inventory.update(
                     f"{'/'.join(parts[:index])}/" for index in range(1, len(parts))
                 )
-            if (
-                total > V2_MAX_BUNDLE_BYTES
-                or _inventory_paths(descriptor) != expected_inventory
-            ):
+            if not _inventory_matches(descriptor, expected_inventory):
                 raise PublicationError("bundle manifest inventory disagrees")
-            workflow_raw = payloads.get("workflow-run.json")
-            if workflow_raw is None or len(workflow_raw) > MAX_INCLUDED_BYTES:
+            if workflow_raw is None:
                 raise PublicationError("bundle workflow Run is missing or oversized")
         finally:
             os.close(descriptor)
@@ -383,10 +418,9 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             observed = load_source_v2(
                 source, project, None, None, terminal_continuation=terminal
             )
-            # Retain the complete normalized observation (including evidence
-            # hashes) so the metrics read can be bracketed by the exact same
-            # authenticated source state rather than merely the Run identity.
-            expected, _ = normalize_run_v2(observed, include_artifacts=True)
+            # Publication compares the semantic Run only. Artifact catalogs
+            # and payload admission are deliberately outside this boundary.
+            expected, _ = normalize_run_v2(observed, include_artifacts=False)
             publication_digest = _publication_evidence_digest(source, observed)
         except (
             OSError,
@@ -418,7 +452,7 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             confirmed = load_source_v2(
                 source, project, None, None, terminal_continuation=terminal
             )
-            confirmed_record, _ = normalize_run_v2(confirmed, include_artifacts=True)
+            confirmed_record, _ = normalize_run_v2(confirmed, include_artifacts=False)
             confirmed_publication_digest = _publication_evidence_digest(
                 source, confirmed
             )

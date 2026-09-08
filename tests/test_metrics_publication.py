@@ -100,6 +100,17 @@ class MetricsPublicationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, bundle, request = self.fixture(root)
+            unlisted = bundle / "unlisted"
+            unlisted.mkdir()
+            (unlisted / "unsafe").symlink_to(bundle / "manifest.json")
+            # An undeclared tree is rejected at its root, not recursively
+            # traversed (and therefore does not surface its unsafe child).
+            with self.assertRaisesRegex(PublicationError, "inventory"):
+                build_publication(request)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, bundle, request = self.fixture(root)
             manifest_path = bundle / "manifest.json"
             manifest = json.loads(manifest_path.read_text())
             manifest["files"].append(
@@ -108,6 +119,34 @@ class MetricsPublicationTests(unittest.TestCase):
             manifest_path.write_text(json.dumps(manifest))
             with self.assertRaises(PublicationError):
                 build_publication(request)
+
+    def test_bundle_aggregate_limit_is_checked_before_payload_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, bundle, request = self.fixture(root)
+            manifest_path = bundle / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["files"][0]["bytes"] = afk_export.V2_MAX_BUNDLE_BYTES
+            manifest_path.write_text(json.dumps(manifest))
+            with (
+                mock.patch(
+                    "afk_metrics.publication.read_bytes_beneath",
+                    side_effect=AssertionError("oversized payload was read"),
+                ),
+                self.assertRaisesRegex(PublicationError, "admission limits"),
+            ):
+                build_publication(request)
+
+    def test_semantic_comparison_does_not_admit_source_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            with mock.patch(
+                "afk_export.public_artifacts",
+                side_effect=AssertionError("artifact catalog was traversed"),
+            ):
+                publication = build_publication(request)
+            self.assertEqual(len(publication["runs"]), 1)
 
     def test_source_change_during_metrics_projection_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
