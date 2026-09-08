@@ -126,6 +126,7 @@ def parse_pi_events(
     cost_measurements = 0
     finalized = 0
     missing = 0
+    categories_partial = False
     retries = 0
     compactions = 0
     digest = hashlib.sha256()
@@ -240,6 +241,8 @@ def parse_pi_events(
                         (identity_key, provider, model),
                     )
                 measured = _usage(raw_usage)
+                if not set(TOKEN_FIELDS[:-1]).issubset(measured):
+                    categories_partial = True
                 amount = _reported_cost(raw_usage)
                 if amount is not None:
                     cost += float(amount)
@@ -265,6 +268,8 @@ def parse_pi_events(
                 # its measurements. Retain the event in the coverage denominator
                 # so a measured final message cannot make that omission vanish.
                 compactions += 1
+                if not set(TOKEN_FIELDS[:-1]).issubset(measured):
+                    categories_partial = True
                 if measured:
                     _add(compact_usage, measured)
                 else:
@@ -292,7 +297,7 @@ def parse_pi_events(
     partial = missing > 0 or retries > 0
     coverage = (
         "partial"
-        if partial
+        if partial or categories_partial
         else ("complete" if finalized or compactions else "unavailable")
     )
     cost_status = (
@@ -1456,6 +1461,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
         "outcome": {
             "terminal": observed["output"].get("outcome"),
             "coordinator_status": state.get("status"),
+            "coordinator_decision": observed["output"].get("decision"),
             "validation_results": validation_results,
             "repair_count": sum(
                 1 for entry in state["history"] if entry.get("component") == "response"
@@ -1563,9 +1569,14 @@ def build_report(sources: list[Path]) -> dict[str, Any]:
                     "validation_conditions_sha256": "validation conditions",
                 }
                 warnings = [
-                    f"different {label}"
+                    f"unavailable {label}"
+                    if left["work"].get(field) is None
+                    or right["work"].get(field) is None
+                    else f"different {label}"
                     for field, label in names.items()
-                    if left["work"].get(field) != right["work"].get(field)
+                    if left["work"].get(field) is None
+                    or right["work"].get(field) is None
+                    or left["work"].get(field) != right["work"].get(field)
                 ]
             comparisons.append(
                 {

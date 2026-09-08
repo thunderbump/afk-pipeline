@@ -66,6 +66,7 @@ def _human(report):
                     f"  Run identity: {', '.join(identity_parts) or 'unavailable'}",
                     f"  adapter / provider / model: {'; '.join(model_parts) or 'unavailable'}",
                     f"  terminal outcome: {outcome['terminal']}",
+                    f"  Coordinator decision: {_available(outcome.get('coordinator_decision'))}",
                     f"  validation: {', '.join(str(x) for x in outcome['validation_results']) or 'unavailable'}",
                     f"  repairs / retries: {outcome['repair_count']} / {outcome['retry_count']}",
                     f"  Run wall span: {_available(timing['run_wall_span_seconds'])} s",

@@ -29,6 +29,21 @@ ROOT = Path(__file__).parents[1]
 
 
 class MetricsEventTests(unittest.TestCase):
+    def test_partial_token_categories_do_not_claim_complete_coverage(self):
+        for kind in ("message_end", "compaction_end"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "events.jsonl"
+                event = (
+                    {
+                        "type": kind,
+                        "message": {"role": "assistant", "usage": {"input": 100}},
+                    }
+                    if kind == "message_end"
+                    else {"type": kind, "result": {"usage": {"input": 100}}}
+                )
+                path.write_text(json.dumps(event) + "\n")
+                self.assertEqual(parse_pi_events(path)["coverage"], "partial")
+
     def test_finalized_usage_is_counted_once_and_snapshots_are_ignored(self):
         events = [
             {"type": "message_update", "message": {"id": "m1", "usage": {"input": 5}}},
@@ -473,7 +488,7 @@ class MetricsReportTests(unittest.TestCase):
                     "repository": {},
                 },
                 "terminal_directory": root,
-                "output": {"outcome": "completed"},
+                "output": {"outcome": "completed", "decision": "exhausted"},
                 "request": {"validation": {}},
                 "bead_id": None,
             }
@@ -498,6 +513,7 @@ class MetricsReportTests(unittest.TestCase):
                 invalid = summarize_source(root)
         self.assertEqual(report["outcome"]["completion_acceptance"], "unavailable")
         self.assertEqual(report["outcome"]["integration_status"], "unavailable")
+        self.assertEqual(report["outcome"]["coordinator_decision"], "exhausted")
         self.assertEqual(report["timing"]["publication_seconds"], 2)
         self.assertEqual(report["timing"]["unattributed_seconds"], 7)
         self.assertIn(
@@ -569,6 +585,23 @@ class MetricsReportTests(unittest.TestCase):
         self.assertEqual(report["integrity"]["status"], "verified")
         self.assertEqual(report["outcome"]["completion_acceptance"], "unavailable")
         self.assertEqual(report["outcome"]["integration_status"], "unavailable")
+
+    def test_unknown_bases_cannot_establish_equivalent_conditions(self):
+        rows = [
+            {
+                "source_identity": identity,
+                "work": {
+                    "objective_sha256": "objective",
+                    "base_commit": None,
+                    "validation_conditions_sha256": "validation",
+                },
+            }
+            for identity in ("a", "b")
+        ]
+        with mock.patch("afk_metrics.report.summarize_source", side_effect=rows):
+            comparison = build_report([Path("a"), Path("b")])["comparisons"][0]
+        self.assertFalse(comparison["equivalent_frozen_conditions"])
+        self.assertIn("unavailable base code state", comparison["warnings"])
 
     def test_fixture_run_comparison_matches_and_flags_confounded_base(self):
         with tempfile.TemporaryDirectory() as temporary:
