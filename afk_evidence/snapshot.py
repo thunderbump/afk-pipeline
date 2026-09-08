@@ -20,7 +20,7 @@ from afk_coordinate.contract import (
 )
 from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_review
-from afk_validate.evidence import evidence_identity
+from afk_validate.evidence import evidence_identity, validate_repairable_failure
 
 from .access import (
     MAX_RELATED_WORK_BYTES,
@@ -148,6 +148,8 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
             coordinator = root / "coordinator"
         assignment = validate_assignment(reader.json(coordinator / "assignment.json"))
         request = validate_request(reader.json(coordinator / "input.json"))
+        if preparation is not None:
+            _validate_preparation(preparation, root, assignment, request, context)
         if assignment.get("related_work") != request.get("related_work"):
             raise RunValidationError("Coordinator related-work references disagree")
         related_reference = assignment.get("related_work")
@@ -172,12 +174,38 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
         directories = continuation_directories(coordinator / "continuations")
         retained_roots = [coordinator]
         for index, directory in enumerate(directories):
+            bases = tuple(retained_roots)
+
+            def invocation_directory(record, invocation_roots=bases):
+                return _invocation_path(invocation_roots, record, "output.json").parent
+
+            def verify_failed_validation(record):
+                validate_repairable_failure(
+                    invocation_directory(record),
+                    reader=reader,
+                    log_limit=MAX_VALIDATION_LOG_BYTES,
+                )
+
+            def verify_iteration(record):
+                from .iteration import validate_sealed_result
+
+                invocation = invocation_directory(record)
+                validate_sealed_result(
+                    reader.json(invocation / "input.json"),
+                    reader.json(invocation / "output.json"),
+                    reader=reader,
+                    repository=context.repository,
+                    verify_git=context.repository is not None,
+                )
+
             require_exhausted_structure(
                 state,
                 expected_limit,
-                lambda record, name, bases=tuple(retained_roots): reader.json(
-                    _invocation_path(bases, record, name)
+                lambda record, name, invocation_roots=bases: reader.json(
+                    _invocation_path(invocation_roots, record, name)
                 ),
+                verify_failed_validation=verify_failed_validation,
+                verify_iteration=verify_iteration,
             )
             continuation_input = reader.json(directory / "input.json")
             continuation_state = validate_checkpoint(
@@ -281,6 +309,133 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
     )
 
 
+def _validate_preparation(value, root, assignment, request, context):
+    """Validate and bind prepared-Run routing and repository metadata."""
+    required = {
+        "schema_version",
+        "run",
+        "bead",
+        "project",
+        "related_work",
+        "repository",
+        "timestamps",
+        "preparation_status",
+        "routing",
+        "coordinator",
+        "errors",
+    }
+    if set(value) != required or value.get("preparation_status") != "prepared":
+        raise RunValidationError("invalid prepared Run metadata")
+    run = value.get("run")
+    bead = value.get("bead")
+    project = value.get("project")
+    repository = value.get("repository")
+    timestamps = value.get("timestamps")
+    if (
+        not isinstance(run, dict)
+        or set(run) != {"id", "artifact_root"}
+        or run.get("id") != root.name
+        or Path(run.get("artifact_root", "")).absolute() != root
+        or not isinstance(bead, dict)
+        or set(bead) != {"id"}
+        or not isinstance(bead.get("id"), str)
+        or not bead["id"]
+        or not isinstance(project, dict)
+        or set(project) != {"slug"}
+        or not isinstance(project.get("slug"), str)
+        or not project["slug"]
+        or not isinstance(repository, dict)
+        or set(repository) != {"path", "base_ref", "base_commit", "branch", "worktree"}
+        or any(
+            not isinstance(repository.get(key), str) or not repository[key]
+            for key in repository
+        )
+        or Path(repository["worktree"]).resolve()
+        != Path(assignment["workspace"]).resolve()
+        or not isinstance(timestamps, dict)
+        or set(timestamps) != {"started_at", "prepared_at", "finished_at"}
+        or not isinstance(timestamps.get("started_at"), str)
+        or not isinstance(timestamps.get("prepared_at"), str)
+        or timestamps.get("finished_at") is not None
+        and not isinstance(timestamps.get("finished_at"), str)
+        or value.get("related_work") != assignment.get("related_work")
+        or value.get("related_work") != request.get("related_work")
+        or not isinstance(value.get("errors"), list)
+    ):
+        raise RunValidationError("prepared Run metadata is not bound to this Run")
+    if context.repository is not None and (
+        Path(repository["path"]).resolve() != context.repository.resolve()
+    ):
+        raise RunValidationError(
+            "prepared Run repository does not match trusted context"
+        )
+    routing = value.get("routing")
+    if not isinstance(routing, dict) or set(routing) != {"planner", "policy"}:
+        raise RunValidationError("invalid prepared Run routing")
+    for name, result in (
+        ("planner", "planner/output.json"),
+        ("policy", "policy/output.json"),
+    ):
+        stage = routing.get(name)
+        required_stage = {
+            "command",
+            "directory",
+            "result",
+            "status",
+            "exit_code",
+            "outcome",
+        }
+        if name == "policy":
+            required_stage.add("decision")
+        if (
+            not isinstance(stage, dict)
+            or set(stage) != required_stage
+            or stage.get("directory") != name
+            or stage.get("result") != result
+            or not isinstance(stage.get("command"), list)
+            or not stage["command"]
+            or not all(isinstance(item, str) for item in stage["command"])
+            or stage.get("status")
+            not in {"not_started", "running", "completed", "failed"}
+            or not (
+                stage.get("exit_code") is None
+                or isinstance(stage.get("exit_code"), int)
+                and not isinstance(stage.get("exit_code"), bool)
+            )
+            or stage.get("outcome") not in {None, "completed", "failed"}
+        ):
+            raise RunValidationError("invalid prepared Run routing")
+    coordinator = value.get("coordinator")
+    if (
+        not isinstance(coordinator, dict)
+        or set(coordinator)
+        != {
+            "command",
+            "directory",
+            "result",
+            "status",
+            "exit_code",
+            "outcome",
+            "decision",
+        }
+        or coordinator.get("directory") != "coordinator"
+        or coordinator.get("result") != "coordinator/output.json"
+        or not isinstance(coordinator.get("command"), list)
+        or not coordinator["command"]
+        or not all(isinstance(item, str) for item in coordinator["command"])
+        or coordinator.get("status")
+        not in {"not_started", "running", "completed", "failed"}
+        or not (
+            coordinator.get("exit_code") is None
+            or isinstance(coordinator.get("exit_code"), int)
+            and not isinstance(coordinator.get("exit_code"), bool)
+        )
+        or coordinator.get("outcome") not in {None, "completed", "failed"}
+        or coordinator.get("decision") not in {None, "stop", "exhausted"}
+    ):
+        raise RunValidationError("invalid prepared Run coordinator routing")
+
+
 def _invocation_path(bases, record, name):
     for base in reversed(tuple(bases)):
         candidate = base / record["directory"] / name
@@ -348,7 +503,9 @@ def _verify_stage_provenance(reader, history, roots, context):
 def _related_ids(reader, reference):
     if reference is None:
         return set()
-    raw = reader.bytes(Path(reference.get("path", "")), MAX_RELATED_WORK_BYTES)
+    if not isinstance(reference, dict) or not isinstance(reference.get("path"), str):
+        raise RunValidationError("malformed related-work reference")
+    raw = reader.bytes(Path(reference["path"]), MAX_RELATED_WORK_BYTES)
     validate_snapshot_bytes(raw, reference)
     return {json.loads(line)["id"] for line in raw.splitlines()}
 

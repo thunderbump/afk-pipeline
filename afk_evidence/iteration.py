@@ -14,10 +14,13 @@ from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_review
 
 
-def evaluate_policy(policy_input):
+def evaluate_policy(policy_input, *, reader=None, repository=None, verify_git=True):
     """Verify one assessment lineage and derive its deterministic policy."""
     assessment, lineage, protected_directories = verified_assessment(
-        Path(policy_input["assessment_directory"])
+        Path(policy_input["assessment_directory"]),
+        reader=reader,
+        repository=repository,
+        verify_git=verify_git,
     )
     completed_responses = lineage.response_count
     actionable_findings = sum(
@@ -36,10 +39,17 @@ def evaluate_policy(policy_input):
     )
 
 
-def validate_sealed_result(input_value, output_value):
+def validate_sealed_result(
+    input_value, output_value, *, reader=None, repository=None, verify_git=True
+):
     """Validate a sealed Iteration result against its complete evidence chain."""
     policy_input = validate_input(input_value)
-    policy, lineage, _protected = evaluate_policy(policy_input)
+    policy, lineage, _protected = evaluate_policy(
+        policy_input,
+        reader=reader,
+        repository=repository,
+        verify_git=verify_git,
+    )
     expected_output = {
         "schema_version": 1,
         "outcome": "completed",
@@ -74,10 +84,11 @@ def validate_result_location(result_directory, workspace, evidence_directories):
         raise ValueError("result directory must be outside the workspace and evidence")
 
 
-def verified_assessment(assessment_directory, reader=None):
-    # Stage evidence is conventionally a numbered child of one caller-owned Run
-    # root; that root also contains the explicitly supplied frozen related-work.
-    reader = reader or EvidenceReader((assessment_directory.absolute().parent.parent,))
+def verified_assessment(
+    assessment_directory, reader=None, repository=None, verify_git=True
+):
+    # Standalone authority begins at the explicitly supplied Assessment only.
+    reader = reader or EvidenceReader((assessment_directory.absolute(),))
     assessment_input = validate_stage_input(
         read_object(
             reader, assessment_directory / "input.json", "Finding Assessment input"
@@ -92,6 +103,7 @@ def verified_assessment(assessment_directory, reader=None):
         raise ValueError("iteration policy requires a completed Finding Assessment")
     workspace_value = assessment_input["workspace"]
     review_directory = Path(assessment_input["review_directory"])
+    reader.authorize_directory(review_directory)
     review_input = validate_stage_input(
         read_object(reader, review_directory / "input.json", "Review input"),
         "Review",
@@ -102,7 +114,13 @@ def verified_assessment(assessment_directory, reader=None):
         reader, review_directory / "output.json", "Review output"
     )
     change_directory = Path(review_input["change_directory"])
-    lineage = verify_change_lineage(change_directory, reader=reader)
+    reader.authorize_directory(change_directory)
+    lineage = verify_change_lineage(
+        change_directory,
+        reader=reader,
+        repository=repository,
+        verify_git=verify_git,
+    )
     change_after = lineage.after
 
     try:
@@ -211,6 +229,7 @@ def _snapshot_ids(reader, reference):
     if not isinstance(reference, dict) or not isinstance(reference.get("path"), str):
         raise TypeError("related-work reference is malformed")
     try:
+        reader.authorize_file(reference["path"])
         raw = reader.bytes(reference["path"], MAX_RELATED_WORK_BYTES)
     except EvidenceUnavailable as error:
         raise ValueError(error.reason) from error

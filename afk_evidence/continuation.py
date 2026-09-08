@@ -68,7 +68,14 @@ def require_terminal_pair(state, output):
         raise ValueError("terminal output does not match coordinator checkpoint")
 
 
-def require_exhausted_structure(state, expected_max_responses, read_component):
+def require_exhausted_structure(
+    state,
+    expected_max_responses,
+    read_component,
+    *,
+    verify_failed_validation=None,
+    verify_iteration=None,
+):
     """Prove the recorded reason for an exhausted terminal, without Git access.
 
     ``read_component(record, name)`` returns a parsed object and lets callers
@@ -97,6 +104,8 @@ def require_exhausted_structure(state, expected_max_responses, read_component):
         output = read_component(last_real, "output.json")
         if output.get("outcome") != "failed":
             raise ValueError("Validation repair outcome disagrees with history")
+        if verify_failed_validation is not None:
+            verify_failed_validation(last_real)
         return
     iteration = next(
         (
@@ -109,6 +118,10 @@ def require_exhausted_structure(state, expected_max_responses, read_component):
     if iteration is None:
         raise ValueError("exhausted continuation lacks Iteration evidence")
     output = read_component(iteration, "output.json")
+    if verify_iteration is not None:
+        # This re-derives policy from the referenced Review/Assessment lineage;
+        # copied policy fields alone are not continuation authority.
+        verify_iteration(iteration)
     policy = output.get("policy") if isinstance(output, dict) else None
     if (
         output.get("outcome") != "completed"
