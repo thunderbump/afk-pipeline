@@ -256,13 +256,14 @@ def parse_pi_events(
                 raw_usage = result.get("usage") if isinstance(result, dict) else None
                 measured = _usage(raw_usage)
                 amount = _reported_cost(raw_usage)
-                if not measured and amount is None:
-                    continue
                 identity = event.get("id")
                 # No upstream id is guaranteed. Distinct un-identified events
                 # may be equal aggregates, so only an upstream id deduplicates.
                 if identity is not None and not first_seen("compaction", identity):
                     continue
+                # A compaction is represented work even when Pi omitted all of
+                # its measurements. Retain the event in the coverage denominator
+                # so a measured final message cannot make that omission vanish.
                 compactions += 1
                 if measured:
                     _add(compact_usage, measured)
@@ -394,6 +395,27 @@ def _safe_evidence_json(root: Path, relative: str, name: str) -> dict[str, Any]:
     descriptor = open_directory_beneath(root, relative)
     try:
         value = read_json_at(descriptor, name)
+    finally:
+        os.close(descriptor)
+    if not isinstance(value, dict):
+        raise TypeError("expected JSON object")
+    return value
+
+
+def _safe_optional_evidence_json(
+    root: Path, relative: str, name: str
+) -> dict[str, Any] | None:
+    """Atomically open optional JSON without following mutable path entries."""
+    descriptor = (
+        open_directory_beneath(root, relative)
+        if relative
+        else os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    )
+    try:
+        try:
+            value = read_json_at(descriptor, name)
+        except FileNotFoundError:
+            return None
     finally:
         os.close(descriptor)
     if not isinstance(value, dict):
@@ -1288,12 +1310,17 @@ def summarize_source(source: Path) -> dict[str, Any]:
     publication_nonoverlap_seconds = None
     completion_acceptance = "unavailable"
     integration_status = "unavailable"
-    publication_path = observed["terminal_directory"] / "publication.json"
-    if publication_path.exists() or publication_path.is_symlink():
-        try:
-            if publication_path.is_symlink() or not publication_path.is_file():
-                raise ValueError("publication evidence is not a regular file")
-            publication = _validated_publication(_safe_json(publication_path))
+    try:
+        terminal_directory = Path(observed["terminal_directory"]).absolute()
+        terminal_relative_path = terminal_directory.relative_to(root)
+        terminal_relative = (
+            terminal_relative_path.as_posix() if terminal_relative_path.parts else ""
+        )
+        publication_value = _safe_optional_evidence_json(
+            root, terminal_relative, "publication.json"
+        )
+        if publication_value is not None:
+            publication = _validated_publication(publication_value)
             publication_seconds = _seconds(
                 publication["started_at"], publication["finished_at"]
             )
@@ -1307,16 +1334,16 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 publication["started_at"], publication["finished_at"], occupied
             )
             run_end_candidates.append(publication["finished_at"])
-            # Datastore admission proves publication only. Completion acceptance
-            # and Git integration need their own evidence, unavailable here.
-        except (
-            OSError,
-            TypeError,
-            ValueError,
-            KeyError,
-            json.JSONDecodeError,
-        ) as error:
-            return _invalid_source(source, error, identity, assignment)
+            # Publication does not prove completion acceptance or Git integration.
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+        ExportError,
+    ) as error:
+        return _invalid_source(source, error, identity, assignment)
     # A preparation's finished_at seals the original coordinator only. A
     # selected continuation can contain later invocations (and publication), so
     # extend the wall span to the latest authenticated end timestamp.
