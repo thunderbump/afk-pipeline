@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -18,8 +19,11 @@ from afk_coordinate.contract import validate_component_output
 from afk_export import (
     ExportError,
     ExportUsageError,
+    hash_file_beneath,
     load_source,
     normalize_component_output,
+    open_directory_beneath,
+    read_json_at,
     receipt_bound_inference_artifacts,
 )
 
@@ -204,7 +208,7 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
         "unavailable"
         if not has_cost and not compaction_has_cost
         else "partial"
-        if cost_measurements < finalized + compactions
+        if cost_measurements < finalized + compactions or partial
         else "reported_estimate"
     )
     return {
@@ -263,6 +267,27 @@ def _safe_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError("expected JSON object")
     return value
+
+
+def _safe_evidence_json(root: Path, relative: str, name: str) -> dict[str, Any]:
+    """Read JSON through Export's no-follow, real-directory evidence boundary."""
+    descriptor = open_directory_beneath(root, relative)
+    try:
+        value = read_json_at(descriptor, name)
+    finally:
+        os.close(descriptor)
+    if not isinstance(value, dict):
+        raise TypeError("expected JSON object")
+    return value
+
+
+def _safe_evidence_hash(root: Path, relative: str, name: str) -> str:
+    descriptor = open_directory_beneath(root, relative)
+    try:
+        digest, _size = hash_file_beneath(descriptor, name)
+        return digest
+    finally:
+        os.close(descriptor)
 
 
 def _sum_usage(
@@ -502,11 +527,43 @@ def _verify_generic_receipt(directory: Path, receipt: dict[str, Any]) -> None:
         raise ValueError("receipt outcome is invalid")
 
 
+def _verify_unsupported_receipt(
+    root: Path,
+    relative: str,
+    receipt: dict[str, Any],
+    invocation: dict[str, Any],
+    purpose: str,
+) -> None:
+    """Verify runtime-common identity while declining adapter-specific metrics."""
+    identity = receipt.get("identity")
+    adapter = invocation.get("adapter")
+    hashes = receipt.get("hashes")
+    timing = receipt.get("timing")
+    adapter_identity = adapter.get("identity") if isinstance(adapter, dict) else None
+    if (
+        receipt.get("schema_version") != 1
+        or invocation.get("schema_version") != 1
+        or invocation.get("purpose") != purpose
+        or not isinstance(identity, dict)
+        or identity.get("runtime") != "afk-inference-v1"
+        or not isinstance(adapter, dict)
+        or not isinstance(adapter.get("kind"), str)
+        or not isinstance(adapter_identity, str)
+        or identity.get("adapter") != adapter_identity
+        or not isinstance(hashes, dict)
+        or not isinstance(hashes.get("invocation_sha256"), str)
+        or not re.fullmatch(r"[0-9a-f]{64}", hashes["invocation_sha256"])
+        or _safe_evidence_hash(root, relative, "invocation.json")
+        != hashes["invocation_sha256"]
+        or not isinstance(timing, dict)
+        or _number(timing.get("duration_seconds")) is None
+        or _seconds(timing.get("started_at"), timing.get("ended_at")) is None
+    ):
+        raise ValueError("unsupported adapter receipt identity disagrees")
+
+
 def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
-    receipt_path = root / relative / "receipt.json"
-    if receipt_path.is_symlink() or not receipt_path.is_file():
-        raise ValueError("inference receipt is unavailable")
-    receipt = _safe_json(receipt_path)
+    receipt = _safe_evidence_json(root, relative, "receipt.json")
     identity = (
         receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
     )
@@ -548,7 +605,16 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     )
     base["response_validator_seconds"] = validator if validator else None
     if family != "pi":
-        _verify_generic_receipt(root / relative, receipt)
+        # Fixture receipts have a repository-known contract and can be fully
+        # authenticated. Other retained adapter families are deliberately an
+        # observational reporting boundary: preserve the invocation, but do not
+        # interpret adapter-specific event streams as usage or cost evidence.
+        invocation = _safe_evidence_json(root, relative, "invocation.json")
+        adapter = invocation.get("adapter")
+        if isinstance(adapter, dict) and adapter.get("kind") == "fixture":
+            _verify_generic_receipt(root / relative, receipt)
+        else:
+            _verify_unsupported_receipt(root, relative, receipt, invocation, purpose)
         return {
             **base,
             "metrics": {
@@ -575,15 +641,16 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         event_name = artifacts.get("events") if isinstance(artifacts, dict) else None
         if isinstance(event_name, str):
             parsed.append(parse_pi_events(root / relative / event_name))
-    if any(item["coverage"] == "partial" for item in parsed) or len(parsed) < len(
-        attempts
+    if (
+        any(item["coverage"] == "partial" for item in parsed)
+        or len(parsed) < len(attempts)
+        or receipt.get("outcome") not in {"succeeded", None}
     ):
+        # A failed/retried/aborted request can legitimately omit usage even when
+        # a later finalized message has measurements.
         merged_coverage = "partial"
     elif parsed and all(item["coverage"] == "complete" for item in parsed):
         merged_coverage = "complete"
-    elif receipt.get("outcome") not in {"succeeded", None}:
-        # A failed/retried/aborted request can legitimately have no final usage.
-        merged_coverage = "partial"
     else:
         merged_coverage = "unavailable"
     merged = {
@@ -610,11 +677,16 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         for item in parsed
     )
     cost_groups = sum(item["cost_measurements"] for item in parsed)
+    uncertain_cost_coverage = (
+        merged_coverage != "complete"
+        or merged["retry_count"] > 0
+        or receipt.get("outcome") not in {"succeeded", None}
+    )
     cost_status = (
         "unavailable"
         if not costs
         else "partial"
-        if cost_groups < measured_groups
+        if cost_groups < measured_groups or uncertain_cost_coverage
         else "reported_estimate"
     )
     merged["cost"] = {
@@ -823,9 +895,10 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 entry.get("component") == "validation"
                 and entry.get("outcome") != "abandoned"
             ):
-                output = _safe_json(
-                    root / coordinator_prefix / entry["directory"] / "output.json"
-                )
+                component_relative = (
+                    f"{coordinator_prefix}{entry['directory']}"
+                ).rstrip("/")
+                output = _safe_evidence_json(root, component_relative, "output.json")
                 if validate_component_output("validation", output) != entry.get(
                     "outcome"
                 ):
@@ -860,8 +933,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
     )
     prep = observed.get("preparation")
     timestamps = prep.get("timestamps", {}) if isinstance(prep, dict) else {}
-    run_span = _seconds(timestamps.get("started_at"), timestamps.get("finished_at"))
-    prep_seconds = _seconds(timestamps.get("started_at"), timestamps.get("prepared_at"))
+    run_started_at = timestamps.get("started_at")
+    run_end_candidates = [timestamps.get("finished_at")]
+    prep_seconds = _seconds(run_started_at, timestamps.get("prepared_at"))
     publication_seconds = None
     completion_acceptance = "unavailable"
     integration_status = "unavailable"
@@ -874,6 +948,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
             publication_seconds = _seconds(
                 publication["started_at"], publication["finished_at"]
             )
+            run_end_candidates.append(publication["finished_at"])
             if publication["admission_outcome"] is not None:
                 completion_acceptance = publication["admission_outcome"]
             integration_status = publication["status"]
@@ -885,6 +960,20 @@ def summarize_source(source: Path) -> dict[str, Any]:
             json.JSONDecodeError,
         ) as error:
             return _invalid_source(source, error, identity, assignment)
+    # A preparation's finished_at seals the original coordinator only. A
+    # selected continuation can contain later invocations (and publication), so
+    # extend the wall span to the latest authenticated end timestamp.
+    run_end_candidates.extend(
+        item["elapsed"].get("ended_at")
+        for item in invocations
+        if isinstance(item.get("elapsed"), dict)
+    )
+    candidate_spans = [
+        value
+        for end in run_end_candidates
+        if (value := _seconds(run_started_at, end)) is not None
+    ]
+    run_span = max(candidate_spans) if candidate_spans else None
     known_nonoverlap = (
         (prep_seconds or 0) + known_invocation_seconds + sum(validation_durations)
     )
@@ -917,6 +1006,17 @@ def summarize_source(source: Path) -> dict[str, Any]:
         )
         else "reported_estimate"
     )
+    total_usage = _sum_usage(receipt_metrics)
+    total_compaction_usage = _sum_usage(receipt_metrics, "compaction")
+    usage_coverages = [
+        metrics.get("coverage", "unavailable") for metrics in receipt_metrics
+    ]
+    if not total_usage and not total_compaction_usage:
+        usage_coverage = "unavailable"
+    elif usage_coverages and all(value == "complete" for value in usage_coverages):
+        usage_coverage = "complete"
+    else:
+        usage_coverage = "partial"
     return {
         "source_identity": source_identity,
         "integrity": {"status": "verified"},
@@ -947,8 +1047,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "invocations": invocations,
             "totals": {
                 "elapsed_seconds": invocation_seconds,
-                "usage": _sum_usage(receipt_metrics),
-                "compaction_usage": _sum_usage(receipt_metrics, "compaction"),
+                "usage": total_usage,
+                "compaction_usage": total_compaction_usage,
+                "usage_coverage": usage_coverage,
                 "cost": {
                     "status": total_cost_status,
                     "kind": "pi_reported_estimate"

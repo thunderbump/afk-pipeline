@@ -1,4 +1,6 @@
+import hashlib
 import json
+import os
 import subprocess
 import tempfile
 import unittest
@@ -9,6 +11,7 @@ from afk_inference import Capability, FixtureAdapter, InferenceRuntime, Scripted
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
     MAX_JSONL_RECORD_BYTES,
+    _invocation,
     _validated_publication,
     _verify_generic_receipt,
     build_report,
@@ -90,6 +93,25 @@ class MetricsEventTests(unittest.TestCase):
         self.assertIsNone(result["cost"]["amount"])
         self.assertFalse(result["request_count_exact"])
 
+    def test_retry_makes_cost_coverage_partial_even_with_a_measured_final(self):
+        events = [
+            {"type": "auto_retry_start", "attempt": 1},
+            {
+                "type": "message_end",
+                "message": {
+                    "id": "ok",
+                    "role": "assistant",
+                    "usage": {"input": 1, "cost": {"total": 0.01}},
+                },
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            result = parse_pi_events(path)
+        self.assertEqual(result["coverage"], "partial")
+        self.assertEqual(result["cost"]["status"], "partial")
+
     def test_cost_is_retained_when_token_categories_are_missing(self):
         events = [
             {
@@ -159,6 +181,41 @@ class MetricsEventTests(unittest.TestCase):
 
 
 class MetricsIntegrityTests(unittest.TestCase):
+    def test_unsupported_adapter_is_preserved_with_unavailable_metrics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "worker/inference"
+            evidence.mkdir(parents=True)
+            invocation = {
+                "schema_version": 1,
+                "purpose": "feedback_response",
+                "adapter": {"kind": "copilot", "identity": "copilot-v1"},
+            }
+            raw = json.dumps(invocation).encode()
+            (evidence / "invocation.json").write_bytes(raw)
+            receipt = {
+                "schema_version": 1,
+                "identity": {
+                    "runtime": "afk-inference-v1",
+                    "adapter": "copilot-v1",
+                    "adapter_family": "copilot",
+                },
+                "hashes": {"invocation_sha256": hashlib.sha256(raw).hexdigest()},
+                "timing": {
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "ended_at": "2026-01-01T00:00:01Z",
+                    "duration_seconds": 1,
+                },
+                "outcome": "succeeded",
+                "attempt_count": 1,
+                "attempts": [],
+            }
+            (evidence / "receipt.json").write_text(json.dumps(receipt))
+            result = _invocation(root, "worker/inference", "feedback_response")
+        self.assertEqual(result["adapter_family"], "copilot")
+        self.assertEqual(result["metrics"]["coverage"], "unavailable")
+        self.assertEqual(result["metrics"]["reason"], "unsupported_adapter")
+
     def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -281,7 +338,8 @@ class MetricsReportTests(unittest.TestCase):
                     "response_validator_seconds": None,
                     "metrics": {
                         "retry_count": 0,
-                        "usage": {},
+                        "coverage": "complete",
+                        "usage": {"input": 1},
                         "compaction": {"usage": {}},
                         "cost": {"amount": None, "status": "unavailable"},
                     },
@@ -301,7 +359,41 @@ class MetricsReportTests(unittest.TestCase):
             "unsealed_abandoned_invocation",
         )
         self.assertIsNone(report["inference"]["totals"]["elapsed_seconds"])
+        self.assertEqual(report["inference"]["totals"]["usage"], {"input": 1})
+        self.assertEqual(report["inference"]["totals"]["usage_coverage"], "partial")
         self.assertEqual(report["timing"]["unattributed_seconds"], 8)
+
+    def test_validation_component_symlink_is_invalid_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            external = root / "external"
+            external.mkdir()
+            (external / "output.json").write_text("{}")
+            os.symlink(external, root / "01-validation")
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {
+                    "history": [
+                        {
+                            "component": "validation",
+                            "directory": "01-validation",
+                            "outcome": "passed",
+                        }
+                    ],
+                    "status": "completed",
+                },
+                "coordinator": root,
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(report["integrity"]["status"], "invalid")
+        self.assertIsNone(report["timing"])
 
     def test_malformed_validation_output_is_invalid_not_a_metric(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -339,6 +431,52 @@ class MetricsReportTests(unittest.TestCase):
                 report = summarize_source(root)
         self.assertEqual(report["integrity"]["status"], "invalid")
         self.assertIsNone(report["timing"])
+
+    def test_continuation_invocation_extends_original_run_wall_span(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = {
+                "identity": {"run_id": "run-1.continuation.01"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": [], "status": "completed"},
+                "coordinator": root,
+                "preparation": {
+                    "timestamps": {
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "prepared_at": "2026-01-01T00:00:01Z",
+                        "finished_at": "2026-01-01T00:00:05Z",
+                    },
+                    "repository": {},
+                },
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            (root / "planner/inference").mkdir(parents=True)
+            invocation = {
+                "source_event_identity": "continued-event",
+                "elapsed": {
+                    "seconds": 2,
+                    "started_at": "2026-01-01T00:00:18Z",
+                    "ended_at": "2026-01-01T00:00:20Z",
+                },
+                "response_validator_seconds": None,
+                "metrics": {
+                    "retry_count": 0,
+                    "coverage": "complete",
+                    "usage": {"input": 1},
+                    "compaction": {"usage": {}},
+                    "cost": {"amount": None, "status": "unavailable"},
+                },
+            }
+            with (
+                mock.patch("afk_metrics.report.load_source", return_value=observed),
+                mock.patch("afk_metrics.report._invocation", return_value=invocation),
+            ):
+                report = summarize_source(root)
+        self.assertEqual(report["timing"]["run_wall_span_seconds"], 20)
+        self.assertEqual(report["timing"]["unattributed_seconds"], 17)
 
     def test_divergent_sources_with_one_identity_fail_closed(self):
         first = {
@@ -392,6 +530,8 @@ class MetricsReportTests(unittest.TestCase):
                         "totals": {
                             "elapsed_seconds": 1,
                             "usage": {"input": 2},
+                            "compaction_usage": {"input": 3},
+                            "usage_coverage": "partial",
                             "cost": {"amount": 0.01},
                         },
                     },
@@ -406,6 +546,11 @@ class MetricsReportTests(unittest.TestCase):
         human = _human(report)
         self.assertIn("provider=openai", human)
         self.assertIn("model=gpt-test", human)
+        self.assertIn('usage (partial coverage): {"input": 2}', human)
+        self.assertIn(
+            'compaction usage (separate aggregate; partial coverage): {"input": 3}',
+            human,
+        )
         self.assertIn("accepted / succeeded", human)
 
 

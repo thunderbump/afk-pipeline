@@ -46,6 +46,7 @@ def _human(report):
                     if label not in model_parts:
                         model_parts.append(label)
             cost = totals["cost"]
+            usage_coverage = totals.get("usage_coverage", "unavailable")
             cost_text = "unavailable"
             if cost["amount"] is not None:
                 cost_text = (
@@ -62,7 +63,8 @@ def _human(report):
                     f"  inference invocation elapsed: {_available(totals['elapsed_seconds'])} s (includes adapter/runtime/tool work; not pure inference latency)",
                     f"  repository Validation: {_available(run['timing']['repository_validation_seconds'])} s",
                     "  Change / Iteration timing: unavailable / unavailable",
-                    f"  usage: {json.dumps(totals['usage'], sort_keys=True) if totals['usage'] else 'unavailable'}",
+                    f"  usage ({usage_coverage} coverage): {json.dumps(totals['usage'], sort_keys=True) if totals['usage'] else 'unavailable'}",
+                    f"  compaction usage (separate aggregate; {usage_coverage} coverage): {json.dumps(totals.get('compaction_usage', {}), sort_keys=True) if totals.get('compaction_usage') else 'unavailable'}",
                     f"  API cost: {cost_text}",
                     f"  completion acceptance / integration: {_available(outcome['completion_acceptance'])} / {_available(outcome['integration_status'])}",
                 ]
