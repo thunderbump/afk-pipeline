@@ -1,0 +1,63 @@
+{
+  "decision": "stop",
+  "history": [
+    {
+      "component": "attempt",
+      "directory": "01-attempt",
+      "input_from": {
+        "assignment": "assignment.json"
+      },
+      "outcome": "succeeded",
+      "sequence": 1
+    },
+    {
+      "component": "validation",
+      "directory": "02-validation",
+      "input_from": {
+        "change": "01-attempt",
+        "workspace": "assignment.json"
+      },
+      "outcome": "passed",
+      "sequence": 2
+    },
+    {
+      "component": "change",
+      "directory": "03-change",
+      "input_from": {
+        "source": "01-attempt"
+      },
+      "outcome": "completed",
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "directory": "04-review",
+      "input_from": {
+        "change": "03-change",
+        "validation": "02-validation"
+      },
+      "outcome": "completed",
+      "sequence": 4
+    },
+    {
+      "component": "assessment",
+      "directory": "05-assessment",
+      "input_from": {
+        "review": "04-review"
+      },
+      "outcome": "completed",
+      "sequence": 5
+    },
+    {
+      "component": "iteration",
+      "directory": "06-iteration",
+      "input_from": {
+        "assessment": "05-assessment"
+      },
+      "outcome": "completed",
+      "sequence": 6
+    }
+  ],
+  "outcome": "completed",
+  "schema_version": 1
+}

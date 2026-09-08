@@ -6,6 +6,7 @@ import os
 import sys
 from pathlib import Path
 
+from .publication import PublicationError, publish
 from .report import build_report
 
 
@@ -102,6 +103,31 @@ def _human(report):
 
 
 def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "publish":
+        parser = argparse.ArgumentParser(
+            prog="python3 -m afk_metrics publish",
+            description="publish bound AFK metrics snapshots",
+        )
+        parser.add_argument("input_json", type=Path)
+        parser.add_argument("destination_json", type=Path)
+        args = parser.parse_args(arguments[1:])
+        try:
+            publication = publish(args.input_json, args.destination_json)
+        except PublicationError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        print(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "destination": str(args.destination_json),
+                    "runs": len(publication["runs"]),
+                }
+            )
+        )
+        return 0
+
     parser = argparse.ArgumentParser(
         description="report optional metrics from retained AFK Runs"
     )
@@ -114,7 +140,7 @@ def main(argv=None):
         type=Path,
         help="new directory for summary.json and comparison.txt",
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     destination = args.destination
     destination_resolved = destination.resolve()
     for source in args.sources:

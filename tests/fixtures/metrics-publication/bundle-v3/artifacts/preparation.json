@@ -1,0 +1,42 @@
+{
+  "bead": {
+    "id": "central-example"
+  },
+  "coordinator": {
+    "command": [
+      "python3",
+      "-m",
+      "afk_coordinate",
+      "/tmp/tmpkqrehlek/r3/source-run/coordinator-request.json",
+      "/tmp/tmpkqrehlek/r3/source-run/coordinator"
+    ],
+    "decision": "stop",
+    "directory": "coordinator",
+    "exit_code": 0,
+    "outcome": "completed",
+    "result": "coordinator/output.json",
+    "status": "completed"
+  },
+  "errors": [],
+  "preparation_status": "prepared",
+  "project": {
+    "slug": "operations-webui"
+  },
+  "repository": {
+    "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "base_ref": "main",
+    "branch": "afk-central-example-run-example",
+    "path": "/tmp/tmpkqrehlek/r3/repository",
+    "worktree": "/tmp/tmpkqrehlek/r3/workspace"
+  },
+  "run": {
+    "artifact_root": "/tmp/tmpkqrehlek/r3/source-run",
+    "id": "synthetic-run-v3"
+  },
+  "schema_version": 1,
+  "timestamps": {
+    "finished_at": "2026-08-19T00:01:00Z",
+    "prepared_at": "2026-08-19T00:00:01Z",
+    "started_at": "2026-08-19T00:00:00Z"
+  }
+}

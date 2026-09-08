@@ -1,0 +1,140 @@
+{
+  "files": [
+    {
+      "bytes": 277,
+      "path": "artifacts/assignment.json",
+      "sha256": "cb5ff92bac3e7e46957d5e5f8043b09e22be1b1c64b6074b8123ba41267c38da"
+    },
+    {
+      "bytes": 208,
+      "path": "artifacts/bead.json",
+      "sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27"
+    },
+    {
+      "bytes": 234,
+      "path": "artifacts/coordinator-request.json",
+      "sha256": "87870cca885cf613ec0d09e7fb4a4068d6ab43b5b2e6ceaf31311ba1d63d853e"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/01-attempt/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 53,
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02"
+    },
+    {
+      "bytes": 131,
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351"
+    },
+    {
+      "bytes": 56,
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3"
+    },
+    {
+      "bytes": 126,
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b"
+    },
+    {
+      "bytes": 18,
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee"
+    },
+    {
+      "bytes": 52,
+      "path": "artifacts/coordinator/03-change/input.json",
+      "sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8"
+    },
+    {
+      "bytes": 272,
+      "path": "artifacts/coordinator/03-change/output.json",
+      "sha256": "8e3937c9494892a152fc837fbe7f44e839ed571dcf34ac778a0fb7ba4376e80c"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 52,
+      "path": "artifacts/coordinator/04-review/input.json",
+      "sha256": "a2840276de131dfea3f6e53471c5ac31ded5949c0fdf1c09e89fcbe7e06b4e59"
+    },
+    {
+      "bytes": 756,
+      "path": "artifacts/coordinator/04-review/output.json",
+      "sha256": "c8db55bc21495e9e68096becc0c17a96d6e9a077f0bf3a48bfdf0c1e836ecb6b"
+    },
+    {
+      "bytes": 35,
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/05-assessment/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 56,
+      "path": "artifacts/coordinator/05-assessment/input.json",
+      "sha256": "55d2cb42bd05051e63a27c18b919da912f73fa7b36c1551a70ca834480c6dc97"
+    },
+    {
+      "bytes": 452,
+      "path": "artifacts/coordinator/05-assessment/output.json",
+      "sha256": "f95b1ddfc984e973a19f4202313cdda29fa886600b7ce807290a5f343af8674e"
+    },
+    {
+      "bytes": 55,
+      "path": "artifacts/coordinator/06-iteration/input.json",
+      "sha256": "dff60d96e1222bf098afd9c4725d9851e4d281d40df78c96791eaf11d6b5abc2"
+    },
+    {
+      "bytes": 202,
+      "path": "artifacts/coordinator/06-iteration/output.json",
+      "sha256": "c14416aba787f3e40cb4e567687ed84cef2893da21e70a963627c20b1c362727"
+    },
+    {
+      "bytes": 277,
+      "path": "artifacts/coordinator/assignment.json",
+      "sha256": "cb5ff92bac3e7e46957d5e5f8043b09e22be1b1c64b6074b8123ba41267c38da"
+    },
+    {
+      "bytes": 234,
+      "path": "artifacts/coordinator/input.json",
+      "sha256": "87870cca885cf613ec0d09e7fb4a4068d6ab43b5b2e6ceaf31311ba1d63d853e"
+    },
+    {
+      "bytes": 1323,
+      "path": "artifacts/coordinator/output.json",
+      "sha256": "6beed93b9bcdcf9abb6c71a8cfa04c678568ad60ce33385a6bf86cf82a721cdf"
+    },
+    {
+      "bytes": 1421,
+      "path": "artifacts/coordinator/state.json",
+      "sha256": "92505c307466add1599e1df69ae01e4c569670cddc580f8b86743eddb5dc5ef8"
+    },
+    {
+      "bytes": 984,
+      "path": "artifacts/preparation.json",
+      "sha256": "b162577f2bc3ed3a42659af6f5c3f1b4ecfffead8ef2f1c11599590adab4a47d"
+    },
+    {
+      "bytes": 16430,
+      "path": "workflow-run.json",
+      "sha256": "775a1bceee1c0c5b963d0205730d1a65a6ea4b772c023d769c4837f7ea9f81a7"
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "synthetic-run-v2"
+  },
+  "kind": "afk-workflow-run",
+  "schema_version": 2
+}

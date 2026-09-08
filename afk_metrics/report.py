@@ -303,9 +303,11 @@ def parse_pi_events(
     cost_status = (
         "unavailable"
         if not has_cost and not compaction_has_cost
-        else "partial"
-        if cost_measurements < finalized + compactions or partial
-        else "reported_estimate"
+        else (
+            "partial"
+            if cost_measurements < finalized + compactions or partial
+            else "reported_estimate"
+        )
     )
     return {
         "finalized_requests": finalized,
@@ -900,9 +902,11 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     family = identity.get("adapter_family")
     timing = receipt.get("timing") if isinstance(receipt.get("timing"), dict) else {}
     base = {
-        "source_event_identity": receipt.get("hashes", {}).get("invocation_sha256")
-        if isinstance(receipt.get("hashes"), dict)
-        else None,
+        "source_event_identity": (
+            receipt.get("hashes", {}).get("invocation_sha256")
+            if isinstance(receipt.get("hashes"), dict)
+            else None
+        ),
         "purpose": purpose,
         "adapter": _identity_label(identity.get("adapter")),
         "adapter_family": _identity_label(family),
@@ -913,12 +917,16 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         "elapsed": {
             "kind": "invocation_adapter_elapsed_not_pure_inference",
             "seconds": _number(timing.get("duration_seconds")),
-            "started_at": timing.get("started_at")
-            if isinstance(timing.get("started_at"), str)
-            else None,
-            "ended_at": timing.get("ended_at")
-            if isinstance(timing.get("ended_at"), str)
-            else None,
+            "started_at": (
+                timing.get("started_at")
+                if isinstance(timing.get("started_at"), str)
+                else None
+            ),
+            "ended_at": (
+                timing.get("ended_at")
+                if isinstance(timing.get("ended_at"), str)
+                else None
+            ),
         },
         "response_validator_seconds": None,
         "response_validator_coverage": "unavailable",
@@ -1071,9 +1079,11 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     cost_status = (
         "unavailable"
         if not costs
-        else "partial"
-        if cost_groups < measured_groups or uncertain_cost_coverage
-        else "reported_estimate"
+        else (
+            "partial"
+            if cost_groups < measured_groups or uncertain_cost_coverage
+            else "reported_estimate"
+        )
     )
     merged["cost"] = {
         "status": cost_status,
@@ -1233,10 +1243,22 @@ def _validated_publication(value: dict[str, Any]) -> dict[str, Any]:
     return value
 
 
-def summarize_source(source: Path) -> dict[str, Any]:
+def summarize_source(
+    source: Path,
+    *,
+    observed: dict[str, Any] | None = None,
+    include_stage_binding: bool = False,
+) -> dict[str, Any]:
+    """Project a Run, optionally from an already authenticated observation.
+
+    The optional arguments are used only by the bound publication projection.
+    The ordinary report call and its JSON shape remain unchanged.
+    """
     source = Path(source)
     try:
-        observed = load_source(source, None, None, None)
+        observed = (
+            observed if observed is not None else load_source(source, None, None, None)
+        )
     except (
         OSError,
         ValueError,
@@ -1253,10 +1275,16 @@ def summarize_source(source: Path) -> dict[str, Any]:
     coordinator_prefix = (
         "" if observed["coordinator"].resolve() == root else "coordinator/"
     )
-    candidates: list[tuple[str, str]] = []
+    candidates: list[tuple[str, str, dict[str, Any]]] = []
     abandoned_candidates: set[str] = set()
     if (root / "planner/inference").exists():
-        candidates.append(("planner/inference", "acceptance_planning"))
+        candidates.append(
+            (
+                "planner/inference",
+                "acceptance_planning",
+                {"kind": "run", "purpose": "acceptance_planning"},
+            )
+        )
     for entry in state["history"]:
         # Abandoned denotes coordinator progression, not absence of evidence.
         # An interrupted component may already have sealed an invocation before
@@ -1267,13 +1295,23 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
             }.get(entry["component"], entry["component"])
-            candidates.append((relative, purpose))
+            candidates.append(
+                (
+                    relative,
+                    purpose,
+                    {
+                        "kind": "component",
+                        "sequence": entry.get("sequence"),
+                        "component": entry["component"],
+                    },
+                )
+            )
             if entry.get("outcome") == "abandoned":
                 abandoned_candidates.add(relative)
     invocations = []
     seen = set()
     try:
-        for relative, purpose in candidates:
+        for relative, purpose, stage_owner in candidates:
             receipt_path = root / relative / "receipt.json"
             if relative in abandoned_candidates and not receipt_path.is_file():
                 item = _unavailable_invocation(relative, purpose)
@@ -1282,6 +1320,8 @@ def summarize_source(source: Path) -> dict[str, Any]:
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
+                if include_stage_binding:
+                    item["_stage_owner"] = stage_owner
                 invocations.append(item)
     except (
         OSError,
@@ -1294,6 +1334,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
     ) as error:
         return _invalid_source(source, error, identity, assignment)
     validation_durations = []
+    validation_stage_measurements: dict[int, dict[str, Any]] = {}
     validation_intervals: list[tuple[str, str]] = []
     validation_duration_missing = 0
     validation_results = []
@@ -1321,6 +1362,13 @@ def summarize_source(source: Path) -> dict[str, Any]:
                     validation_durations.append(duration)
                 else:
                     validation_duration_missing += 1
+                if include_stage_binding:
+                    validation_stage_measurements[entry["sequence"]] = {
+                        "seconds": duration,
+                        "coverage": (
+                            "complete" if duration is not None else "unavailable"
+                        ),
+                    }
                 validation_start = output.get("started_at")
                 validation_end = output.get("finished_at")
                 if validation_start is not None or validation_end is not None:
@@ -1450,12 +1498,14 @@ def summarize_source(source: Path) -> dict[str, Any]:
     total_cost_status = (
         "unavailable"
         if not available_costs
-        else "partial"
-        if any(
-            metrics.get("cost", {}).get("status") != "reported_estimate"
-            for metrics in receipt_metrics
+        else (
+            "partial"
+            if any(
+                metrics.get("cost", {}).get("status") != "reported_estimate"
+                for metrics in receipt_metrics
+            )
+            else "reported_estimate"
         )
-        else "reported_estimate"
     )
     validator_durations = [
         duration
@@ -1465,9 +1515,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
     validator_coverages = [
         item.get(
             "response_validator_coverage",
-            "complete"
-            if item.get("response_validator_seconds") is not None
-            else "unavailable",
+            (
+                "complete"
+                if item.get("response_validator_seconds") is not None
+                else "unavailable"
+            ),
         )
         for item in invocations
     ]
@@ -1494,7 +1546,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
         usage_coverage = "complete"
     else:
         usage_coverage = "partial"
-    return {
+    result = {
         "source_identity": source_identity,
         "integrity": {"status": "verified"},
         "run_identity": {**identity, "bead_id": observed.get("bead_id")},
@@ -1502,9 +1554,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "objective_sha256": hashlib.sha256(
                 assignment["objective"].encode()
             ).hexdigest(),
-            "base_commit": prep.get("repository", {}).get("base_commit")
-            if isinstance(prep, dict)
-            else None,
+            "base_commit": (
+                prep.get("repository", {}).get("base_commit")
+                if isinstance(prep, dict)
+                else None
+            ),
             "validation_conditions_sha256": _canonical_hash(
                 observed["request"].get("validation")
             ),
@@ -1530,9 +1584,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 "usage_coverage": usage_coverage,
                 "cost": {
                     "status": total_cost_status,
-                    "kind": "pi_reported_estimate"
-                    if available_costs
-                    else "unavailable",
+                    "kind": (
+                        "pi_reported_estimate" if available_costs else "unavailable"
+                    ),
                     "amount": sum(available_costs) if available_costs else None,
                     "currency": None,
                     "billed_charge": False if available_costs else None,
@@ -1545,18 +1599,18 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "preparation_seconds": prep_seconds,
             "publication_seconds": publication_seconds,
             "inference_invocation_seconds": invocation_seconds,
-            "repository_validation_seconds": sum(validation_durations)
-            if validation_durations
-            else None,
+            "repository_validation_seconds": (
+                sum(validation_durations) if validation_durations else None
+            ),
             "repository_validation_coverage": repository_validation_coverage,
-            "response_validator_seconds": sum(validator_durations)
-            if validator_durations
-            else None,
+            "response_validator_seconds": (
+                sum(validator_durations) if validator_durations else None
+            ),
             "response_validator_coverage": response_validator_coverage,
             "deterministic_steps": {
-                "Validation": sum(validation_durations)
-                if validation_durations
-                else "unavailable",
+                "Validation": (
+                    sum(validation_durations) if validation_durations else "unavailable"
+                ),
                 "Change": "unavailable",
                 "Iteration": "unavailable",
             },
@@ -1569,6 +1623,56 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
         },
     }
+    if include_stage_binding:
+        result["_publication_stage_data"] = {
+            "history": [
+                {
+                    "sequence": entry["sequence"],
+                    "component": entry["component"],
+                    "outcome": entry["outcome"],
+                }
+                for entry in state["history"]
+            ],
+            "repository_validation": validation_stage_measurements,
+        }
+    return result
+
+
+def build_comparisons(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Build the report's producer facts for every unordered Run pair."""
+    comparisons = []
+    for left_index, left in enumerate(runs):
+        for right in runs[left_index + 1 :]:
+            if left["work"] is None or right["work"] is None:
+                warnings = ["integrity prevents comparison"]
+            else:
+                names = {
+                    "objective_sha256": "objective",
+                    "base_commit": "base code state",
+                    "validation_conditions_sha256": "validation conditions",
+                }
+                warnings = [
+                    (
+                        f"unavailable {label}"
+                        if left["work"].get(field) is None
+                        or right["work"].get(field) is None
+                        else f"different {label}"
+                    )
+                    for field, label in names.items()
+                    if left["work"].get(field) is None
+                    or right["work"].get(field) is None
+                    or left["work"].get(field) != right["work"].get(field)
+                ]
+            comparisons.append(
+                {
+                    "left": left["source_identity"],
+                    "right": right["source_identity"],
+                    "equivalent_frozen_conditions": not warnings,
+                    "warnings": warnings,
+                    "ranking": "not_provided" if warnings else "observational_only",
+                }
+            )
+    return comparisons
 
 
 def build_report(sources: list[Path]) -> dict[str, Any]:
@@ -1608,36 +1712,7 @@ def build_report(sources: list[Path]) -> dict[str, Any]:
                 "timing": None,
             }
         )
-    comparisons = []
-    for left_index, left in enumerate(runs):
-        for right in runs[left_index + 1 :]:
-            if left["work"] is None or right["work"] is None:
-                warnings = ["integrity prevents comparison"]
-            else:
-                names = {
-                    "objective_sha256": "objective",
-                    "base_commit": "base code state",
-                    "validation_conditions_sha256": "validation conditions",
-                }
-                warnings = [
-                    f"unavailable {label}"
-                    if left["work"].get(field) is None
-                    or right["work"].get(field) is None
-                    else f"different {label}"
-                    for field, label in names.items()
-                    if left["work"].get(field) is None
-                    or right["work"].get(field) is None
-                    or left["work"].get(field) != right["work"].get(field)
-                ]
-            comparisons.append(
-                {
-                    "left": left["source_identity"],
-                    "right": right["source_identity"],
-                    "equivalent_frozen_conditions": not warnings,
-                    "warnings": warnings,
-                    "ranking": "not_provided" if warnings else "observational_only",
-                }
-            )
+    comparisons = build_comparisons(runs)
     return {
         "schema_version": 1,
         "report_kind": "afk_retained_run_metrics",

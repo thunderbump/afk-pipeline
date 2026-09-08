@@ -1,0 +1,22 @@
+{
+  "artifacts": {
+    "events": "events.jsonl",
+    "stderr": "stderr.log"
+  },
+  "assessment": {
+    "decisions": [
+      {
+        "defect_decision": "confirmed",
+        "finding_index": 0,
+        "rationale": "Relevant.",
+        "scope": {
+          "kind": "current",
+          "rationale": "The current objective owns this behavior."
+        }
+      }
+    ],
+    "summary": "Address it."
+  },
+  "outcome": "completed",
+  "schema_version": 1
+}
