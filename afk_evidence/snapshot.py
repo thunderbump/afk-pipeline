@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
-import os
-import stat
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from afk_assess.contract import validate_assessment
 from afk_attempt.contract import validate_assignment
 from afk_change.contract import validate_change_output, validate_repository_state
 from afk_coordinate.contract import (
@@ -20,8 +18,17 @@ from afk_coordinate.contract import (
     validate_output,
     validate_request,
 )
+from afk_related_work import validate_snapshot_bytes
+from afk_review.contract import validate_review
 from afk_validate.evidence import evidence_identity
 
+from .access import (
+    MAX_RELATED_WORK_BYTES,
+    MAX_VALIDATION_LOG_BYTES,
+    EvidenceAccessError,
+    EvidenceReader,
+    EvidenceUnavailable,
+)
 from .continuation import (
     continuation_directories,
     require_exhausted_structure,
@@ -29,18 +36,12 @@ from .continuation import (
     validate_link,
 )
 
-MAX_JSON_BYTES = 1024 * 1024
-MAX_RELATED_WORK_BYTES = 256 * 1024
-MAX_VALIDATION_LOG_BYTES = 25 * 1024 * 1024
 
-
-class RunValidationError(ValueError):
+class RunValidationError(EvidenceAccessError):
     """Evidence exists but is malformed, contradictory, or unsafe."""
 
 
-class _Unavailable(Exception):
-    def __init__(self, reason: str, identity: str):
-        self.reason, self.identity = reason, identity
+_Unavailable = EvidenceUnavailable
 
 
 @dataclass(frozen=True)
@@ -88,104 +89,7 @@ class RunSnapshot:
     proof: ProofResult
 
 
-class _Reader:
-    def __init__(self, roots):
-        self.roots = tuple(self._safe_root(Path(root)) for root in roots)
-        self.identities: dict[str, str] = {}
-
-    @staticmethod
-    def _safe_root(root):
-        absolute = root.absolute()
-        current = Path(absolute.anchor)
-        for part in absolute.parts[1:]:
-            current /= part
-            try:
-                facts = current.lstat()
-            except OSError as error:
-                raise RunValidationError(
-                    "trusted evidence root is unavailable"
-                ) from error
-            if stat.S_ISLNK(facts.st_mode):
-                raise RunValidationError("trusted evidence root contains a symlink")
-        if not absolute.is_dir():
-            raise RunValidationError("trusted evidence root is not a directory")
-        return absolute
-
-    def _relative(self, path):
-        absolute = Path(path).absolute()
-        for root in self.roots:
-            try:
-                return root, absolute.relative_to(root)
-            except ValueError:
-                pass
-        raise RunValidationError(
-            f"evidence reference escapes trusted roots: {absolute}"
-        )
-
-    def bytes(self, path, limit, *, missing_unavailable=True):
-        root, relative = self._relative(path)
-        if not relative.parts:
-            raise RunValidationError("evidence reference is not a file")
-        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
-        opened = [descriptor]
-        try:
-            for part in relative.parts[:-1]:
-                if part in ("", ".", ".."):
-                    raise RunValidationError("unsafe evidence path")
-                descriptor = os.open(
-                    part,
-                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                    dir_fd=descriptor,
-                )
-                opened.append(descriptor)
-            try:
-                file_descriptor = os.open(
-                    relative.parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor
-                )
-            except FileNotFoundError as error:
-                if missing_unavailable:
-                    raise _Unavailable("missing evidence", str(path)) from error
-                raise
-            except OSError as error:
-                raise RunValidationError(f"unsafe evidence file: {path}") from error
-            opened.append(file_descriptor)
-            before = os.fstat(file_descriptor)
-            if not stat.S_ISREG(before.st_mode):
-                raise RunValidationError(f"evidence is not a regular file: {path}")
-            if before.st_size > limit:
-                raise _Unavailable("evidence exceeds proof-read limit", str(path))
-            chunks, remaining = [], limit + 1
-            while remaining:
-                chunk = os.read(file_descriptor, min(65536, remaining))
-                if not chunk:
-                    break
-                chunks.append(chunk)
-                remaining -= len(chunk)
-            raw = b"".join(chunks)
-            after = os.fstat(file_descriptor)
-            if len(raw) > limit:
-                raise _Unavailable("evidence exceeds proof-read limit", str(path))
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-                after.st_dev,
-                after.st_ino,
-                after.st_size,
-                after.st_mtime_ns,
-            ) or len(raw) != before.st_size:
-                raise RunValidationError("evidence changed while it was read")
-            key = str(Path(path).absolute())
-            self.identities[key] = hashlib.sha256(raw).hexdigest()
-            return raw
-        finally:
-            for item in reversed(opened):
-                os.close(item)
-
-    def json(self, path):
-        raw = self.bytes(path, MAX_JSON_BYTES)
-        try:
-            value = json.loads(raw.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as error:
-            raise RunValidationError(f"malformed JSON evidence: {path}") from error
-        return value
+_Reader = EvidenceReader
 
 
 def _context(value, run_root):
@@ -255,25 +159,7 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
             ):
                 raise RunValidationError("malformed related-work reference")
             related_raw = reader.bytes(Path(related_path), MAX_RELATED_WORK_BYTES)
-            if (
-                related_reference.get("bytes") != len(related_raw)
-                or related_reference.get("sha256")
-                != hashlib.sha256(related_raw).hexdigest()
-            ):
-                raise RunValidationError("related-work snapshot identity disagrees")
-            try:
-                related_records = [
-                    json.loads(line)
-                    for line in related_raw.decode("utf-8").splitlines()
-                ]
-            except (UnicodeDecodeError, json.JSONDecodeError) as error:
-                raise RunValidationError("malformed related-work snapshot") from error
-            if (
-                not related_records
-                or not all(isinstance(record, dict) for record in related_records)
-                or related_reference.get("record_count") != len(related_records)
-            ):
-                raise RunValidationError("related-work snapshot membership disagrees")
+            validate_snapshot_bytes(related_raw, related_reference)
         state = validate_checkpoint(reader.json(coordinator / "state.json"))
         if state["status"] == "running":
             raise RunValidationError("base Coordinator Run is not terminal")
@@ -332,23 +218,22 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
                     "selected continuation is not a sealed terminal"
                 )
 
-        # Prove every selected invocation envelope and bind the bytes read.
-        selected_roots = [
-            coordinator,
-            *directories[: int(selected.continuation_id or "0")],
-        ]
-        for record in selected.state["history"]:
+        # Historical selection changes only the returned prefix.  Proof always
+        # covers the newest retained history, including an active tail.
+        proof_roots = [coordinator, *directories]
+        proof_state = active.state if active is not None else latest.state
+        for record in proof_state["history"]:
             if record["outcome"] == "abandoned":
                 continue
             component_output = reader.json(
-                _invocation_path(selected_roots, record, "output.json")
+                _invocation_path(proof_roots, record, "output.json")
             )
             outcome = validate_component_output(record["component"], component_output)
             if outcome != record["outcome"]:
                 raise RunValidationError(
                     "component outcome disagrees with Coordinator history"
                 )
-        _verify_stage_provenance(reader, selected, selected_roots)
+        _verify_stage_provenance(reader, proof_state["history"], proof_roots, context)
     except _Unavailable as unavailable:
         proof = ProofResult("unavailable", unavailable.reason, unavailable.identity)
     except (KeyError, TypeError, ValueError) as error:
@@ -404,36 +289,86 @@ def _invocation_path(bases, record, name):
     return Path(bases[0]) / record["directory"] / name
 
 
-def _verify_stage_provenance(reader, terminal, roots):
-    history = terminal.state["history"]
-    by_component = {}
+def _verify_stage_provenance(reader, history, roots, context):
+    """Deeply prove every completed cycle, not merely its final rows."""
+    from .stages import verify_change_lineage
+
+    successful = []
+    reviews = {}
     for row in history:
-        if row["outcome"] == COMPONENT_TOPOLOGY[row["component"]]["success"]:
-            by_component[row["component"]] = row
-    review_row = by_component.get("review")
-    if review_row is None:
-        return
-    change_row = by_component.get("change")
-    validation_row = by_component.get("validation")
-    if change_row is None or validation_row is None:
-        raise RunValidationError("Review lacks Change or Validation provenance")
+        if row["outcome"] != COMPONENT_TOPOLOGY[row["component"]]["success"]:
+            continue
+        successful.append(row)
+        directory = _invocation_path(roots, row, "output.json").parent
+        if row["component"] == "change":
+            verify_change_lineage(
+                directory,
+                reader=reader,
+                repository=context.repository,
+                verify_git=context.repository is not None,
+            )
+        elif row["component"] == "review":
+            change_row = next(
+                (
+                    item
+                    for item in reversed(successful[:-1])
+                    if item["component"] == "change"
+                ),
+                None,
+            )
+            validation_row = next(
+                (
+                    item
+                    for item in reversed(successful[:-1])
+                    if item["component"] == "validation"
+                ),
+                None,
+            )
+            if change_row is None or validation_row is None:
+                raise RunValidationError("Review lacks Change or Validation provenance")
+            reviews[row["sequence"]] = _verify_review(
+                reader, roots, row, change_row, validation_row
+            )
+        elif row["component"] == "assessment":
+            review_row = next(
+                (
+                    item
+                    for item in reversed(successful[:-1])
+                    if item["component"] == "review"
+                ),
+                None,
+            )
+            if review_row is None:
+                raise RunValidationError("Assessment lacks Review provenance")
+            _verify_assessment(
+                reader, roots, row, review_row, reviews[review_row["sequence"]]
+            )
+
+
+def _related_ids(reader, reference):
+    if reference is None:
+        return set()
+    raw = reader.bytes(Path(reference.get("path", "")), MAX_RELATED_WORK_BYTES)
+    validate_snapshot_bytes(raw, reference)
+    return {json.loads(line)["id"] for line in raw.splitlines()}
+
+
+def _verify_review(reader, roots, review_row, change_row, validation_row):
     review_dir = _invocation_path(roots, review_row, "output.json").parent
     change_dir = _invocation_path(roots, change_row, "output.json").parent
     validation_dir = _invocation_path(roots, validation_row, "output.json").parent
     review_input = reader.json(review_dir / "input.json")
     review_output = reader.json(review_dir / "output.json")
-    expected_paths = {
-        "change_directory": change_dir.absolute(),
-        "validation_directory": validation_dir.absolute(),
-    }
-    for field, expected in expected_paths.items():
+    for field, expected in (
+        ("change_directory", change_dir),
+        ("validation_directory", validation_dir),
+    ):
         value = review_input.get(field)
         if not isinstance(value, str) or not Path(value).is_absolute():
             raise RunValidationError(f"invalid Review {field}")
-        reader._relative(Path(value))
-        if Path(value).absolute() != expected:
+        reader.relative(value)
+        if Path(value).absolute() != expected.absolute():
             raise RunValidationError(f"Review {field} does not match history")
-
     change = validate_change_output(reader.json(change_dir / "output.json"))
     validation_input = reader.json(validation_dir / "input.json")
     validation_output = reader.json(validation_dir / "output.json")
@@ -445,61 +380,67 @@ def _verify_stage_provenance(reader, terminal, roots):
             logs.append(raw.decode("utf-8"))
         except UnicodeDecodeError as error:
             raise RunValidationError("Validation log is not UTF-8") from error
-    identity = evidence_identity(validation_input, validation_output, logs[0], logs[1])
-    if review_output.get("validation_evidence") != identity:
+    if review_output.get("validation_evidence") != evidence_identity(
+        validation_input, validation_output, *logs
+    ):
         raise RunValidationError("Review-bound Validation evidence identity disagrees")
-
-    change_state = _subject(change["repository"]["after"])
-    validation_before = _subject(validation_output["repository"]["before"])
-    validation_after = _subject(validation_output["repository"]["after"])
-    review_repository = review_output.get("repository")
-    if not isinstance(review_repository, dict):
+    repository = review_output.get("repository")
+    if not isinstance(repository, dict):
         raise RunValidationError("invalid Review repository evidence")
-    review_before = _subject(review_repository.get("before"))
-    review_after = _subject(review_repository.get("after"))
+    subject = _subject(change["repository"]["after"])
+    states = [
+        _subject(validation_output["repository"][key]) for key in ("before", "after")
+    ]
+    states += [_subject(repository.get(key)) for key in ("before", "after")]
     if (
         review_output.get("outcome") != "completed"
-        or review_repository.get("unchanged") is not True
-        or not (
-            change_state
-            == validation_before
-            == validation_after
-            == review_before
-            == review_after
-        )
+        or repository.get("unchanged") is not True
+        or any(state != subject for state in states)
     ):
         raise RunValidationError("Change, Validation and Review subjects disagree")
     workspace = review_input.get("workspace")
-    validation_workspace = validation_input.get("workspace")
     if (
         not isinstance(workspace, str)
-        or not isinstance(validation_workspace, str)
         or Path(workspace).absolute() != Path(change["workspace"]).absolute()
-        or Path(validation_workspace).absolute() != Path(workspace).absolute()
+        or Path(validation_input["workspace"]).absolute() != Path(workspace).absolute()
     ):
         raise RunValidationError("stage workspaces disagree")
+    related = review_input.get("related_work")
+    review = validate_review(
+        review_output.get("review"),
+        Path(workspace),
+        subject["head"],
+        _related_ids(reader, related),
+    )
+    return review_dir, review_input, review_output, review, subject
 
-    assessment_row = by_component.get("assessment")
-    if assessment_row:
-        assessment_dir = _invocation_path(roots, assessment_row, "output.json").parent
-        assessment_input = reader.json(assessment_dir / "input.json")
-        assessment_output = reader.json(assessment_dir / "output.json")
-        review_reference = assessment_input.get("review_directory")
-        repository = assessment_output.get("repository")
-        if (
-            not isinstance(review_reference, str)
-            or Path(review_reference).absolute() != review_dir.absolute()
-            or not isinstance(repository, dict)
-            or assessment_output.get("outcome") != "completed"
-            or repository.get("unchanged") is not True
-            or _subject(repository.get("before")) != review_after
-            or _subject(repository.get("after")) != review_after
-        ):
-            raise RunValidationError("Assessment subject does not match Review")
-        if assessment_input.get("related_work") != review_input.get("related_work"):
-            raise RunValidationError(
-                "Assessment related-work evidence disagrees with Review"
-            )
+
+def _verify_assessment(reader, roots, row, review_row, review_facts):
+    review_dir, review_input, _review_output, review, subject = review_facts
+    directory = _invocation_path(roots, row, "output.json").parent
+    input_value = reader.json(directory / "input.json")
+    output = reader.json(directory / "output.json")
+    reference = input_value.get("review_directory")
+    repository = output.get("repository")
+    if (
+        not isinstance(reference, str)
+        or Path(reference).absolute() != review_dir.absolute()
+        or not isinstance(repository, dict)
+        or output.get("outcome") != "completed"
+        or repository.get("unchanged") is not True
+        or _subject(repository.get("before")) != subject
+        or _subject(repository.get("after")) != subject
+    ):
+        raise RunValidationError("Assessment subject does not match Review")
+    if input_value.get("related_work") != review_input.get("related_work"):
+        raise RunValidationError(
+            "Assessment related-work evidence disagrees with Review"
+        )
+    validate_assessment(
+        review,
+        output.get("assessment"),
+        _related_ids(reader, input_value.get("related_work")),
+    )
 
 
 def _subject(value):

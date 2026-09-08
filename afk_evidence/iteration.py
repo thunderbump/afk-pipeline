@@ -4,8 +4,13 @@ import json
 from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
+from afk_evidence.access import (
+    MAX_RELATED_WORK_BYTES,
+    EvidenceReader,
+    EvidenceUnavailable,
+)
 from afk_evidence.stages import verify_change_lineage
-from afk_related_work import snapshot_ids
+from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_review
 
 
@@ -69,28 +74,35 @@ def validate_result_location(result_directory, workspace, evidence_directories):
         raise ValueError("result directory must be outside the workspace and evidence")
 
 
-def verified_assessment(assessment_directory):
+def verified_assessment(assessment_directory, reader=None):
+    # Stage evidence is conventionally a numbered child of one caller-owned Run
+    # root; that root also contains the explicitly supplied frozen related-work.
+    reader = reader or EvidenceReader((assessment_directory.absolute().parent.parent,))
     assessment_input = validate_stage_input(
-        read_object(assessment_directory / "input.json", "Finding Assessment input"),
+        read_object(
+            reader, assessment_directory / "input.json", "Finding Assessment input"
+        ),
         "Finding Assessment",
         "review_directory",
     )
     assessment_output = read_object(
-        assessment_directory / "output.json", "Finding Assessment output"
+        reader, assessment_directory / "output.json", "Finding Assessment output"
     )
     if assessment_output.get("outcome") != "completed":
         raise ValueError("iteration policy requires a completed Finding Assessment")
     workspace_value = assessment_input["workspace"]
     review_directory = Path(assessment_input["review_directory"])
     review_input = validate_stage_input(
-        read_object(review_directory / "input.json", "Review input"),
+        read_object(reader, review_directory / "input.json", "Review input"),
         "Review",
         "change_directory",
         "validation_directory",
     )
-    review_output = read_object(review_directory / "output.json", "Review output")
+    review_output = read_object(
+        reader, review_directory / "output.json", "Review output"
+    )
     change_directory = Path(review_input["change_directory"])
-    lineage = verify_change_lineage(change_directory)
+    lineage = verify_change_lineage(change_directory, reader=reader)
     change_after = lineage.after
 
     try:
@@ -126,9 +138,7 @@ def verified_assessment(assessment_directory):
     review_related = review_input.get("related_work")
     if assessment_input.get("related_work") != review_related:
         raise ValueError("Finding Assessment must use the Review related-work snapshot")
-    related_work_ids = (
-        snapshot_ids(review_related) if review_related is not None else set()
-    )
+    related_work_ids = _snapshot_ids(reader, review_related)
     review = validate_review(
         review_value, workspace, review_after["head"], related_work_ids
     )
@@ -185,12 +195,24 @@ def decide(actionable_findings, completed_responses, max_responses):
     }
 
 
-def read_object(path, name):
-    value = read_json(path)
+def read_object(reader, path, name):
+    try:
+        value = reader.json(path)
+    except EvidenceUnavailable as error:
+        raise ValueError(error.reason) from error
     if not isinstance(value, dict):
         raise TypeError(f"{name} must be an object")
     return value
 
 
-def read_json(path):
-    return json.loads(path.read_text())
+def _snapshot_ids(reader, reference):
+    if reference is None:
+        return set()
+    if not isinstance(reference, dict) or not isinstance(reference.get("path"), str):
+        raise TypeError("related-work reference is malformed")
+    try:
+        raw = reader.bytes(reference["path"], MAX_RELATED_WORK_BYTES)
+    except EvidenceUnavailable as error:
+        raise ValueError(error.reason) from error
+    validate_snapshot_bytes(raw, reference)
+    return {json.loads(line)["id"] for line in raw.splitlines()}

@@ -9,6 +9,7 @@ import time
 import unittest
 from pathlib import Path
 
+from afk_evidence import TrustedContext, read_run
 from afk_related_work import build_snapshot, reference
 
 ROOT = Path(__file__).parents[1]
@@ -84,6 +85,14 @@ class CoordinatorCliTest(unittest.TestCase):
         completed = self.invoke(request_path, run)
 
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        self.assertEqual(snapshot.selected_terminal.output["decision"], "stop")
+        self.assertEqual(snapshot.candidate_commit, self.git("rev-parse", "HEAD"))
         self.assertEqual(json.loads((run / "input.json").read_text()), request)
         self.assertEqual(json.loads((run / "assignment.json").read_text()), assignment)
         expected_history = [
@@ -369,11 +378,24 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("continuations/01/output.json", sources)
         self.assertEqual((run / "state.json").read_bytes(), original_state)
         self.assertEqual((run / "output.json").read_bytes(), original_output)
+        snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        self.assertEqual(snapshot.selected_terminal.continuation_id, "01")
 
         continuation_input = run / "continuations" / "01" / "input.json"
         malformed = json.loads(continuation_input.read_text())
         malformed["prior_output"] = "../../wrong.json"
         continuation_input.write_text(json.dumps(malformed))
+        with self.assertRaises(ValueError):
+            read_run(
+                run,
+                "latest",
+                TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+            )
         rejected = subprocess.run(
             [
                 str(ROOT / "afk"),

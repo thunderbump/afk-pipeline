@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -95,6 +96,30 @@ class RunSnapshotTest(unittest.TestCase):
         target.write_text('{"schema_version":1,"outcome":"failed"}')
         (self.run / "01-attempt/output.json").unlink()
         (self.run / "01-attempt/output.json").symlink_to(target)
+        with self.assertRaises(RunValidationError):
+            read_run(self.run, "latest", {"evidence_roots": [self.run]})
+
+    def test_oversized_private_json_is_unavailable_and_never_truncated(self):
+        (self.run / "01-attempt/output.json").write_bytes(b" " * (1024 * 1024 + 1))
+        snapshot = read_run(self.run, "latest", {"evidence_roots": [self.run]})
+        self.assertEqual(snapshot.proof.status, "unavailable")
+        self.assertIn("limit", snapshot.proof.reason)
+
+    def test_related_work_uses_the_full_canonical_membership_contract(self):
+        raw = b'{"id":"task","relationship":"subject","secret":"x"}\n'
+        related = self.run / "related-work.jsonl"
+        related.write_bytes(raw)
+        reference = {
+            "path": str(related),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "media_type": "application/x-ndjson",
+            "record_count": 1,
+            "bytes": len(raw),
+        }
+        self.assignment["related_work"] = reference
+        self.request["related_work"] = reference
+        self.write("assignment.json", self.assignment)
+        self.write("input.json", self.request)
         with self.assertRaises(RunValidationError):
             read_run(self.run, "latest", {"evidence_roots": [self.run]})
 

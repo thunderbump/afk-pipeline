@@ -127,6 +127,9 @@ def validate_repairable_failure(
     validation_directory: Path,
     workspace: Path | None = None,
     repository: dict[str, object] | None = None,
+    *,
+    reader=None,
+    log_limit: int = 25 * 1024 * 1024,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Return sealed input/output for one ordinary, stable nonzero failure.
 
@@ -134,11 +137,19 @@ def validate_repairable_failure(
     states, and unavailable logs are deliberately not repairable evidence.
     """
     validation_directory = Path(validation_directory)
-    if validation_directory.is_symlink() or not validation_directory.is_dir():
-        raise ValueError("Validation evidence directory is unavailable")
-    validation_directory = validation_directory.resolve()
-    validation_input = _read_object(validation_directory / "input.json", "input")
-    validation_output = _read_object(validation_directory / "output.json", "output")
+    if reader is None:
+        if validation_directory.is_symlink() or not validation_directory.is_dir():
+            raise ValueError("Validation evidence directory is unavailable")
+        validation_directory = validation_directory.resolve()
+        validation_input = _read_object(validation_directory / "input.json", "input")
+        validation_output = _read_object(validation_directory / "output.json", "output")
+    else:
+        validation_input = reader.json(validation_directory / "input.json")
+        validation_output = reader.json(validation_directory / "output.json")
+        if not isinstance(validation_input, dict) or not isinstance(
+            validation_output, dict
+        ):
+            raise TypeError("failed Validation input and output must be objects")
     if validation_input.get("schema_version") != 1:
         raise ValueError("Validation input must use schema_version 1")
     input_workspace = validation_input.get("workspace")
@@ -212,6 +223,9 @@ def validate_repairable_failure(
         raise ValueError("failed Validation logs are not identified")
     for name in artifacts.values():
         path = validation_directory / name
+        if reader is not None:
+            reader.bytes(path, log_limit)
+            continue
         try:
             facts = path.lstat()
         except OSError as error:

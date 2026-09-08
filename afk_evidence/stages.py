@@ -1,6 +1,7 @@
 """Verify Committed Change source evidence and expose its immutable lineage."""
 
 import json
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,12 +13,19 @@ from afk_change.contract import (
     validate_git_transition,
     validate_repository_state,
 )
-from afk_related_work import snapshot_ids
+from afk_related_work import validate_snapshot_bytes
 from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import validate_input as validate_response_input
 from afk_review.contract import validate_review
 from afk_runtime import git
 from afk_validate.evidence import validate_repairable_failure
+
+from .access import (
+    MAX_RELATED_WORK_BYTES,
+    MAX_VALIDATION_LOG_BYTES,
+    EvidenceReader,
+    EvidenceUnavailable,
+)
 
 
 @dataclass
@@ -29,8 +37,12 @@ class VerifiedLineage:
     evidence_directories: set[Path] = field(default_factory=set)
 
 
-def verify_source(kind, source_directory):
-    lineage = _Lineage()
+def verify_source(
+    kind, source_directory, *, reader=None, repository=None, verify_git=True
+):
+    directory = Path(source_directory).absolute()
+    root = directory.parent if kind == "attempt" else directory.parent.parent
+    lineage = _Lineage(reader or EvidenceReader((root,)), repository, verify_git)
     if kind == "attempt":
         assignment, before, after = _committed_attempt(source_directory, lineage)
     else:
@@ -46,8 +58,13 @@ def verify_source(kind, source_directory):
     )
 
 
-def verify_change_lineage(change_directory):
-    lineage = _Lineage()
+def verify_change_lineage(
+    change_directory, *, reader=None, repository=None, verify_git=True
+):
+    directory = Path(change_directory).absolute()
+    lineage = _Lineage(
+        reader or EvidenceReader((directory.parent,)), repository, verify_git
+    )
     assignment, before, after = _committed_change(change_directory, set(), lineage)
     return VerifiedLineage(
         assignment,
@@ -60,20 +77,30 @@ def verify_change_lineage(change_directory):
 
 @dataclass
 class _Lineage:
+    reader: EvidenceReader
+    repository: Path | None = None
+    verify_git: bool = True
     response_count: int = 0
     evidence_directories: set[Path] = field(default_factory=set)
 
     def include(self, directory):
-        self.evidence_directories.add(directory.resolve())
+        self.reader.relative(directory)
+        self.evidence_directories.add(Path(directory).absolute())
+
+    def read(self, path):
+        try:
+            return self.reader.json(path)
+        except EvidenceUnavailable as error:
+            raise ValueError(error.reason) from error
 
 
 def _committed_attempt(source_directory, lineage):
     lineage.include(source_directory)
-    assignment = validate_assignment(read_json(source_directory / "input.json"))
-    attempt = read_json(source_directory / "output.json")
+    assignment = validate_assignment(lineage.read(source_directory / "input.json"))
+    attempt = lineage.read(source_directory / "output.json")
     before, after = validate_attempt(attempt)
     validate_transition(
-        Path(assignment["workspace"]), before, after, attempt["repository"]
+        Path(assignment["workspace"]), before, after, attempt["repository"], lineage
     )
     return assignment, before, after
 
@@ -82,8 +109,10 @@ def _committed_response(source_directory, visited, lineage):
     remember_evidence(visited, "feedback_response", source_directory)
     lineage.include(source_directory)
     lineage.response_count += 1
-    response_input = validate_response_input(read_json(source_directory / "input.json"))
-    response_output = read_json(source_directory / "output.json")
+    response_input = validate_response_input(
+        lineage.read(source_directory / "input.json")
+    )
+    response_output = lineage.read(source_directory / "output.json")
     if (
         not isinstance(response_output, dict)
         or response_output.get("schema_version") != 1
@@ -104,16 +133,22 @@ def _committed_response(source_directory, visited, lineage):
     else:
         assessment_directory = Path(response_input["assessment_directory"])
         lineage.include(assessment_directory)
-        assessment_input = read_object(
-            assessment_directory / "input.json", "Finding Assessment input"
+        assessment_input = _object(
+            lineage.read(assessment_directory / "input.json"),
+            "Finding Assessment input",
         )
-        assessment_output = read_object(
-            assessment_directory / "output.json", "Finding Assessment output"
+        assessment_output = _object(
+            lineage.read(assessment_directory / "output.json"),
+            "Finding Assessment output",
         )
         review_directory = absolute_evidence_path(assessment_input, "review_directory")
         lineage.include(review_directory)
-        review_input = read_object(review_directory / "input.json", "Review input")
-        review_output = read_object(review_directory / "output.json", "Review output")
+        review_input = _object(
+            lineage.read(review_directory / "input.json"), "Review input"
+        )
+        review_output = _object(
+            lineage.read(review_directory / "output.json"), "Review output"
+        )
         change_directory = absolute_evidence_path(review_input, "change_directory")
         validation_directory = absolute_evidence_path(
             review_input, "validation_directory"
@@ -148,9 +183,7 @@ def _committed_response(source_directory, visited, lineage):
             raise ValueError(
                 "Finding Assessment must use the Review related-work snapshot"
             )
-        related_work_ids = (
-            snapshot_ids(review_related) if review_related is not None else set()
-        )
+        related_work_ids = _snapshot_ids(lineage, review_related)
         reviewed = validate_review(
             review_value, workspace, before["head"], related_work_ids
         )
@@ -164,7 +197,7 @@ def _committed_response(source_directory, visited, lineage):
 
     if response_repository.get("descends_from_before") is not True:
         raise ValueError("Feedback Response must record descendant commits")
-    validate_transition(workspace, before, after, response_repository)
+    validate_transition(workspace, before, after, response_repository, lineage)
     return assignment, before, after
 
 
@@ -172,7 +205,10 @@ def _validation_repair_source(response_input, response_before, visited, lineage)
     validation_directory = Path(response_input["validation_directory"])
     lineage.include(validation_directory)
     _validation_input, validation_output = validate_repairable_failure(
-        validation_directory, Path(response_input["workspace"])
+        validation_directory,
+        Path(response_input["workspace"]),
+        reader=lineage.reader,
+        log_limit=MAX_VALIDATION_LOG_BYTES,
     )
     source = response_input["source"]
     source_directory = Path(source["directory"])
@@ -203,7 +239,7 @@ def _validation_repair_source(response_input, response_before, visited, lineage)
 def _committed_change(change_directory, visited, lineage):
     remember_evidence(visited, "committed_change", change_directory)
     lineage.include(change_directory)
-    recorded = validate_change_output(read_json(change_directory / "output.json"))
+    recorded = validate_change_output(lineage.read(change_directory / "output.json"))
     source = recorded["source"]
     source_directory = Path(source["directory"])
     if source["kind"] == "attempt":
@@ -249,8 +285,29 @@ def clean_repository_state(value):
     return state
 
 
-def validate_transition(workspace, before, after, repository):
-    validate_git_transition(workspace, before, after)
+def validate_transition(workspace, before, after, repository, lineage):
+    git_workspace = lineage.repository or workspace
+    if lineage.verify_git:
+        if lineage.repository is not None:
+            for revision in (before["head"], after["head"]):
+                present = subprocess.run(
+                    [
+                        "git",
+                        "-C",
+                        str(git_workspace),
+                        "cat-file",
+                        "-e",
+                        f"{revision}^{{commit}}",
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if present.returncode:
+                    raise EvidenceUnavailable(
+                        "candidate Git object is unavailable", revision
+                    )
+        validate_git_transition(git_workspace, before, after)
     if before["head"] == after["head"]:
         raise ValueError("committed change requires distinct repository heads")
     recorded = repository.get("commits_between_heads")
@@ -260,13 +317,14 @@ def validate_transition(workspace, before, after, repository):
         or not all(isinstance(commit, str) and commit for commit in recorded)
     ):
         raise ValueError("committed change requires a recorded commit range")
-    for revision in recorded:
-        require_canonical_commit(workspace, revision)
-    actual = git(
-        workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
-    ).splitlines()
-    if recorded != actual:
-        raise ValueError("recorded commit range does not match the repository")
+    if lineage.verify_git:
+        for revision in recorded:
+            require_canonical_commit(git_workspace, revision)
+        actual = git(
+            git_workspace, "rev-list", "--reverse", f"{before['head']}..{after['head']}"
+        ).splitlines()
+        if recorded != actual:
+            raise ValueError("recorded commit range does not match the repository")
 
 
 def validate_read_only_stage(value, name):
@@ -302,12 +360,21 @@ def absolute_evidence_path(value, field):
     return Path(path)
 
 
-def read_object(path, name):
-    value = read_json(path)
+def _object(value, name):
     if not isinstance(value, dict):
         raise TypeError(f"{name} must be an object")
     return value
 
 
-def read_json(path):
-    return json.loads(path.read_text())
+def _snapshot_ids(lineage, reference):
+    if reference is None:
+        return set()
+    path = reference.get("path") if isinstance(reference, dict) else None
+    if not isinstance(path, str):
+        raise TypeError("related-work reference is malformed")
+    try:
+        raw = lineage.reader.bytes(path, MAX_RELATED_WORK_BYTES)
+    except EvidenceUnavailable as error:
+        raise ValueError(error.reason) from error
+    validate_snapshot_bytes(raw, reference)
+    return {json.loads(line)["id"] for line in raw.splitlines()}
