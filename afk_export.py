@@ -1629,16 +1629,41 @@ def artifact_candidates_v3(observed, originals=None):
     return selected
 
 
-def receipt_bound_inference_artifacts(root, relative, purpose, expected_setting=None):
-    """Authenticate one runtime evidence directory and return its closed catalog."""
+def receipt_bound_inference_artifacts(
+    root,
+    relative,
+    purpose,
+    expected_setting=None,
+    authenticated_consumer=None,
+):
+    """Authenticate runtime evidence and optionally consume it through the held directory.
+
+    The consumer receives the no-follow directory descriptor and the exact
+    validated receipt before that descriptor is closed.  Consumers must still
+    verify each opened file against its receipt digest, since directory entries
+    can be replaced concurrently.
+    """
     try:
         directory_descriptor = open_directory_beneath(root, relative)
     except OSError as error:
         raise ExportError("invalid Inference Receipt evidence") from error
     try:
-        return _receipt_bound_inference_artifacts(
+        catalog = _receipt_bound_inference_artifacts(
             root, relative, purpose, expected_setting, directory_descriptor
         )
+        if authenticated_consumer is None:
+            return catalog
+        # _receipt_bound_inference_artifacts admitted this exact byte sequence.
+        receipt = json.loads(
+            decode_text(
+                next(
+                    item["validated_raw"]
+                    for item in catalog
+                    if item["kind"] == "inference_receipt"
+                )
+            )
+        )
+        return catalog, authenticated_consumer(directory_descriptor, receipt)
     finally:
         os.close(directory_descriptor)
 

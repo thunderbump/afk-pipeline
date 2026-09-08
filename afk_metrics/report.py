@@ -11,6 +11,7 @@ import json
 import math
 import os
 import re
+import stat
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from afk_export import (
     load_source,
     normalize_component_output,
     open_directory_beneath,
+    open_file_beneath,
     read_json_at,
     receipt_bound_inference_artifacts,
 )
@@ -104,8 +106,14 @@ def _reported_cost(raw_usage: Any) -> float | int | None:
     )
 
 
-def parse_pi_events(path: Path) -> dict[str, Any]:
-    """Stream a Pi JSONL file and project finalized usage without event payloads."""
+def parse_pi_events(
+    path: Path | int, expected_sha256: str | None = None
+) -> dict[str, Any]:
+    """Stream Pi JSONL and optionally bind parsing to an already-open artifact.
+
+    Descriptor input is used by report generation so hashing and parsing observe
+    the same inode. Path input remains available for standalone fixture tests.
+    """
     usage: dict[str, float | int] = {}
     compact_usage: dict[str, float | int] = {}
     compact_cost = 0.0
@@ -120,9 +128,22 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
     seen_messages: set[str] = set()
     seen_compactions: set[str] = set()
     identities: set[tuple[str | None, str | None]] = set()
-    with Path(path).open("rb") as stream:
+    digest = hashlib.sha256()
+    if isinstance(path, int):
+        descriptor = os.dup(path)
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            os.close(descriptor)
+            raise ValueError("Pi event evidence is not a regular file")
+    else:
+        descriptor = None
+        before = None
+    with (
+        os.fdopen(descriptor, "rb") if descriptor is not None else Path(path).open("rb")
+    ) as stream:
         line_number = 0
         while line := stream.readline(MAX_JSONL_RECORD_BYTES + 1):
+            digest.update(line)
             line_number += 1
             if len(line) > MAX_JSONL_RECORD_BYTES:
                 raise ValueError(f"oversized JSONL event at line {line_number}")
@@ -198,6 +219,16 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
                     compact_cost += float(amount)
                     compaction_has_cost = True
                     cost_measurements += 1
+        if before is not None:
+            after = os.fstat(stream.fileno())
+            if (
+                before.st_size != after.st_size
+                or before.st_mtime_ns != after.st_mtime_ns
+                or before.st_ctime_ns != after.st_ctime_ns
+            ):
+                raise ValueError("Pi event evidence changed while being parsed")
+    if expected_sha256 is not None and digest.hexdigest() != expected_sha256:
+        raise ValueError("Pi event evidence hash disagrees with receipt")
     partial = missing > 0 or retries > 0
     coverage = (
         "partial"
@@ -251,15 +282,43 @@ def _seconds(start: Any, end: Any) -> float | None:
     if not isinstance(start, str) or not isinstance(end, str):
         return None
     try:
-        return max(
-            0.0,
-            (
-                datetime.fromisoformat(end.replace("Z", "+00:00"))
-                - datetime.fromisoformat(start.replace("Z", "+00:00"))
-            ).total_seconds(),
-        )
-    except ValueError:
+        seconds = (
+            datetime.fromisoformat(end.replace("Z", "+00:00"))
+            - datetime.fromisoformat(start.replace("Z", "+00:00"))
+        ).total_seconds()
+        return seconds if seconds >= 0 else None
+    except (TypeError, ValueError):
         return None
+
+
+def _nonoverlapping_seconds(
+    start: Any, end: Any, occupied: list[tuple[Any, Any]]
+) -> float | None:
+    """Return an interval's duration excluding the union of known overlaps."""
+    total = _seconds(start, end)
+    if total is None:
+        return None
+    begin = datetime.fromisoformat(start.replace("Z", "+00:00"))
+    finish = datetime.fromisoformat(end.replace("Z", "+00:00"))
+    clips = []
+    for other_start, other_end in occupied:
+        if _seconds(other_start, other_end) is None:
+            continue
+        left = max(begin, datetime.fromisoformat(other_start.replace("Z", "+00:00")))
+        right = min(finish, datetime.fromisoformat(other_end.replace("Z", "+00:00")))
+        if right > left:
+            clips.append((left, right))
+    clips.sort()
+    overlap = 0.0
+    cursor = None
+    for left, right in clips:
+        if cursor is None or left > cursor:
+            overlap += (right - left).total_seconds()
+            cursor = right
+        elif right > cursor:
+            overlap += (right - cursor).total_seconds()
+            cursor = right
+    return total - overlap
 
 
 def _safe_json(path: Path) -> dict[str, Any]:
@@ -540,6 +599,9 @@ def _verify_unsupported_receipt(
     hashes = receipt.get("hashes")
     timing = receipt.get("timing")
     adapter_identity = adapter.get("identity") if isinstance(adapter, dict) else None
+    attempts = receipt.get("attempts")
+    attempt_count = receipt.get("attempt_count")
+    outcome = receipt.get("outcome")
     if (
         receipt.get("schema_version") != 1
         or invocation.get("schema_version") != 1
@@ -558,8 +620,29 @@ def _verify_unsupported_receipt(
         or not isinstance(timing, dict)
         or _number(timing.get("duration_seconds")) is None
         or _seconds(timing.get("started_at"), timing.get("ended_at")) is None
+        or outcome
+        not in {
+            "succeeded",
+            "response_rejected",
+            "adapter_failed",
+            "validator_failed",
+            "timed_out",
+            "interrupted",
+        }
+        or not isinstance(attempt_count, int)
+        or isinstance(attempt_count, bool)
+        or attempt_count < 0
+        or not isinstance(attempts, list)
+        or attempt_count != len(attempts)
     ):
         raise ValueError("unsupported adapter receipt identity disagrees")
+    for index, attempt in enumerate(attempts, 1):
+        if (
+            not isinstance(attempt, dict)
+            or attempt.get("attempt_number") != index
+            or _number(attempt.get("duration_seconds")) is None
+        ):
+            raise ValueError("unsupported adapter attempt contract disagrees")
 
 
 def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
@@ -615,6 +698,9 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             _verify_generic_receipt(root / relative, receipt)
         else:
             _verify_unsupported_receipt(root, relative, receipt, invocation, purpose)
+        # Adapter-specific validation payloads are not part of the authenticated
+        # common contract and therefore cannot contribute report metrics.
+        base["response_validator_seconds"] = None
         return {
             **base,
             "metrics": {
@@ -622,7 +708,7 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
                 "reason": "unsupported_adapter",
                 "usage": {},
                 "compaction": {"aggregate_count": 0, "usage": {}},
-                "retry_count": 0,
+                "retry_count": max(receipt["attempt_count"] - 1, 0),
                 "cost": {
                     "status": "unavailable",
                     "kind": "unavailable",
@@ -630,17 +716,71 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
                 },
             },
         }
-    # Reuse Export's receipt boundary: this authenticates invocation identity and
-    # every declared event hash with bounded metadata and streaming file hashes.
-    receipt_bound_inference_artifacts(root, relative, purpose, None)
-    parsed = []
-    for attempt in attempts:
-        if not isinstance(attempt, dict):
-            continue
-        artifacts = attempt.get("artifacts")
-        event_name = artifacts.get("events") if isinstance(artifacts, dict) else None
-        if isinstance(event_name, str):
-            parsed.append(parse_pi_events(root / relative / event_name))
+
+    # Keep Export's authenticated directory open through parsing. Each stream is
+    # opened without following links and parsed from the same descriptor whose
+    # bytes are checked against the exact validated receipt.
+    def consume_events(directory_descriptor: int, authenticated: dict[str, Any]):
+        values = []
+        authenticated_attempts = authenticated.get("attempts", [])
+        for attempt in authenticated_attempts:
+            if not isinstance(attempt, dict):
+                continue
+            artifacts = attempt.get("artifacts")
+            event_name = (
+                artifacts.get("events") if isinstance(artifacts, dict) else None
+            )
+            expected = (
+                artifacts.get("events_sha256") if isinstance(artifacts, dict) else None
+            )
+            if event_name is None and expected is None:
+                continue
+            if (
+                not isinstance(event_name, str)
+                or not isinstance(expected, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", expected)
+            ):
+                raise ValueError("Pi event receipt contract is invalid")
+            descriptor = open_file_beneath(directory_descriptor, event_name)
+            try:
+                values.append(parse_pi_events(descriptor, expected))
+            finally:
+                os.close(descriptor)
+        return authenticated, values
+
+    _catalog, consumed = receipt_bound_inference_artifacts(
+        root, relative, purpose, None, consume_events
+    )
+    receipt, parsed = consumed
+    attempts = receipt.get("attempts", [])
+    identity = receipt["identity"]
+    timing = receipt["timing"]
+    base.update(
+        {
+            "source_event_identity": receipt["hashes"]["invocation_sha256"],
+            "adapter": _identity_label(identity.get("adapter")),
+            "adapter_family": _identity_label(identity.get("adapter_family")),
+            "provider": _identity_label(identity.get("provider")),
+            "model": _identity_label(identity.get("model")),
+            "outcome": receipt.get("outcome"),
+            "attempt_count": receipt.get("attempt_count"),
+            "elapsed": {
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": _number(timing.get("duration_seconds")),
+                "started_at": timing.get("started_at"),
+                "ended_at": timing.get("ended_at"),
+            },
+        }
+    )
+    validator = sum(
+        float(value)
+        for attempt in attempts
+        if isinstance(attempt, dict)
+        and isinstance(attempt.get("validation"), dict)
+        and (value := _number(attempt["validation"].get("validator_duration_seconds")))
+        is not None
+    )
+    base["response_validator_seconds"] = validator if validator else None
     if (
         any(item["coverage"] == "partial" for item in parsed)
         or len(parsed) < len(attempts)
@@ -937,6 +1077,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
     run_end_candidates = [timestamps.get("finished_at")]
     prep_seconds = _seconds(run_started_at, timestamps.get("prepared_at"))
     publication_seconds = None
+    publication_nonoverlap_seconds = None
     completion_acceptance = "unavailable"
     integration_status = "unavailable"
     publication_path = observed["terminal_directory"] / "publication.json"
@@ -947,6 +1088,15 @@ def summarize_source(source: Path) -> dict[str, Any]:
             publication = _validated_publication(_safe_json(publication_path))
             publication_seconds = _seconds(
                 publication["started_at"], publication["finished_at"]
+            )
+            occupied = [(run_started_at, timestamps.get("prepared_at"))]
+            occupied.extend(
+                (item["elapsed"].get("started_at"), item["elapsed"].get("ended_at"))
+                for item in invocations
+                if isinstance(item.get("elapsed"), dict)
+            )
+            publication_nonoverlap_seconds = _nonoverlapping_seconds(
+                publication["started_at"], publication["finished_at"], occupied
             )
             run_end_candidates.append(publication["finished_at"])
             if publication["admission_outcome"] is not None:
@@ -975,7 +1125,10 @@ def summarize_source(source: Path) -> dict[str, Any]:
     ]
     run_span = max(candidate_spans) if candidate_spans else None
     known_nonoverlap = (
-        (prep_seconds or 0) + known_invocation_seconds + sum(validation_durations)
+        (prep_seconds or 0)
+        + known_invocation_seconds
+        + sum(validation_durations)
+        + (publication_nonoverlap_seconds or 0)
     )
     active_intervals = []
     if prep_seconds is not None:
@@ -989,6 +1142,14 @@ def summarize_source(source: Path) -> dict[str, Any]:
         {"kind": "repository_validation", "seconds": value}
         for value in validation_durations
     )
+    if publication_seconds is not None:
+        active_intervals.append(
+            {
+                "kind": "publication",
+                "seconds": publication_seconds,
+                "nonoverlapping_seconds": publication_nonoverlap_seconds,
+            }
+        )
     source_identity = _canonical_hash({"identity": identity, "assignment": assignment})
     retries = sum(item.get("retry_count", 0) for item in receipt_metrics)
     available_costs = [
@@ -1087,7 +1248,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 if run_span is not None and known_nonoverlap <= run_span
                 else None
             ),
-            "overlap_note": "unattributed excludes only known non-overlapping preparation, invocation and Validation intervals; nested response validation is not subtracted again",
+            "overlap_note": "unattributed excludes known non-overlapping preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
         },
     }
 

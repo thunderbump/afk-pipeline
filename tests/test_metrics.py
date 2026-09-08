@@ -12,6 +12,7 @@ from afk_metrics.__main__ import _human
 from afk_metrics.report import (
     MAX_JSONL_RECORD_BYTES,
     _invocation,
+    _seconds,
     _validated_publication,
     _verify_generic_receipt,
     build_report,
@@ -169,6 +170,17 @@ class MetricsEventTests(unittest.TestCase):
         self.assertNotIn("TOP SECRET", json.dumps(result))
         self.assertNotIn("sk-live", json.dumps(result))
 
+    def test_descriptor_stream_must_match_authenticated_digest(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text(json.dumps({"type": "agent_end"}) + "\n")
+            descriptor = os.open(path, os.O_RDONLY)
+            try:
+                with self.assertRaisesRegex(ValueError, "hash disagrees"):
+                    parse_pi_events(descriptor, "0" * 64)
+            finally:
+                os.close(descriptor)
+
     def test_stream_rejects_an_oversized_record_at_a_fixed_bound(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "events.jsonl"
@@ -207,14 +219,22 @@ class MetricsIntegrityTests(unittest.TestCase):
                     "duration_seconds": 1,
                 },
                 "outcome": "succeeded",
-                "attempt_count": 1,
-                "attempts": [],
+                "attempt_count": 2,
+                "attempts": [
+                    {"attempt_number": 1, "duration_seconds": 0.4},
+                    {"attempt_number": 2, "duration_seconds": 0.6},
+                ],
             }
             (evidence / "receipt.json").write_text(json.dumps(receipt))
             result = _invocation(root, "worker/inference", "feedback_response")
+            receipt["outcome"] = "prompt text must not become an outcome"
+            (evidence / "receipt.json").write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "identity disagrees"):
+                _invocation(root, "worker/inference", "feedback_response")
         self.assertEqual(result["adapter_family"], "copilot")
         self.assertEqual(result["metrics"]["coverage"], "unavailable")
         self.assertEqual(result["metrics"]["reason"], "unsupported_adapter")
+        self.assertEqual(result["metrics"]["retry_count"], 1)
 
     def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -262,9 +282,62 @@ class MetricsIntegrityTests(unittest.TestCase):
         contradictory = {**publication, "status": "failed"}
         with self.assertRaises(ValueError):
             _validated_publication(contradictory)
+        reversed_timing = {
+            **publication,
+            "started_at": "2026-01-01T00:00:02Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+        }
+        with self.assertRaises(ValueError):
+            _validated_publication(reversed_timing)
 
 
 class MetricsReportTests(unittest.TestCase):
+    def test_reversed_timestamps_are_invalid_not_zero_duration(self):
+        self.assertIsNone(_seconds("2026-01-01T00:00:02Z", "2026-01-01T00:00:01Z"))
+
+    def test_publication_is_not_counted_as_unattributed_time(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": [], "status": "completed"},
+                "coordinator": root,
+                "preparation": {
+                    "timestamps": {
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "prepared_at": "2026-01-01T00:00:01Z",
+                        "finished_at": "2026-01-01T00:00:08Z",
+                    },
+                    "repository": {},
+                },
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            (root / "publication.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "succeeded",
+                        "admission_outcome": "accepted",
+                        "started_at": "2026-01-01T00:00:08Z",
+                        "finished_at": "2026-01-01T00:00:10Z",
+                        "process": {"exit_code": 0},
+                        "error_category": None,
+                    }
+                )
+            )
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(report["timing"]["publication_seconds"], 2)
+        self.assertEqual(report["timing"]["unattributed_seconds"], 7)
+        self.assertIn(
+            {"kind": "publication", "seconds": 2, "nonoverlapping_seconds": 2},
+            report["timing"]["active_execution_intervals"],
+        )
+
     def test_fixture_run_comparison_matches_and_flags_confounded_base(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
