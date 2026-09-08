@@ -3145,7 +3145,13 @@ def read_open_descriptor(descriptor, limit, expected_facts=None):
             if not chunk:
                 break
             data.extend(chunk)
-        if len(data) != facts.st_size:
+        after = os.fstat(descriptor)
+        if (
+            len(data) != facts.st_size
+            or facts.st_size != after.st_size
+            or facts.st_mtime_ns != after.st_mtime_ns
+            or facts.st_ctime_ns != after.st_ctime_ns
+        ):
             raise ExportError("artifact changed while being read")
         return bytes(data)
     finally:

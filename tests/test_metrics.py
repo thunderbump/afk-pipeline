@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from afk_export import ExportError, receipt_bound_inference_artifacts
+from afk_export import ExportError, read_bytes, receipt_bound_inference_artifacts
 from afk_inference import Capability, FixtureAdapter, InferenceRuntime, ScriptedResult
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
@@ -15,6 +15,7 @@ from afk_metrics.report import (
     MAX_REPORTED_IDENTITIES,
     _invocation,
     _seconds,
+    _union_seconds,
     _validate_pi_metric_receipt,
     _validated_publication,
     _validator_seconds,
@@ -412,6 +413,107 @@ class MetricsIntegrityTests(unittest.TestCase):
         self.assertIsNone(result["response_validator_seconds"])
         self.assertEqual(result["response_validator_coverage"], "unavailable")
 
+    def test_same_size_in_place_mutation_fails_descriptor_read(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "evidence.json"
+            path.write_bytes(b"aaaa")
+            original_read = os.read
+            changed = False
+
+            def mutate_after_read(descriptor, count):
+                nonlocal changed
+                data = original_read(descriptor, count)
+                if data and not changed:
+                    changed = True
+                    path.write_bytes(b"bbbb")
+                return data
+
+            with (
+                mock.patch("afk_export.os.read", side_effect=mutate_after_read),
+                self.assertRaisesRegex(ExportError, "changed while being read"),
+            ):
+                read_bytes(path, 100)
+
+    def test_pi_runtime_attempt_retries_are_added_to_stream_retries(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            evidence = root / "inference"
+            evidence.mkdir()
+            streams = [
+                [{"type": "agent_end"}],
+                [
+                    {"type": "auto_retry_start", "attempt": 1},
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "id": "final",
+                            "role": "assistant",
+                            "usage": {"input": 1},
+                        },
+                    },
+                ],
+            ]
+            attempts = []
+            for index, events in enumerate(streams, 1):
+                raw = "".join(json.dumps(event) + "\n" for event in events).encode()
+                name = f"events-{index}.jsonl"
+                (evidence / name).write_bytes(raw)
+                attempts.append(
+                    {
+                        "attempt_number": index,
+                        "duration_seconds": 1,
+                        "protocol": {
+                            "status": "adapter_failed" if index == 1 else "accepted"
+                        },
+                        "artifacts": {
+                            "events": name,
+                            "events_sha256": hashlib.sha256(raw).hexdigest(),
+                        },
+                    }
+                )
+            receipt = {
+                "identity": {"adapter_family": "pi", "adapter": "pi-v1"},
+                "hashes": {"invocation_sha256": "a" * 64},
+                "timing": {
+                    "started_at": "2026-01-01T00:00:00Z",
+                    "ended_at": "2026-01-01T00:00:02Z",
+                    "duration_seconds": 2,
+                    "timeout_seconds": 10,
+                },
+                "attempt_count": 2,
+                "attempts": attempts,
+                "protocol": {"status": "accepted"},
+                "validation": {"status": "accepted"},
+                "outcome": "succeeded",
+            }
+            invocation = {"timeout_seconds": 10}
+
+            def consume_bound(
+                _root, _relative, _purpose, authenticated_context_consumer=None
+            ):
+                descriptor = os.open(evidence, os.O_RDONLY | os.O_DIRECTORY)
+                try:
+                    consumed = authenticated_context_consumer(
+                        descriptor, receipt, invocation
+                    )
+                finally:
+                    os.close(descriptor)
+                return {}, consumed
+
+            with (
+                mock.patch(
+                    "afk_metrics.report._safe_evidence_json", return_value=receipt
+                ),
+                mock.patch(
+                    "afk_metrics.report.receipt_bound_inference_artifacts",
+                    side_effect=consume_bound,
+                ),
+            ):
+                result = _invocation(root, "inference", "feedback_response")
+        # One runtime retry plus one Pi-internal auto retry.
+        self.assertEqual(result["metrics"]["retry_count"], 2)
+        self.assertEqual(result["metrics"]["coverage"], "partial")
+
     def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -470,6 +572,14 @@ class MetricsIntegrityTests(unittest.TestCase):
 class MetricsReportTests(unittest.TestCase):
     def test_reversed_timestamps_are_invalid_not_zero_duration(self):
         self.assertIsNone(_seconds("2026-01-01T00:00:02Z", "2026-01-01T00:00:01Z"))
+
+    def test_overlapping_active_intervals_are_attributed_once(self):
+        intervals = [
+            ("2026-01-01T00:00:00Z", "2026-01-01T00:00:05Z"),
+            ("2026-01-01T00:00:02Z", "2026-01-01T00:00:07Z"),
+            ("2026-01-01T00:00:06Z", "2026-01-01T00:00:09Z"),
+        ]
+        self.assertEqual(_union_seconds(intervals), 9)
 
     def test_publication_is_not_counted_as_unattributed_time(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -719,7 +829,61 @@ class MetricsReportTests(unittest.TestCase):
         self.assertEqual(
             missing_report["inference"]["totals"]["usage_coverage"], "partial"
         )
-        self.assertEqual(report["timing"]["unattributed_seconds"], 8)
+        # The synthetic invocation has no authenticated endpoints, so its
+        # duration cannot safely be subtracted from wall time.
+        self.assertEqual(report["timing"]["unattributed_seconds"], 10)
+
+    def test_validation_completion_extends_continuation_wall_span(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "01-validation").mkdir()
+            output = {
+                "outcome": "passed",
+                "duration_seconds": 3,
+                "started_at": "2026-01-01T00:00:09Z",
+                "finished_at": "2026-01-01T00:00:12Z",
+            }
+            observed = {
+                "identity": {"run_id": "run-1.continuation.01"},
+                "assignment": {"objective": "objective"},
+                "state": {
+                    "history": [
+                        {
+                            "component": "validation",
+                            "directory": "01-validation",
+                            "outcome": "passed",
+                        }
+                    ],
+                    "status": "completed",
+                },
+                "coordinator": root,
+                "preparation": {
+                    "timestamps": {
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "prepared_at": "2026-01-01T00:00:02Z",
+                        "finished_at": "2026-01-01T00:00:05Z",
+                    },
+                    "repository": {},
+                },
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with (
+                mock.patch("afk_metrics.report.load_source", return_value=observed),
+                mock.patch(
+                    "afk_metrics.report._safe_evidence_json", return_value=output
+                ),
+                mock.patch(
+                    "afk_metrics.report.validate_component_output",
+                    return_value="passed",
+                ),
+                mock.patch("afk_metrics.report.normalize_component_output"),
+            ):
+                report = summarize_source(root)
+        self.assertEqual(report["timing"]["run_wall_span_seconds"], 12)
+        self.assertEqual(report["timing"]["unattributed_seconds"], 7)
 
     def test_validation_component_symlink_is_invalid_evidence(self):
         with tempfile.TemporaryDirectory() as temporary:
