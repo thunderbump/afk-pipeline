@@ -12,9 +12,6 @@ from pathlib import Path
 
 from afk_attempt.contract import validate_assignment
 from afk_attempt.transcript import build_attempt_transcript, encode_attempt_transcript
-
-SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
-
 from afk_coordinate.contract import (
     COMPONENT_TOPOLOGY,
     validate_checkpoint,
@@ -22,6 +19,13 @@ from afk_coordinate.contract import (
     validate_continuation,
     validate_output,
     validate_request,
+)
+from afk_evidence.continuation import (
+    continuation_directories,
+    require_exhausted_structure,
+)
+from afk_evidence.continuation import (
+    validate_link as validate_continuation_link,
 )
 from afk_plan.contract import validate_input as validate_plan_input
 from afk_plan.contract import validate_planner_output
@@ -31,6 +35,7 @@ from afk_preflight.contract import validate_output as validate_preflight_output
 from afk_related_work import SNAPSHOT_NAME, validate_reference, validate_snapshot
 from afk_review.contract import validate_audit
 
+SUPPORTED_THINKING = {"off", "minimal", "low", "medium", "high", "xhigh"}
 SAFE_PROJECT = re.compile(r"[a-z0-9][a-z0-9._-]*\Z")
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 MAX_JSON_BYTES = 1024 * 1024
@@ -770,21 +775,24 @@ def load_continuation_lineage(
     terminal_continuation=None,
 ):
     """Validate the full lineage and select one sealed terminal when requested."""
-    from afk_coordinate.__main__ import (
-        existing_continuations,
-        require_exhausted,
-        validate_continuation_link,
-    )
-
-    directories = existing_continuations(coordinator / "continuations")
+    directories = continuation_directories(coordinator / "continuations")
     prior_output = "../../output.json"
     expected_max_responses = request["max_responses"]
     observed = []
     terminal_directory = coordinator
     selected = None
     for directory in directories:
-        require_exhausted(
-            coordinator, state, expected_max_responses, check_workspace=False
+        require_exhausted_structure(
+            state,
+            expected_max_responses,
+            lambda record, name, current=terminal_directory: read_json(
+                locate_invocation_file(
+                    coordinator,
+                    [*observed, current],
+                    record,
+                    name,
+                )
+            ),
         )
         continuation_input = validate_continuation(read_json(directory / "input.json"))
         continuation_state = validate_checkpoint(read_json(directory / "state.json"))
@@ -816,6 +824,17 @@ def load_continuation_lineage(
             raise ExportError("selected continuation is not a sealed terminal")
         return selected
     return state, output, terminal_directory, observed
+
+
+def locate_invocation_file(coordinator, continuation_directories, record, name):
+    """Locate retained invocation bytes across exact-prefix continuation roots."""
+    candidates = [coordinator, *continuation_directories]
+    for base in reversed(candidates):
+        path = base / record["directory"] / name
+        if path.exists() or path.is_symlink():
+            return path
+    # Return the canonical base location so the bounded reader reports absence.
+    return coordinator / record["directory"] / name
 
 
 def validate_preparation(source, value):

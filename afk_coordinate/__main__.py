@@ -15,6 +15,10 @@ from afk_coordinate.contract import (
     validate_request,
     validation_repair_source,
 )
+from afk_evidence.continuation import continuation_directories
+from afk_evidence.continuation import (
+    validate_link as shared_validate_continuation_link,
+)
 from afk_iterate.__main__ import validate_sealed_result
 from afk_related_work import validate_snapshot
 from afk_runtime import progress, repository_state, seal_json, write_json
@@ -344,18 +348,8 @@ def continuation_runtime(request, state, directory, continuation_input):
 
 
 def existing_continuations(root):
-    if not root.exists():
-        return []
-    if not root.is_dir() or root.is_symlink():
-        raise ValueError("continuations must be a real directory")
-    directories = sorted(root.iterdir())
-    expected = [f"{index:02d}" for index in range(1, len(directories) + 1)]
-    if any(
-        path.name != name or not path.is_dir() or path.is_symlink()
-        for path, name in zip(directories, expected, strict=True)
-    ):
-        raise ValueError("continuation directories are malformed")
-    return directories
+    """Compatibility wrapper for the shared read-only traversal."""
+    return continuation_directories(root)
 
 
 def validate_continuation_link(
@@ -364,20 +358,10 @@ def validate_continuation_link(
     continuation_input,
     expected_prior_output,
 ):
-    prior_history = prior_state["history"]
-    completed_responses = sum(
-        record["component"] == "response" and record["outcome"] == "completed"
-        for record in prior_history
+    """Compatibility wrapper for the shared exact-predecessor check."""
+    return shared_validate_continuation_link(
+        prior_state, continuation_state, continuation_input, expected_prior_output
     )
-    if (
-        continuation_input["prior_output"] != expected_prior_output
-        or continuation_input["completed_responses"] != completed_responses
-        or continuation_state.get("continuation") != continuation_input
-        or continuation_state["history"][: len(prior_history)] != prior_history
-        or len(continuation_state["history"]) < len(prior_history)
-        or continuation_state["next_sequence"] < prior_state["next_sequence"]
-    ):
-        raise ValueError("continuation lineage does not match its predecessor")
 
 
 def validate_terminal_pair(state, output_path):

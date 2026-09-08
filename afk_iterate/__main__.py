@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
-from afk_change.evidence import verify_change_lineage
+from afk_evidence.stages import verify_change_lineage
 from afk_related_work import snapshot_ids
 from afk_review.contract import validate_review
 from afk_runtime import progress, seal_json, write_json
