@@ -422,6 +422,17 @@ def _sum_usage(
     return result
 
 
+def _aggregate_measurement_coverage(
+    coverages: list[str], has_measurements: bool
+) -> str:
+    """Combine component coverage without presenting known subsets as totals."""
+    if not has_measurements:
+        return "unavailable"
+    if coverages and all(value == "complete" for value in coverages):
+        return "complete"
+    return "partial"
+
+
 def _hash_regular_beneath(directory: Path, relative: str) -> str:
     candidate = Path(relative)
     if candidate.is_absolute() or ".." in candidate.parts:
@@ -706,17 +717,31 @@ def _verify_unsupported_receipt(
             raise ValueError("unsupported adapter attempt contract disagrees")
 
 
-def _validator_seconds(attempts: list[Any]) -> float | None:
-    """Sum available response-validator measurements, preserving measured zero."""
+def _validator_timing(attempts: list[Any]) -> tuple[float | None, str]:
+    """Project measured validator time and explicitly qualify its coverage."""
     values = []
+    relevant = 0
+    missing = 0
     for attempt in attempts:
         validation = attempt.get("validation") if isinstance(attempt, dict) else None
-        if isinstance(validation, dict) and "validator_duration_seconds" in validation:
-            value = _number(validation["validator_duration_seconds"])
-            if value is None:
-                raise ValueError("receipt validator timing is invalid")
-            values.append(float(value))
-    return sum(values) if values else None
+        if not isinstance(validation, dict):
+            continue
+        relevant += 1
+        if "validator_duration_seconds" not in validation:
+            missing += 1
+            continue
+        value = _number(validation["validator_duration_seconds"])
+        if value is None:
+            raise ValueError("receipt validator timing is invalid")
+        values.append(float(value))
+    if not values:
+        return None, "unavailable"
+    return sum(values), "partial" if missing or len(values) < relevant else "complete"
+
+
+def _validator_seconds(attempts: list[Any]) -> float | None:
+    """Sum available response-validator measurements, preserving measured zero."""
+    return _validator_timing(attempts)[0]
 
 
 def _validate_pi_metric_receipt(
@@ -733,6 +758,7 @@ def _validate_pi_metric_receipt(
         or not isinstance(invocation, dict)
         or (duration := _number(timing.get("duration_seconds"))) is None
         or (timeout := _number(timing.get("timeout_seconds"))) is None
+        or timeout <= 0
         or timeout != _number(invocation.get("timeout_seconds"))
         or (wall := _seconds(timing.get("started_at"), timing.get("ended_at"))) is None
         or not math.isclose(float(duration), wall, rel_tol=0.01, abs_tol=0.1)
@@ -788,7 +814,9 @@ def _validate_pi_metric_receipt(
             )
         ):
             raise ValueError("Pi receipt attempt contract is invalid")
-    _validator_seconds(attempts)
+    validator_seconds, _coverage = _validator_timing(attempts)
+    if validator_seconds is not None and validator_seconds > float(duration):
+        raise ValueError("Pi receipt validator timing exceeds invocation elapsed time")
     expected_protocol = (
         attempts[-1]["protocol"] if attempts else {"status": "not_started"}
     )
@@ -833,11 +861,11 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             else None,
         },
         "response_validator_seconds": None,
+        "response_validator_coverage": "unavailable",
     }
     attempts = (
         receipt.get("attempts") if isinstance(receipt.get("attempts"), list) else []
     )
-    base["response_validator_seconds"] = _validator_seconds(attempts)
     if family != "pi":
         # Fixture receipts have a repository-known contract and can be fully
         # authenticated. Other retained adapter families are deliberately an
@@ -847,11 +875,14 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         adapter = invocation.get("adapter")
         if isinstance(adapter, dict) and adapter.get("kind") == "fixture":
             _verify_generic_receipt(root / relative, receipt)
+            (
+                base["response_validator_seconds"],
+                base["response_validator_coverage"],
+            ) = _validator_timing(attempts)
         else:
             _verify_unsupported_receipt(root, relative, receipt, invocation, purpose)
             # Adapter-specific validator payloads are not authenticated by the
-            # common unsupported-adapter boundary.
-            base["response_validator_seconds"] = None
+            # common unsupported-adapter boundary, so do not even parse them.
         return {
             **base,
             "metrics": {
@@ -931,7 +962,10 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
             },
         }
     )
-    base["response_validator_seconds"] = _validator_seconds(attempts)
+    (
+        base["response_validator_seconds"],
+        base["response_validator_coverage"],
+    ) = _validator_timing(attempts)
     if (
         any(item["coverage"] == "partial" for item in parsed)
         or len(parsed) < len(attempts)
@@ -1058,6 +1092,7 @@ def _unavailable_invocation(relative: str, purpose: str) -> dict[str, Any]:
             "ended_at": None,
         },
         "response_validator_seconds": None,
+        "response_validator_coverage": "unavailable",
         "metrics": {
             "coverage": "partial",
             "reason": "unsealed_abandoned_invocation",
@@ -1187,9 +1222,18 @@ def summarize_source(source: Path) -> dict[str, Any]:
             if key not in seen:
                 seen.add(key)
                 invocations.append(item)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError, ExportError) as error:
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        IndexError,
+        json.JSONDecodeError,
+        ExportError,
+    ) as error:
         return _invalid_source(source, error, identity, assignment)
     validation_durations = []
+    validation_duration_missing = 0
     validation_results = []
     try:
         for entry in state["history"]:
@@ -1213,6 +1257,8 @@ def summarize_source(source: Path) -> dict[str, Any]:
                     raise ValueError("invalid Validation duration")
                 if duration is not None:
                     validation_durations.append(duration)
+                else:
+                    validation_duration_missing += 1
                 validation_results.append(output["outcome"])
     except (
         OSError,
@@ -1334,6 +1380,25 @@ def summarize_source(source: Path) -> dict[str, Any]:
         for item in invocations
         if (duration := item["response_validator_seconds"]) is not None
     ]
+    validator_coverages = [
+        item.get(
+            "response_validator_coverage",
+            "complete"
+            if item.get("response_validator_seconds") is not None
+            else "unavailable",
+        )
+        for item in invocations
+    ]
+    response_validator_coverage = _aggregate_measurement_coverage(
+        validator_coverages, bool(validator_durations)
+    )
+    repository_validation_coverage = (
+        "partial"
+        if validation_durations and validation_duration_missing
+        else "complete"
+        if validation_durations
+        else "unavailable"
+    )
     total_usage = _sum_usage(receipt_metrics)
     total_compaction_usage = _sum_usage(receipt_metrics, "compaction")
     usage_coverages = [
@@ -1400,9 +1465,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
             "repository_validation_seconds": sum(validation_durations)
             if validation_durations
             else None,
+            "repository_validation_coverage": repository_validation_coverage,
             "response_validator_seconds": sum(validator_durations)
             if validator_durations
             else None,
+            "response_validator_coverage": response_validator_coverage,
             "deterministic_steps": {
                 "Validation": sum(validation_durations)
                 if validation_durations

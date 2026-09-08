@@ -1650,9 +1650,15 @@ def receipt_bound_inference_artifacts(
     except OSError as error:
         raise ExportError("invalid Inference Receipt evidence") from error
     try:
-        catalog = _receipt_bound_inference_artifacts(
-            root, relative, purpose, expected_setting, directory_descriptor
-        )
+        try:
+            catalog = _receipt_bound_inference_artifacts(
+                root, relative, purpose, expected_setting, directory_descriptor
+            )
+        except (KeyError, IndexError) as error:
+            # A malformed retained receipt is invalid evidence, not an
+            # unhandled report/export failure. Keep schema dereferences behind
+            # the same public integrity boundary as explicit validation errors.
+            raise ExportError("invalid Inference Receipt evidence") from error
         if (
             authenticated_consumer is not None
             and authenticated_context_consumer is not None

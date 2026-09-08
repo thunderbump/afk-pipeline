@@ -90,8 +90,12 @@ Timing distinguishes Run wall span, preparation, inference invocation elapsed,
 trusted in-process response-validator time, and repository Validation time.
 Invocation elapsed includes adapter, Pi runtime, tools, and related process work
 and is not pure model latency. Nested response validation is not added to the
-repository Validation total. Change and Iteration currently have no structured
-durations and are explicitly unavailable. Continuation wait gaps and
+repository Validation total. The machine report qualifies both validator totals
+with adjacent `response_validator_coverage` and
+`repository_validation_coverage` values (`complete`, `partial`, or
+`unavailable`), so a sum of only the retained measurements is never presented
+as complete. Change and Iteration currently have no structured durations and are
+explicitly unavailable. Continuation wait gaps and
 publication are likewise unavailable when no timestamps establish them.
 Unattributed time is only produced when known non-overlapping intervals fit in
 the Run span; nested durations are not subtracted twice.

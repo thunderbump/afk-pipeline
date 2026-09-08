@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from afk_export import ExportError, receipt_bound_inference_artifacts
 from afk_inference import Capability, FixtureAdapter, InferenceRuntime, ScriptedResult
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
@@ -231,6 +232,21 @@ class MetricsEventTests(unittest.TestCase):
 
 
 class MetricsIntegrityTests(unittest.TestCase):
+    def test_export_schema_dereferences_fail_as_invalid_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "inference").mkdir()
+            with (
+                mock.patch(
+                    "afk_export._receipt_bound_inference_artifacts",
+                    side_effect=KeyError("duration_seconds"),
+                ),
+                self.assertRaisesRegex(ExportError, "invalid Inference Receipt"),
+            ):
+                receipt_bound_inference_artifacts(
+                    root, "inference", "feedback_response"
+                )
+
     def test_pi_metric_receipt_rejects_malformed_trusted_fields(self):
         receipt = {
             "timing": {
@@ -267,6 +283,37 @@ class MetricsIntegrityTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "outcome or timing"):
             _validate_pi_metric_receipt(receipt, {"timeout_seconds": 3})
+        receipt["timing"]["timeout_seconds"] = 0
+        with self.assertRaisesRegex(ValueError, "outcome or timing"):
+            _validate_pi_metric_receipt(receipt, {"timeout_seconds": 0})
+
+    def test_pi_validator_time_cannot_exceed_invocation_elapsed(self):
+        receipt = {
+            "timing": {
+                "started_at": "2026-01-01T00:00:00Z",
+                "ended_at": "2026-01-01T00:00:01Z",
+                "duration_seconds": 1,
+                "timeout_seconds": 2,
+            },
+            "attempt_count": 1,
+            "attempts": [
+                {
+                    "attempt_number": 1,
+                    "duration_seconds": 1,
+                    "protocol": {"status": "accepted"},
+                    "validation": {
+                        "status": "accepted",
+                        "attempt_number": 1,
+                        "validator_duration_seconds": 100,
+                    },
+                }
+            ],
+            "protocol": {"status": "accepted"},
+            "validation": {"status": "accepted"},
+            "outcome": "succeeded",
+        }
+        with self.assertRaisesRegex(ValueError, "exceeds invocation"):
+            _validate_pi_metric_receipt(receipt, {"timeout_seconds": 2})
 
     def test_zero_validator_duration_is_available(self):
         attempts = [
@@ -308,7 +355,11 @@ class MetricsIntegrityTests(unittest.TestCase):
                 "outcome": "succeeded",
                 "attempt_count": 2,
                 "attempts": [
-                    {"attempt_number": 1, "duration_seconds": 0.4},
+                    {
+                        "attempt_number": 1,
+                        "duration_seconds": 0.4,
+                        "validation": {"validator_duration_seconds": "opaque"},
+                    },
                     {"attempt_number": 2, "duration_seconds": 0.6},
                 ],
             }
@@ -322,6 +373,8 @@ class MetricsIntegrityTests(unittest.TestCase):
         self.assertEqual(result["metrics"]["coverage"], "unavailable")
         self.assertEqual(result["metrics"]["reason"], "unsupported_adapter")
         self.assertEqual(result["metrics"]["retry_count"], 1)
+        self.assertIsNone(result["response_validator_seconds"])
+        self.assertEqual(result["response_validator_coverage"], "unavailable")
 
     def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -532,6 +585,10 @@ class MetricsReportTests(unittest.TestCase):
         )
         self.assertIsNone(report["inference"]["totals"]["elapsed_seconds"])
         self.assertEqual(report["timing"]["response_validator_seconds"], 0)
+        self.assertEqual(report["timing"]["response_validator_coverage"], "partial")
+        self.assertEqual(
+            report["timing"]["repository_validation_coverage"], "unavailable"
+        )
         self.assertEqual(report["inference"]["totals"]["usage"], {"input": 1})
         self.assertEqual(report["inference"]["totals"]["usage_coverage"], "partial")
         self.assertEqual(
