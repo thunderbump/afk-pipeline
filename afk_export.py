@@ -38,8 +38,8 @@ MAX_INCLUDED_BYTES = 1024 * 1024
 MAX_EVENTS_BYTES = 64 * 1024 * 1024
 MAX_BUNDLE_FILES = 128
 MAX_BUNDLE_BYTES = 8 * 1024 * 1024
-V2_MAX_ARTIFACT_BYTES = 25 * 1024 * 1024
-V2_MAX_BUNDLE_BYTES = 32 * 1024 * 1024
+V2_MAX_ARTIFACT_BYTES = 50 * 1024 * 1024
+V2_MAX_BUNDLE_BYTES = 64 * 1024 * 1024
 V2_MAX_ARTIFACT_NAME_BYTES = 255
 MAX_MANIFEST_BYTES = 64 * 1024
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -781,7 +781,11 @@ def load_continuation_lineage(
     expected_max_responses = request["max_responses"]
     observed = []
     terminal_directory = coordinator
-    selected = None
+    selected = (
+        (state, output, terminal_directory, [])
+        if terminal_continuation == "original"
+        else None
+    )
     for directory in directories:
         require_exhausted(
             coordinator, state, expected_max_responses, check_workspace=False
@@ -1265,6 +1269,7 @@ def artifact_candidates(observed):
         validated_preflight_output_raw=None,
         validated_raw=None,
         expected_sha256=None,
+        verified_source_bytes=None,
         inference_view=False,
         private_source=False,
         generated_raw=None,
@@ -1306,6 +1311,7 @@ def artifact_candidates(observed):
                 "validated_preflight_output_raw": validated_preflight_output_raw,
                 "validated_raw": validated_raw,
                 "expected_sha256": expected_sha256,
+                "verified_source_bytes": verified_source_bytes,
                 "inference_view": inference_view,
                 "private_source": private_source,
                 "generated_raw": generated_raw,
@@ -1774,14 +1780,23 @@ def _receipt_bound_inference_artifacts(
             raise ExportError("invalid Inference Receipt artifact identity")
         local_path = path[len(relative) + 1 :]
         try:
-            raw = read_bytes_beneath(
-                directory_descriptor,
-                local_path,
-                V2_MAX_ARTIFACT_BYTES if read_limit is None else read_limit,
-            )
+            if kind in {"inference_events", "inference_log"}:
+                # These sources remain private. Verify receipt integrity without
+                # retaining their bytes or applying a downloadable payload cap.
+                actual_hash, source_bytes = hash_file_beneath(
+                    directory_descriptor, local_path
+                )
+                raw = None
+            else:
+                raw = read_bytes_beneath(
+                    directory_descriptor,
+                    local_path,
+                    V2_MAX_ARTIFACT_BYTES if read_limit is None else read_limit,
+                )
+                actual_hash, source_bytes = digest(raw), len(raw)
         except (OSError, ExportError) as error:
             raise ExportError("Inference Receipt artifact is unavailable") from error
-        if digest(raw) != claimed_hash:
+        if actual_hash != claimed_hash:
             raise ExportError("Inference Receipt artifact hash disagrees")
         catalog.append(
             {
@@ -1792,6 +1807,7 @@ def _receipt_bound_inference_artifacts(
                 "priority": priority,
                 "validated_raw": raw,
                 "expected_sha256": claimed_hash,
+                "verified_source_bytes": source_bytes,
                 "private_source": True,
             }
         )
@@ -2205,7 +2221,11 @@ def derive_public_artifact(candidate, redactions):
     source_identity = {"path": source}
     if candidate.get("expected_sha256") is not None:
         source_identity.update(
-            bytes=len(candidate["validated_raw"]),
+            bytes=(
+                candidate["verified_source_bytes"]
+                if candidate.get("verified_source_bytes") is not None
+                else len(candidate["validated_raw"])
+            ),
             sha256=candidate["expected_sha256"],
         )
     base = {
@@ -3026,8 +3046,8 @@ def open_directory_beneath(root, relative):
         raise
 
 
-def read_bytes_beneath(directory_descriptor, name, limit, expected_facts=None):
-    """Read a nested regular file without following intermediate symlinks."""
+def open_file_beneath(directory_descriptor, name):
+    """Open a nested file without following any path-component symlink."""
     if not safe_relative(name):
         raise ExportError("artifact path is not safe relative evidence")
     descriptor = os.dup(directory_descriptor)
@@ -3037,7 +3057,45 @@ def read_bytes_beneath(directory_descriptor, name, limit, expected_facts=None):
             child = os.open(component, DIRECTORY_FLAGS, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = child
-        return read_bytes_at(descriptor, components[-1], limit, expected_facts)
+        return os.open(
+            components[-1],
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=descriptor,
+        )
+    finally:
+        os.close(descriptor)
+
+
+def read_bytes_beneath(directory_descriptor, name, limit, expected_facts=None):
+    return read_open_descriptor(
+        open_file_beneath(directory_descriptor, name), limit, expected_facts
+    )
+
+
+def hash_file_beneath(directory_descriptor, name):
+    """Stream-check private receipt logs with bounded memory and stable facts."""
+    descriptor = open_file_beneath(directory_descriptor, name)
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ExportError("artifact is not a regular file")
+        hashed = hashlib.sha256()
+        count = 0
+        while count <= before.st_size:
+            chunk = os.read(descriptor, min(1024 * 1024, before.st_size + 1 - count))
+            if not chunk:
+                break
+            hashed.update(chunk)
+            count += len(chunk)
+        after = os.fstat(descriptor)
+        if (
+            count != before.st_size
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_ctime_ns != after.st_ctime_ns
+        ):
+            raise ExportError("artifact changed while being verified")
+        return hashed.hexdigest(), count
     finally:
         os.close(descriptor)
 

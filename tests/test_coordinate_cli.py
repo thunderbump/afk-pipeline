@@ -635,6 +635,20 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("continuations/01/output.json", sources)
         self.assertNotIn("continuations/02/output.json", sources)
 
+        original_bundle = self.root / "original-terminal-bundle"
+        original_export = export_run(
+            run,
+            original_bundle,
+            project="fixture",
+            run_id="continued-1",
+            terminal_continuation="original",
+        )
+        self.assertEqual(original_export["identity"]["run_id"], "continued-1")
+        original_record = json.loads(
+            (original_bundle / "workflow-run.json").read_text()
+        )
+        self.assertEqual(original_record["terminal"], {"decision": "exhausted"})
+
         second_input = json.loads((second_directory / "input.json").read_text())
         second_input["prior_output"] = "../wrong/output.json"
         (second_directory / "input.json").write_text(json.dumps(second_input))
@@ -645,6 +659,15 @@ class CoordinatorCliTest(unittest.TestCase):
                 project="fixture",
                 run_id="continued-1",
                 terminal_continuation="01",
+            )
+
+        with self.assertRaises((ExportError, ValueError)):
+            export_run(
+                run,
+                self.root / "invalid-original-bundle",
+                project="fixture",
+                run_id="continued-1",
+                terminal_continuation="original",
             )
 
     def test_next_continuation_refuses_rewritten_predecessor_allowance(self):

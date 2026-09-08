@@ -1345,6 +1345,45 @@ class ExportCliTests(unittest.TestCase):
         ):
             afk_export.public_artifacts({"redactions": set()})
 
+    def test_oversized_receipt_logs_verify_without_suppressing_other_artifacts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            self.add_inference_receipt(inference)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            for name, file in (("events", "events.jsonl"), ("stderr", "stderr.log")):
+                data = b"x" * 4096
+                (inference / "attempts/1" / file).write_bytes(data)
+                receipt["attempts"][0]["artifacts"][name + "_sha256"] = hashlib.sha256(
+                    data
+                ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt))
+            with mock.patch("afk_export.V2_MAX_ARTIFACT_BYTES", 1024):
+                artifacts = afk_export.receipt_bound_inference_artifacts(
+                    source, "coordinator/04-review/inference", "review"
+                )
+            by_kind = {item["kind"]: item for item in artifacts}
+            self.assertIn("inference_response", by_kind)
+            for kind in ("inference_events", "inference_log"):
+                item = by_kind[kind]
+                self.assertEqual(item["verified_source_bytes"], 4096)
+                self.assertIsNone(item["validated_raw"])
+                candidate = {**item, "source": item["relative"], "root": source}
+                descriptor, data = afk_export.derive_public_artifact(candidate, set())
+                self.assertEqual(descriptor["source"]["bytes"], 4096)
+                self.assertEqual(descriptor["unavailable_reason"], "private_source")
+                self.assertIsNone(data)
+            (inference / "attempts/1/events.jsonl").write_bytes(b"y" * 4096)
+            with (
+                mock.patch("afk_export.V2_MAX_ARTIFACT_BYTES", 1024),
+                self.assertRaisesRegex(afk_export.ExportError, "hash disagrees"),
+            ):
+                afk_export.receipt_bound_inference_artifacts(
+                    source, "coordinator/04-review/inference", "review"
+                )
+
     def test_v2_admits_only_receipt_bound_inference_artifacts(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

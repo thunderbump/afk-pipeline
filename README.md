@@ -602,9 +602,20 @@ are admitted before events. The allowlist covers the frozen Bead,
 Assignment, Coordinator request, Preparation record, retained Preflight records,
 Coordinator records, and each Component Invocation input, output, and declared
 artifact. The limits are
-25 MiB per uncompressed artifact, 32 MiB for the complete bundle, 128 payload
+50 MiB per uncompressed artifact, 64 MiB for the complete bundle, 128 payload
 files, and a 64 KiB manifest. This allows useful
 event streams above the old 8 MiB bundle limit.
+Receipt-bound optional inference event and stderr logs are verified by streaming
+the complete file and comparing its receipt hash. Their size does not abort
+export or turn a missing, unsafe or mismatched source into valid evidence. Raw
+receipt sources retain their private-source policy. Downloadable component logs
+still obey the artifact and total-bundle limits and receive explicit
+`artifact_limit` or `bundle_limit` descriptors when omitted.
+
+The Python export interface accepts `terminal_continuation="original"` to
+replay the original terminal after continuations exist. It still validates the
+complete retained chain before selecting that historical prefix.
+
 
 Pass `--schema-version 2` only for compatibility with the older
 raw-source-plus-derived-view artifact contract. V2 keeps private-source
