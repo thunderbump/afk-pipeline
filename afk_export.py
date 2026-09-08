@@ -1406,11 +1406,37 @@ def artifact_candidates(observed):
                     0,
                 )
         for entry in observed["state"]["history"]:
-            if entry["outcome"] == "abandoned":
-                continue
             # History is cumulative across continuations. Resolve each stage
             # through the retained lineage rather than assuming it lives under
-            # the original Coordinator root.
+            # the original Coordinator root. An abandoned component has no
+            # admissible component output, but it can still have a sealed
+            # inference invocation consumed by the metrics report. Include
+            # that receipt-bound evidence in the normalized checkpoint.
+            evidence_path = locate_invocation_file(
+                observed["coordinator"],
+                observed.get("continuations", []),
+                entry,
+                "inference/receipt.json",
+            )
+            inference_relative = evidence_path.parent.relative_to(root).as_posix()
+            inference_purpose = {
+                "assessment": "finding_assessment",
+                "response": "feedback_response",
+            }.get(entry["component"], entry["component"])
+            inference_path = root / inference_relative
+            if evidence_path.is_file() or (
+                entry["outcome"] != "abandoned"
+                and (inference_path.exists() or inference_path.is_symlink())
+            ):
+                for item in receipt_bound_inference_artifacts(
+                    root,
+                    inference_relative,
+                    inference_purpose,
+                    None,
+                ):
+                    add(**item)
+            if entry["outcome"] == "abandoned":
+                continue
             output_path = locate_invocation_file(
                 observed["coordinator"],
                 observed.get("continuations", []),
@@ -1422,21 +1448,6 @@ def artifact_candidates(observed):
             add(f"{base}/input.json", scope, "json", "application/json", 0)
             add(f"{base}/output.json", scope, "json", "application/json", 0)
             output = read_json(output_path)
-            inference_relative = f"{base}/inference"
-            if (root / inference_relative).exists() or (
-                root / inference_relative
-            ).is_symlink():
-                inference_purpose = {
-                    "assessment": "finding_assessment",
-                    "response": "feedback_response",
-                }.get(entry["component"], entry["component"])
-                for item in receipt_bound_inference_artifacts(
-                    root,
-                    inference_relative,
-                    inference_purpose,
-                    None,
-                ):
-                    add(**item)
             for kind, filename in sorted(output.get("artifacts", {}).items()):
                 if kind not in ARTIFACTS[entry["component"]] or not isinstance(
                     filename, str

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -201,6 +202,104 @@ class MetricsPublicationTests(unittest.TestCase):
             def summarize_then_change(*args, **kwargs):
                 summary = actual_summarize(*args, **kwargs)
                 events = source / "coordinator" / "01-attempt" / "events.jsonl"
+                events.write_bytes(events.read_bytes() + b'{"type":"noop"}\n')
+                return summary
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.summarize_source",
+                    side_effect=summarize_then_change,
+                ),
+                self.assertRaisesRegex(PublicationError, "changed"),
+            ):
+                build_publication(request)
+
+    def test_abandoned_inference_change_during_projection_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fixtures = ExportCliTests()
+            source = fixtures.sealed_preparer(root)
+            history = [
+                fixtures.history()[0],
+                {**fixtures.history()[1], "outcome": "failed"},
+                {
+                    "sequence": 3,
+                    "component": "response",
+                    "directory": "03-response",
+                    "input_from": {"validation": "02-validation"},
+                    "outcome": "abandoned",
+                },
+            ]
+            state_path = source / "coordinator" / "state.json"
+            state = json.loads(state_path.read_text())
+            state.update(
+                status="failed",
+                next_sequence=4,
+                history=history,
+                terminal={
+                    "failed_component": "validation",
+                    "component_outcome": "failed",
+                    "exit_code": 1,
+                },
+            )
+            state_path.write_text(json.dumps(state))
+            validation_output_path = (
+                source / "coordinator" / "02-validation" / "output.json"
+            )
+            validation_output = json.loads(validation_output_path.read_text())
+            validation_output["outcome"] = "failed"
+            validation_output_path.write_text(json.dumps(validation_output))
+            output_path = source / "coordinator" / "output.json"
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "outcome": "failed",
+                        **state["terminal"],
+                        "history": history,
+                    }
+                )
+            )
+            preparation_path = source / "preparation.json"
+            preparation = json.loads(preparation_path.read_text())
+            preparation["coordinator"].update(
+                status="failed", exit_code=1, outcome="failed", decision=None
+            )
+            preparation_path.write_text(json.dumps(preparation))
+            stage = source / "coordinator" / "03-response"
+            (source / "coordinator" / "03-change").rename(stage)
+            inference = stage / "inference"
+            fixtures.add_inference_receipt(inference)
+            invocation_path = inference / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["purpose"] = "feedback_response"
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            bundle = root / "bundle"
+            afk_export.export_run(source, bundle, schema_version=3)
+            request = {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [
+                    {
+                        "source": str(source),
+                        "bundle": str(bundle),
+                        "selection": "latest",
+                    }
+                ],
+            }
+            actual_summarize = __import__(
+                "afk_metrics.publication", fromlist=["summarize_source"]
+            ).summarize_source
+
+            def summarize_then_change(*args, **kwargs):
+                summary = actual_summarize(*args, **kwargs)
+                events = inference / "attempts" / "1" / "events.jsonl"
                 events.write_bytes(events.read_bytes() + b'{"type":"noop"}\n')
                 return summary
 
