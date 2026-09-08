@@ -54,8 +54,8 @@ jq . /new/report-directory/summary.json
 ```
 
 This command is explicitly opt-in. The destination must not already exist and
-must be separate from the source Runs. It writes `summary.json` (schema version
-1) and `comparison.txt`; it does not mutate, seal, publish, or change the status
+must not equal or be nested beneath any source Run. It writes `summary.json`
+(schema version 1) and `comparison.txt`; it does not mutate, seal, publish, or change the status
 of source evidence. Replaying the same sealed inputs produces the same summary
 (the report deliberately has no generation timestamp). Repeated source inputs
 and shared continuation evidence are deduplicated by stable Run and invocation
@@ -65,10 +65,12 @@ or source content in the human report. Existing destinations and invalid CLI
 usage exit 2.
 
 The projection uses the exporter's existing verified prepared-Run and
-continuation traversal. Pi Inference Receipts and their hash-bound event streams
-are authenticated at the existing export boundary. JSONL is streamed in bounded
-memory, and reports contain no prompts, message text, tool payloads, logs,
-credentials, or raw events. Finalized assistant `message_end` usage is counted
+continuation traversal, including sealed invocation evidence retained by a
+component later marked abandoned. Pi Inference Receipts and their hash-bound
+event streams are authenticated at the existing export boundary. JSONL is
+streamed in bounded memory with a 1 MiB per-record limit (oversized records fail
+source integrity), and reports contain no prompts, message text, tool payloads,
+logs, credentials, or raw events. Finalized assistant `message_end` usage is counted
 once by its stable message identity. Cumulative `message_update`, `turn_end`, and
 `agent_end` copies are not summed. `compaction_end.result.usage` is shown as a
 separate aggregate because it may represent several requests. Input, output,

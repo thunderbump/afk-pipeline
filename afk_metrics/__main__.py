@@ -9,6 +9,10 @@ from pathlib import Path
 from .report import build_report
 
 
+def _available(value):
+    return value if value is not None else "unavailable"
+
+
 def _human(report):
     lines = [
         "AFK retained Run metrics comparison",
@@ -21,18 +25,46 @@ def _human(report):
         if run["integrity"]["status"] == "verified":
             outcome = run["outcome"]
             totals = run["inference"]["totals"]
+            identity = run.get("run_identity") or {}
+            identity_parts = [
+                f"{name}={identity[name]}"
+                for name in ("run_id", "bead_id", "project")
+                if identity.get(name) is not None
+            ]
+            model_parts = []
+            for invocation in run["inference"]["invocations"]:
+                observed = invocation.get("observed_identities") or [{}]
+                for event_identity in observed:
+                    values = []
+                    if invocation.get("adapter") is not None:
+                        values.append(f"adapter={invocation['adapter']}")
+                    for name in ("provider", "model"):
+                        value = event_identity.get(name) or invocation.get(name)
+                        if value is not None:
+                            values.append(f"{name}={value}")
+                    label = ", ".join(values) if values else "identity unavailable"
+                    if label not in model_parts:
+                        model_parts.append(label)
+            cost = totals["cost"]
+            cost_text = "unavailable"
+            if cost["amount"] is not None:
+                cost_text = (
+                    f"{cost['amount']} (Pi-reported estimate, not billed charges)"
+                )
             lines.extend(
                 [
+                    f"  Run identity: {', '.join(identity_parts) or 'unavailable'}",
+                    f"  adapter / provider / model: {'; '.join(model_parts) or 'unavailable'}",
                     f"  terminal outcome: {outcome['terminal']}",
                     f"  validation: {', '.join(str(x) for x in outcome['validation_results']) or 'unavailable'}",
                     f"  repairs / retries: {outcome['repair_count']} / {outcome['retry_count']}",
-                    f"  Run wall span: {run['timing']['run_wall_span_seconds'] if run['timing']['run_wall_span_seconds'] is not None else 'unavailable'} s",
-                    f"  inference invocation elapsed: {totals['elapsed_seconds']} s (includes adapter/runtime/tool work; not pure inference latency)",
-                    f"  repository Validation: {run['timing']['repository_validation_seconds'] if run['timing']['repository_validation_seconds'] is not None else 'unavailable'} s",
+                    f"  Run wall span: {_available(run['timing']['run_wall_span_seconds'])} s",
+                    f"  inference invocation elapsed: {_available(totals['elapsed_seconds'])} s (includes adapter/runtime/tool work; not pure inference latency)",
+                    f"  repository Validation: {_available(run['timing']['repository_validation_seconds'])} s",
                     "  Change / Iteration timing: unavailable / unavailable",
                     f"  usage: {json.dumps(totals['usage'], sort_keys=True) if totals['usage'] else 'unavailable'}",
-                    f"  API cost: {totals['cost']['amount'] if totals['cost']['amount'] is not None else 'unavailable'} (Pi-reported estimate, not billed charges)",
-                    "  completion acceptance / integration: unavailable / unavailable",
+                    f"  API cost: {cost_text}",
+                    f"  completion acceptance / integration: {_available(outcome['completion_acceptance'])} / {_available(outcome['integration_status'])}",
                 ]
             )
         lines.append("")
@@ -71,6 +103,17 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
     destination = args.destination
+    destination_resolved = destination.resolve()
+    for source in args.sources:
+        source_resolved = source.resolve()
+        if (
+            destination_resolved == source_resolved
+            or source_resolved in destination_resolved.parents
+        ):
+            print(
+                "metrics destination must be separate from source Runs", file=sys.stderr
+            )
+            return 2
     try:
         destination.mkdir(parents=True, exist_ok=False)
     except FileExistsError:

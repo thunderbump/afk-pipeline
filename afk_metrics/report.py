@@ -29,6 +29,11 @@ TOKEN_FIELDS = (
     "reasoning",
 )
 
+# A stream is bounded both across records and within one record. Pi events are
+# metadata-rich but should never approach this limit; rejecting an oversized
+# record prevents a corrupt artifact from materializing an unbounded line.
+MAX_JSONL_RECORD_BYTES = 1024 * 1024
+
 
 def _number(value: Any) -> float | int | None:
     return (
@@ -63,6 +68,17 @@ def _message_usage(event: dict[str, Any]) -> tuple[dict[str, Any] | None, Any]:
     return message, message.get("usage", event.get("usage"))
 
 
+def _reported_cost(raw_usage: Any) -> float | int | None:
+    if not isinstance(raw_usage, dict):
+        return None
+    raw_cost = raw_usage.get("cost")
+    return (
+        _number(raw_cost.get("total"))
+        if isinstance(raw_cost, dict)
+        else _number(raw_cost)
+    )
+
+
 def parse_pi_events(path: Path) -> dict[str, Any]:
     """Stream a Pi JSONL file and project finalized usage without event payloads."""
     usage: dict[str, float | int] = {}
@@ -79,8 +95,12 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
     seen_messages: set[str] = set()
     seen_compactions: set[str] = set()
     identities: set[tuple[str | None, str | None]] = set()
-    with Path(path).open("r", encoding="utf-8") as stream:
-        for line_number, line in enumerate(stream, 1):
+    with Path(path).open("rb") as stream:
+        line_number = 0
+        while line := stream.readline(MAX_JSONL_RECORD_BYTES + 1):
+            line_number += 1
+            if len(line) > MAX_JSONL_RECORD_BYTES:
+                raise ValueError(f"oversized JSONL event at line {line_number}")
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, UnicodeError) as error:
@@ -124,26 +144,23 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
                         )
                     )
                 measured = _usage(raw_usage)
+                amount = _reported_cost(raw_usage)
+                if amount is not None:
+                    cost += float(amount)
+                    has_cost = True
+                    cost_measurements += 1
                 if not measured:
+                    # Cost is independent evidence: retain it while correctly
+                    # marking token coverage incomplete.
                     missing += 1
                     continue
                 _add(usage, measured)
-                if isinstance(raw_usage, dict):
-                    raw_cost = raw_usage.get("cost")
-                    amount = (
-                        _number(raw_cost.get("total"))
-                        if isinstance(raw_cost, dict)
-                        else _number(raw_cost)
-                    )
-                    if amount is not None:
-                        cost += float(amount)
-                        has_cost = True
-                        cost_measurements += 1
             elif kind == "compaction_end":
                 result = event.get("result")
                 raw_usage = result.get("usage") if isinstance(result, dict) else None
                 measured = _usage(raw_usage)
-                if not measured:
+                amount = _reported_cost(raw_usage)
+                if not measured and amount is None:
                     continue
                 identity = event.get("id")
                 # No upstream id is guaranteed. Distinct un-identified events
@@ -153,18 +170,14 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
                     continue
                 seen_compactions.add(key)
                 compactions += 1
-                _add(compact_usage, measured)
-                if isinstance(raw_usage, dict):
-                    raw_cost = raw_usage.get("cost")
-                    amount = (
-                        _number(raw_cost.get("total"))
-                        if isinstance(raw_cost, dict)
-                        else _number(raw_cost)
-                    )
-                    if amount is not None:
-                        compact_cost += float(amount)
-                        compaction_has_cost = True
-                        cost_measurements += 1
+                if measured:
+                    _add(compact_usage, measured)
+                else:
+                    missing += 1
+                if amount is not None:
+                    compact_cost += float(amount)
+                    compaction_has_cost = True
+                    cost_measurements += 1
     partial = missing > 0 or retries > 0
     coverage = (
         "partial"
@@ -487,8 +500,9 @@ def summarize_source(source: Path) -> dict[str, Any]:
     if (root / "planner/inference").exists():
         candidates.append(("planner/inference", "acceptance_planning"))
     for entry in state["history"]:
-        if entry.get("outcome") == "abandoned":
-            continue
+        # Abandoned denotes coordinator progression, not absence of evidence.
+        # An interrupted component may already have sealed an invocation before
+        # its component output was abandoned, so discover it like any other.
         relative = f"{coordinator_prefix}{entry['directory']}/inference"
         if (root / relative).exists() or (root / relative).is_symlink():
             purpose = {
@@ -533,8 +547,11 @@ def summarize_source(source: Path) -> dict[str, Any]:
     elapsed_values = [item["elapsed"]["seconds"] for item in invocations]
     invocation_seconds = (
         sum(elapsed_values)
-        if all(value is not None for value in elapsed_values)
+        if elapsed_values and all(value is not None for value in elapsed_values)
         else None
+    )
+    known_invocation_seconds = sum(
+        value for value in elapsed_values if value is not None
     )
     prep = observed.get("preparation")
     timestamps = prep.get("timestamps", {}) if isinstance(prep, dict) else {}
@@ -560,7 +577,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
             # can be unavailable without changing trust in the sealed Run.
             publication_seconds = None
     known_nonoverlap = (
-        (prep_seconds or 0) + (invocation_seconds or 0) + sum(validation_durations)
+        (prep_seconds or 0) + known_invocation_seconds + sum(validation_durations)
     )
     active_intervals = []
     if prep_seconds is not None:
