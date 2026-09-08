@@ -24,6 +24,7 @@ from afk_export import (
     ExportUsageError,
     hash_file_beneath,
     load_source,
+    locate_invocation_file,
     normalize_component_output,
     open_directory_beneath,
     open_file_beneath,
@@ -1272,9 +1273,14 @@ def summarize_source(
     assignment = observed["assignment"]
     state = observed["state"]
     root = source.resolve()
-    coordinator_prefix = (
-        "" if observed["coordinator"].resolve() == root else "coordinator/"
-    )
+    coordinator = Path(observed["coordinator"]).resolve()
+    continuation_roots = [
+        Path(item).resolve() for item in observed.get("continuations", [])
+    ]
+
+    def relative_evidence(path: Path) -> str:
+        return path.resolve().relative_to(root).as_posix()
+
     candidates: list[tuple[str, str, dict[str, Any]]] = []
     abandoned_candidates: set[str] = set()
     if (root / "planner/inference").exists():
@@ -1289,8 +1295,15 @@ def summarize_source(
         # Abandoned denotes coordinator progression, not absence of evidence.
         # An interrupted component may already have sealed an invocation before
         # its component output was abandoned, so discover it like any other.
-        relative = f"{coordinator_prefix}{entry['directory']}/inference"
-        if (root / relative).exists() or (root / relative).is_symlink():
+        receipt_path = locate_invocation_file(
+            coordinator,
+            continuation_roots,
+            entry,
+            "inference/receipt.json",
+        )
+        inference_path = receipt_path.parent
+        relative = relative_evidence(inference_path)
+        if inference_path.exists() or inference_path.is_symlink():
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
@@ -1344,9 +1357,10 @@ def summarize_source(
                 entry.get("component") == "validation"
                 and entry.get("outcome") != "abandoned"
             ):
-                component_relative = (
-                    f"{coordinator_prefix}{entry['directory']}"
-                ).rstrip("/")
+                output_path = locate_invocation_file(
+                    coordinator, continuation_roots, entry, "output.json"
+                )
+                component_relative = relative_evidence(output_path.parent)
                 output = _safe_evidence_json(root, component_relative, "output.json")
                 if validate_component_output("validation", output) != entry.get(
                     "outcome"

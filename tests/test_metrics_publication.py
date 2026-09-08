@@ -89,6 +89,60 @@ class MetricsPublicationTests(unittest.TestCase):
                 publish(input_path, destination)
             self.assertFalse(destination.exists())
 
+    def test_complete_bundle_manifest_inventory_is_required(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, bundle, request = self.fixture(root)
+            (bundle / "unlisted.json").write_text("{}")
+            with self.assertRaisesRegex(PublicationError, "inventory"):
+                build_publication(request)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, bundle, request = self.fixture(root)
+            manifest_path = bundle / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["files"].append(
+                {"path": "missing.json", "bytes": 0, "sha256": "0" * 64}
+            )
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaises(PublicationError):
+                build_publication(request)
+
+    def test_source_change_during_metrics_projection_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            actual_summarize = __import__(
+                "afk_metrics.publication", fromlist=["summarize_source"]
+            ).summarize_source
+
+            def summarize_then_change(*args, **kwargs):
+                summary = actual_summarize(*args, **kwargs)
+                (source / "coordinator" / "publication.json").write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "status": "succeeded",
+                            "admission_outcome": "accepted",
+                            "started_at": "2026-01-01T00:00:00Z",
+                            "finished_at": "2026-01-01T00:00:01Z",
+                            "process": {"exit_code": 0},
+                            "error_category": None,
+                        }
+                    )
+                )
+                return summary
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.summarize_source",
+                    side_effect=summarize_then_change,
+                ),
+                self.assertRaisesRegex(PublicationError, "changed"),
+            ):
+                build_publication(request)
+
     def test_duplicate_identity_and_count_are_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

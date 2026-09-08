@@ -1408,11 +1408,20 @@ def artifact_candidates(observed):
         for entry in observed["state"]["history"]:
             if entry["outcome"] == "abandoned":
                 continue
-            base = f"{coordinator_prefix}{entry['directory']}"
+            # History is cumulative across continuations. Resolve each stage
+            # through the retained lineage rather than assuming it lives under
+            # the original Coordinator root.
+            output_path = locate_invocation_file(
+                observed["coordinator"],
+                observed.get("continuations", []),
+                entry,
+                "output.json",
+            )
+            base = output_path.parent.relative_to(root).as_posix()
             scope = f"component:{entry['sequence']}:{entry['component']}"
             add(f"{base}/input.json", scope, "json", "application/json", 0)
             add(f"{base}/output.json", scope, "json", "application/json", 0)
-            output = read_json(root / base / "output.json")
+            output = read_json(output_path)
             inference_relative = f"{base}/inference"
             if (root / inference_relative).exists() or (
                 root / inference_relative

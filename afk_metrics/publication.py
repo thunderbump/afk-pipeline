@@ -7,19 +7,25 @@ import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from afk_export import (
+    MAX_BUNDLE_FILES,
     MAX_INCLUDED_BYTES,
     MAX_MANIFEST_BYTES,
+    V2_MAX_BUNDLE_BYTES,
     ExportError,
     ExportUsageError,
     load_source_v2,
     normalize_run_v2,
+    open_directory_beneath,
     read_bytes_at,
+    read_bytes_beneath,
     require_directory,
+    safe_relative,
 )
 
 from .report import build_comparisons, summarize_source
@@ -100,6 +106,28 @@ def load_publication_request(path: Path) -> dict[str, Any]:
     return value
 
 
+def _inventory_paths(descriptor: int, prefix: str = "") -> set[str]:
+    """Inventory a bundle through no-follow descriptors, rejecting odd nodes."""
+    paths: set[str] = set()
+    for name in os.listdir(descriptor):
+        relative = f"{prefix}/{name}" if prefix else name
+        facts = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+        if stat.S_ISREG(facts.st_mode):
+            paths.add(relative)
+        elif stat.S_ISDIR(facts.st_mode):
+            paths.add(f"{relative}/")
+            child = os.open(
+                name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=descriptor
+            )
+            try:
+                paths.update(_inventory_paths(child, relative))
+            finally:
+                os.close(child)
+        else:
+            raise PublicationError("bundle contains an unsafe filesystem entry")
+    return paths
+
+
 def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
     try:
         require_directory(bundle)
@@ -108,41 +136,86 @@ def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
             manifest_raw = read_bytes_at(
                 descriptor, "manifest.json", MAX_MANIFEST_BYTES
             )
-            workflow_raw = read_bytes_at(
-                descriptor, "workflow-run.json", MAX_INCLUDED_BYTES
-            )
+            manifest = _json_object(manifest_raw, "bundle manifest")
+            schema = manifest.get("schema_version")
+            files = manifest.get("files")
+            if (
+                set(manifest) != {"schema_version", "kind", "identity", "files"}
+                or schema not in {2, 3}
+                or manifest.get("kind") != "afk-workflow-run"
+                or not isinstance(files, list)
+                or not 1 <= len(files) <= MAX_BUNDLE_FILES
+            ):
+                raise PublicationError("bundle manifest identity is invalid")
+
+            payloads: dict[str, bytes] = {}
+            total = len(manifest_raw)
+            for row in files:
+                if (
+                    not isinstance(row, dict)
+                    or set(row) != {"path", "bytes", "sha256"}
+                    or not isinstance(row.get("path"), str)
+                    or not safe_relative(row["path"])
+                    or row["path"] == "manifest.json"
+                    or row["path"] in payloads
+                    or not isinstance(row.get("bytes"), int)
+                    or isinstance(row.get("bytes"), bool)
+                    or row["bytes"] < 0
+                    or SHA256.fullmatch(str(row.get("sha256"))) is None
+                ):
+                    raise PublicationError("bundle manifest file inventory is invalid")
+                raw = read_bytes_beneath(descriptor, row["path"], V2_MAX_BUNDLE_BYTES)
+                total += len(raw)
+                if (
+                    row["bytes"] != len(raw)
+                    or row["sha256"] != hashlib.sha256(raw).hexdigest()
+                ):
+                    raise PublicationError("bundle file hash or size disagrees")
+                payloads[row["path"]] = raw
+            expected_inventory = {"manifest.json", *payloads}
+            for path in payloads:
+                parts = path.split("/")
+                expected_inventory.update(
+                    f"{'/'.join(parts[:index])}/" for index in range(1, len(parts))
+                )
+            if (
+                total > V2_MAX_BUNDLE_BYTES
+                or _inventory_paths(descriptor) != expected_inventory
+            ):
+                raise PublicationError("bundle manifest inventory disagrees")
+            workflow_raw = payloads.get("workflow-run.json")
+            if workflow_raw is None or len(workflow_raw) > MAX_INCLUDED_BYTES:
+                raise PublicationError("bundle workflow Run is missing or oversized")
         finally:
             os.close(descriptor)
     except (OSError, ExportError) as error:
         raise PublicationError("bundle is unavailable or unsafe") from error
-    manifest = _json_object(manifest_raw, "bundle manifest")
     workflow = _json_object(workflow_raw, "bundle workflow Run")
-    schema = manifest.get("schema_version")
-    files = manifest.get("files")
     if (
-        set(manifest) != {"schema_version", "kind", "identity", "files"}
-        or schema not in {2, 3}
-        or manifest.get("kind") != "afk-workflow-run"
-        or not isinstance(files, list)
-        or manifest.get("identity") != workflow.get("identity")
+        manifest.get("identity") != workflow.get("identity")
         or workflow.get("schema_version") != schema
     ):
         raise PublicationError("bundle manifest identity is invalid")
-    rows = [
-        row
-        for row in files
-        if isinstance(row, dict) and row.get("path") == "workflow-run.json"
-    ]
     digest = hashlib.sha256(workflow_raw).hexdigest()
-    if (
-        len(rows) != 1
-        or set(rows[0]) != {"path", "bytes", "sha256"}
-        or rows[0].get("bytes") != len(workflow_raw)
-        or rows[0].get("sha256") != digest
-        or SHA256.fullmatch(str(rows[0].get("sha256"))) is None
-    ):
-        raise PublicationError("bundle workflow Run hash or size disagrees")
     return schema, workflow, workflow_raw, digest
+
+
+def _publication_evidence_digest(source: Path, observed: dict[str, Any]) -> str | None:
+    terminal = Path(observed["terminal_directory"]).resolve()
+    relative = terminal.relative_to(source.resolve()).as_posix()
+    descriptor = (
+        open_directory_beneath(source, relative)
+        if relative != "."
+        else os.open(source, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    )
+    try:
+        try:
+            raw = read_bytes_at(descriptor, "publication.json", MAX_INCLUDED_BYTES)
+        except FileNotFoundError:
+            return None
+    finally:
+        os.close(descriptor)
+    return hashlib.sha256(raw).hexdigest()
 
 
 def _semantic_record(record: dict[str, Any], schema: int) -> dict[str, Any]:
@@ -310,7 +383,11 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             observed = load_source_v2(
                 source, project, None, None, terminal_continuation=terminal
             )
-            expected, _ = normalize_run_v2(observed, include_artifacts=False)
+            # Retain the complete normalized observation (including evidence
+            # hashes) so the metrics read can be bracketed by the exact same
+            # authenticated source state rather than merely the Run identity.
+            expected, _ = normalize_run_v2(observed, include_artifacts=True)
+            publication_digest = _publication_evidence_digest(source, observed)
         except (
             OSError,
             ValueError,
@@ -337,6 +414,28 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
         summary = summarize_source(
             source, observed=observed, include_stage_binding=True
         )
+        try:
+            confirmed = load_source_v2(
+                source, project, None, None, terminal_continuation=terminal
+            )
+            confirmed_record, _ = normalize_run_v2(confirmed, include_artifacts=True)
+            confirmed_publication_digest = _publication_evidence_digest(
+                source, confirmed
+            )
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            ExportError,
+            ExportUsageError,
+        ) as error:
+            raise PublicationError("source Run changed during metrics read") from error
+        if (
+            confirmed_record != expected
+            or confirmed_publication_digest != publication_digest
+        ):
+            raise PublicationError("source Run changed during metrics read")
         if summary["integrity"]["status"] != "verified":
             raise PublicationError("source metrics verification failed")
         stages = _stages(summary, project, identity["run_id"])
