@@ -98,6 +98,27 @@ class MetricsEventTests(unittest.TestCase):
         self.assertIsNone(result["cost"]["amount"])
         self.assertFalse(result["request_count_exact"])
 
+    def test_compaction_without_measurements_keeps_coverage_partial(self):
+        events = [
+            {
+                "type": "message_end",
+                "message": {
+                    "id": "measured",
+                    "role": "assistant",
+                    "usage": {"input": 4, "cost": {"total": 0.01}},
+                },
+            },
+            {"type": "compaction_end", "id": "unmeasured", "result": {}},
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text("".join(json.dumps(event) + "\n" for event in events))
+            result = parse_pi_events(path)
+        self.assertEqual(result["compaction"]["aggregate_count"], 1)
+        self.assertEqual(result["compaction"]["usage"], {})
+        self.assertEqual(result["coverage"], "partial")
+        self.assertEqual(result["cost"]["status"], "partial")
+
     def test_retry_attempt_numbers_are_scoped_to_each_retry_episode(self):
         events = [
             {"type": "auto_retry_start", "attempt": 1},
@@ -456,7 +477,8 @@ class MetricsReportTests(unittest.TestCase):
                 "request": {"validation": {}},
                 "bead_id": None,
             }
-            (root / "publication.json").write_text(
+            publication_path = root / "publication.json"
+            publication_path.write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
@@ -471,12 +493,80 @@ class MetricsReportTests(unittest.TestCase):
             )
             with mock.patch("afk_metrics.report.load_source", return_value=observed):
                 report = summarize_source(root)
+                publication_path.unlink()
+                publication_path.symlink_to(root / "forged-publication.json")
+                invalid = summarize_source(root)
         self.assertEqual(report["timing"]["publication_seconds"], 2)
         self.assertEqual(report["timing"]["unattributed_seconds"], 7)
         self.assertIn(
             {"kind": "publication", "seconds": 2, "nonoverlapping_seconds": 2},
             report["timing"]["active_execution_intervals"],
         )
+        self.assertEqual(invalid["integrity"]["status"], "invalid")
+
+    def test_publication_read_does_not_have_a_path_check_read_race(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": [], "status": "completed"},
+                "coordinator": root,
+                "preparation": {
+                    "timestamps": {
+                        "started_at": "2026-01-01T00:00:00Z",
+                        "prepared_at": "2026-01-01T00:00:01Z",
+                        "finished_at": "2026-01-01T00:00:08Z",
+                    },
+                    "repository": {},
+                },
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            publication_path = root / "publication.json"
+            publication_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "succeeded",
+                        "admission_outcome": "accepted",
+                        "started_at": "2026-01-01T00:00:08Z",
+                        "finished_at": "2026-01-01T00:00:10Z",
+                        "process": {"exit_code": 0},
+                        "error_category": None,
+                    }
+                )
+            )
+            original_is_file = Path.is_file
+
+            def replace_after_check(path):
+                if path == publication_path:
+                    path.write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "status": "failed",
+                                "admission_outcome": "rejected",
+                                "started_at": "2026-01-01T00:00:08Z",
+                                "finished_at": "2026-01-01T00:00:11Z",
+                                "process": {"exit_code": 1},
+                                "error_category": "admission_rejected",
+                            }
+                        )
+                    )
+                    return True
+                return original_is_file(path)
+
+            with (
+                mock.patch("afk_metrics.report.load_source", return_value=observed),
+                mock.patch.object(Path, "is_file", new=replace_after_check),
+            ):
+                report = summarize_source(root)
+        self.assertEqual(report["integrity"]["status"], "verified")
+        self.assertEqual(report["outcome"]["completion_acceptance"], "accepted")
+        self.assertEqual(report["outcome"]["integration_status"], "succeeded")
 
     def test_fixture_run_comparison_matches_and_flags_confounded_base(self):
         with tempfile.TemporaryDirectory() as temporary:
