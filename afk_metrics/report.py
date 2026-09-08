@@ -9,14 +9,17 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from afk_coordinate.contract import validate_component_output
 from afk_export import (
     ExportError,
     ExportUsageError,
     load_source,
+    normalize_component_output,
     receipt_bound_inference_artifacts,
 )
 
@@ -33,6 +36,24 @@ TOKEN_FIELDS = (
 # metadata-rich but should never approach this limit; rejecting an oversized
 # record prevents a corrupt artifact from materializing an unbounded line.
 MAX_JSONL_RECORD_BYTES = 1024 * 1024
+
+# Identity labels are the only event strings emitted by this projection. Keep
+# them deliberately narrower than arbitrary Pi strings so an event cannot use a
+# nominal model/provider field as a prompt, tool-output, or credential channel.
+SAFE_IDENTITY_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,127}\Z")
+SENSITIVE_IDENTITY_PREFIX = re.compile(
+    r"(?:sk-|api[_-]?key|bearer|token|secret|password)", re.IGNORECASE
+)
+
+
+def _identity_label(value: Any) -> str | None:
+    if (
+        not isinstance(value, str)
+        or not SAFE_IDENTITY_LABEL.fullmatch(value)
+        or SENSITIVE_IDENTITY_PREFIX.match(value)
+    ):
+        return None
+    return value
 
 
 def _number(value: Any) -> float | int | None:
@@ -134,15 +155,10 @@ def parse_pi_events(path: Path) -> dict[str, Any]:
                     continue
                 seen_messages.add(key)
                 finalized += 1
-                provider = message.get("provider")
-                model = message.get("model")
-                if isinstance(provider, str) or isinstance(model, str):
-                    identities.add(
-                        (
-                            provider if isinstance(provider, str) else None,
-                            model if isinstance(model, str) else None,
-                        )
-                    )
+                provider = _identity_label(message.get("provider"))
+                model = _identity_label(message.get("model"))
+                if provider is not None or model is not None:
+                    identities.add((provider, model))
                 measured = _usage(raw_usage)
                 amount = _reported_cost(raw_usage)
                 if amount is not None:
@@ -280,50 +296,216 @@ def _hash_regular_beneath(directory: Path, relative: str) -> str:
 
 
 def _verify_generic_receipt(directory: Path, receipt: dict[str, Any]) -> None:
-    """Verify common runtime hash bindings for an unsupported adapter.
-
-    Export's closed Pi verifier cannot accept optional adapters by design. This
-    generic boundary authenticates the same retained files but never interprets
-    their event protocol or invents usage support.
-    """
+    """Authenticate the complete current runtime contract without parsing usage."""
+    invocation = _safe_json(directory / "invocation.json")
+    prompt = _safe_json(directory / "prompt.json")
     hashes = receipt.get("hashes")
-    if not isinstance(hashes, dict) or not isinstance(
-        hashes.get("invocation_sha256"), str
+    identity = receipt.get("identity")
+    policy = receipt.get("policy")
+    timing = receipt.get("timing")
+    adapter = invocation.get("adapter")
+    if (
+        set(receipt)
+        != {
+            "schema_version",
+            "identity",
+            "hashes",
+            "policy",
+            "timing",
+            "attempt_count",
+            "attempts",
+            "protocol",
+            "validation",
+            "terminal_response",
+            "outcome",
+        }
+        or set(invocation)
+        != {
+            "schema_version",
+            "purpose",
+            "task_contract_version",
+            "prompt",
+            "requested_capability",
+            "execution_root",
+            "evidence_directory",
+            "timeout_seconds",
+            "adapter",
+        }
+        or receipt.get("schema_version") != 1
+        or invocation.get("schema_version") != 1
+        or not isinstance(hashes, dict)
+        or not isinstance(identity, dict)
+        or set(identity) != {"runtime", "adapter"}
+        or identity.get("runtime") != "afk-inference-v1"
+        or not isinstance(policy, dict)
+        or set(policy)
+        != {
+            "requested_capability",
+            "system_instructions",
+            "max_attempts",
+            "single_deadline",
+            "validator_trust",
+        }
+        or not isinstance(timing, dict)
+        or set(timing)
+        != {"started_at", "ended_at", "timeout_seconds", "duration_seconds"}
+        or not isinstance(adapter, dict)
+        or set(adapter) != {"kind", "identity", "capabilities"}
+        or adapter.get("kind") != "fixture"
+        or identity.get("adapter") != adapter.get("identity")
+        or invocation.get("prompt") != prompt
+        or set(prompt)
+        != {
+            "system",
+            "purpose",
+            "task_contract_version",
+            "trusted_task_instructions",
+            "untrusted_task_data",
+        }
+        or prompt.get("purpose") != invocation.get("purpose")
+        or prompt.get("task_contract_version")
+        != invocation.get("task_contract_version")
+        or policy.get("requested_capability") != invocation.get("requested_capability")
+        or policy.get("system_instructions") != prompt.get("system")
+        or timing.get("timeout_seconds") != invocation.get("timeout_seconds")
     ):
-        raise TypeError("receipt omits invocation identity")
-    top_level = {
+        raise ValueError("generic receipt identity or policy disagrees")
+    required_hashes = {
         "invocation_sha256": "invocation.json",
         "prompt_sha256": "prompt.json",
-        "task_prompt_sha256": "task-prompt.txt",
-        "adapter_contract_sha256": "adapter-contract.json",
+        "adapter_script_sha256": "fixture-script.json",
     }
-    for field, relative in top_level.items():
+    if set(hashes) != set(required_hashes):
+        raise ValueError("generic receipt hash catalog is invalid")
+    for field, relative in required_hashes.items():
         expected = hashes.get(field)
-        if expected is not None and (
+        if (
             not isinstance(expected, str)
             or _hash_regular_beneath(directory, relative) != expected
         ):
             raise ValueError("receipt artifact hash disagrees")
+    script = json.loads((directory / "fixture-script.json").read_text())
+    capabilities = adapter.get("capabilities")
+    if (
+        not isinstance(script, list)
+        or not script
+        or not isinstance(capabilities, list)
+        or not all(isinstance(item, str) for item in capabilities)
+        or policy.get("max_attempts") != len(script)
+        or policy.get("single_deadline") is not True
+        or policy.get("validator_trust") != "trusted_in_process"
+    ):
+        raise ValueError("generic adapter contract disagrees")
+    duration = _number(timing.get("duration_seconds"))
+    timeout = _number(timing.get("timeout_seconds"))
+    if (
+        duration is None
+        or timeout is None
+        or _seconds(timing.get("started_at"), timing.get("ended_at")) is None
+    ):
+        raise ValueError("generic receipt timing is invalid")
     attempts = receipt.get("attempts")
-    if not isinstance(attempts, list):
+    if (
+        not isinstance(attempts, list)
+        or receipt.get("attempt_count") != len(attempts)
+        or len(attempts) > len(script)
+    ):
         raise TypeError("receipt attempts are invalid")
-    for attempt in attempts:
+    for index, attempt in enumerate(attempts, 1):
         artifacts = attempt.get("artifacts") if isinstance(attempt, dict) else None
-        if not isinstance(artifacts, dict):
-            raise TypeError("receipt attempt artifacts are invalid")
-        for name in ("events", "stderr", "response"):
-            relative = artifacts.get(name)
-            expected = artifacts.get(name + "_sha256")
-            if relative is not None and (
-                not isinstance(relative, str)
+        if (
+            not {"attempt_number", "duration_seconds", "protocol", "artifacts"}
+            <= set(attempt)
+            <= {
+                "attempt_number",
+                "duration_seconds",
+                "protocol",
+                "artifacts",
+                "process",
+                "validation",
+            }
+            or attempt.get("attempt_number") != index
+            or _number(attempt.get("duration_seconds")) is None
+            or not isinstance(attempt.get("protocol"), dict)
+            or not isinstance(artifacts, dict)
+            or set(artifacts)
+            != {
+                "events",
+                "events_sha256",
+                "stderr",
+                "stderr_sha256",
+                "response",
+                "response_sha256",
+            }
+        ):
+            raise TypeError("receipt attempt contract is invalid")
+        for name, suffix in (
+            ("events", "events.jsonl"),
+            ("stderr", "stderr.log"),
+            ("response", "response.json"),
+        ):
+            relative = artifacts[name]
+            expected = artifacts[name + "_sha256"]
+            expected_relative = f"attempts/{index}/{suffix}"
+            if relative is None and expected is None and name == "response":
+                continue
+            if (
+                relative != expected_relative
                 or not isinstance(expected, str)
                 or _hash_regular_beneath(directory, relative) != expected
             ):
                 raise ValueError("receipt attempt artifact hash disagrees")
+    expected_protocol = (
+        attempts[-1]["protocol"] if attempts else {"status": "not_started"}
+    )
+    if receipt.get("protocol") != expected_protocol:
+        raise ValueError("receipt terminal protocol disagrees")
+    validation = receipt.get("validation")
+    if not isinstance(validation, dict) or not isinstance(
+        validation.get("status"), str
+    ):
+        raise TypeError("receipt validation is invalid")
+    attempt_number = validation.get("attempt_number")
+    if attempt_number is not None:
+        if (
+            not isinstance(attempt_number, int)
+            or isinstance(attempt_number, bool)
+            or not 1 <= attempt_number <= len(attempts)
+            or attempts[attempt_number - 1].get("validation") != validation
+        ):
+            raise ValueError("receipt validation identity disagrees")
+        response_path = attempts[attempt_number - 1]["artifacts"].get("response")
+        if response_path is None or json.loads(
+            (directory / response_path).read_text()
+        ) != receipt.get("terminal_response"):
+            raise ValueError("receipt terminal response disagrees")
+    elif receipt.get("terminal_response") is not None:
+        raise ValueError("receipt terminal response lacks identity")
+    outcome = receipt.get("outcome")
+    validation_status = validation["status"]
+    if outcome not in {
+        "succeeded",
+        "response_rejected",
+        "adapter_failed",
+        "validator_failed",
+        "timed_out",
+        "interrupted",
+    } or (
+        outcome in {"succeeded", "response_rejected", "validator_failed"}
+        and validation_status
+        != {
+            "succeeded": "accepted",
+            "response_rejected": "response_rejected",
+            "validator_failed": "validator_failed",
+        }[outcome]
+    ):
+        raise ValueError("receipt outcome is invalid")
 
 
 def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     receipt_path = root / relative / "receipt.json"
+    if receipt_path.is_symlink() or not receipt_path.is_file():
+        raise ValueError("inference receipt is unavailable")
     receipt = _safe_json(receipt_path)
     identity = (
         receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
@@ -335,10 +517,10 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         if isinstance(receipt.get("hashes"), dict)
         else None,
         "purpose": purpose,
-        "adapter": identity.get("adapter"),
-        "adapter_family": family,
-        "provider": identity.get("provider"),
-        "model": identity.get("model"),
+        "adapter": _identity_label(identity.get("adapter")),
+        "adapter_family": _identity_label(family),
+        "provider": _identity_label(identity.get("provider")),
+        "model": _identity_label(identity.get("model")),
         "outcome": receipt.get("outcome"),
         "attempt_count": receipt.get("attempt_count"),
         "elapsed": {
@@ -466,6 +648,121 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
     return {**base, "metrics": merged}
 
 
+def _invalid_source(
+    source: Path, error: BaseException, identity: Any = None, assignment: Any = None
+) -> dict[str, Any]:
+    stable = (
+        _canonical_hash({"identity": identity, "assignment": assignment})
+        if identity is not None and assignment is not None
+        else hashlib.sha256(str(source.resolve()).encode()).hexdigest()
+    )
+    return {
+        "source_identity": stable,
+        "integrity": {"status": "invalid", "error": type(error).__name__},
+        "run_identity": identity,
+        "work": None,
+        "outcome": None,
+        "inference": None,
+        "timing": None,
+    }
+
+
+def _unavailable_invocation(relative: str, purpose: str) -> dict[str, Any]:
+    return {
+        "source_event_identity": _canonical_hash([relative, purpose, "unsealed"]),
+        "purpose": purpose,
+        "adapter": None,
+        "adapter_family": None,
+        "provider": None,
+        "model": None,
+        "outcome": "interrupted",
+        "attempt_count": None,
+        "elapsed": {
+            "kind": "invocation_adapter_elapsed_not_pure_inference",
+            "seconds": None,
+            "started_at": None,
+            "ended_at": None,
+        },
+        "response_validator_seconds": None,
+        "metrics": {
+            "coverage": "partial",
+            "reason": "unsealed_abandoned_invocation",
+            "usage": {},
+            "compaction": {"aggregate_count": 0, "usage": {}},
+            "retry_count": 0,
+            "cost": {"status": "unavailable", "kind": "unavailable", "amount": None},
+        },
+    }
+
+
+def _validated_publication(value: dict[str, Any]) -> dict[str, Any]:
+    expected = {
+        "schema_version",
+        "status",
+        "admission_outcome",
+        "started_at",
+        "finished_at",
+        "process",
+        "error_category",
+    }
+    process = value.get("process")
+    status = value.get("status")
+    admission = value.get("admission_outcome")
+    error = value.get("error_category")
+    exit_code = process.get("exit_code") if isinstance(process, dict) else False
+    if (
+        set(value) != expected
+        or value.get("schema_version") != 1
+        or status not in {"succeeded", "failed"}
+        or admission not in {None, "accepted", "replayed", "conflict", "rejected"}
+        or not isinstance(process, dict)
+        or set(process) != {"exit_code"}
+        or (
+            exit_code is not None
+            and (not isinstance(exit_code, int) or isinstance(exit_code, bool))
+        )
+        or error
+        not in {
+            None,
+            "export_failed",
+            "temporary_storage",
+            "admission_protocol",
+            "admission_rejected",
+            "post_admission_failed",
+        }
+        or _seconds(value.get("started_at"), value.get("finished_at")) is None
+    ):
+        raise ValueError("invalid publication evidence")
+    valid_relationship = (
+        (
+            status == "succeeded"
+            and admission in {"accepted", "replayed"}
+            and exit_code == 0
+            and error is None
+        )
+        or (
+            status == "failed"
+            and admission in {"conflict", "rejected"}
+            and exit_code not in {None, 0}
+            and error == "admission_rejected"
+        )
+        or (
+            status == "failed"
+            and admission in {"accepted", "replayed"}
+            and exit_code not in {None, 0}
+            and error == "post_admission_failed"
+        )
+        or (
+            status == "failed"
+            and admission is None
+            and error in {"export_failed", "temporary_storage", "admission_protocol"}
+        )
+    )
+    if not valid_relationship:
+        raise ValueError("publication protocol relationships disagree")
+    return value
+
+
 def summarize_source(source: Path) -> dict[str, Any]:
     source = Path(source)
     try:
@@ -478,17 +775,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
         ExportError,
         ExportUsageError,
     ) as error:
-        return {
-            "source_identity": hashlib.sha256(
-                str(source.resolve()).encode()
-            ).hexdigest(),
-            "integrity": {"status": "invalid", "error": type(error).__name__},
-            "run_identity": None,
-            "work": None,
-            "outcome": None,
-            "inference": None,
-            "timing": None,
-        }
+        return _invalid_source(source, error)
     identity = observed["identity"]
     assignment = observed["assignment"]
     state = observed["state"]
@@ -497,6 +784,7 @@ def summarize_source(source: Path) -> dict[str, Any]:
         "" if observed["coordinator"].resolve() == root else "coordinator/"
     )
     candidates: list[tuple[str, str]] = []
+    abandoned_candidates: set[str] = set()
     if (root / "planner/inference").exists():
         candidates.append(("planner/inference", "acceptance_planning"))
     for entry in state["history"]:
@@ -510,39 +798,56 @@ def summarize_source(source: Path) -> dict[str, Any]:
                 "response": "feedback_response",
             }.get(entry["component"], entry["component"])
             candidates.append((relative, purpose))
+            if entry.get("outcome") == "abandoned":
+                abandoned_candidates.add(relative)
     invocations = []
     seen = set()
     try:
         for relative, purpose in candidates:
-            item = _invocation(root, relative, purpose)
+            receipt_path = root / relative / "receipt.json"
+            if relative in abandoned_candidates and not receipt_path.is_file():
+                item = _unavailable_invocation(relative, purpose)
+            else:
+                item = _invocation(root, relative, purpose)
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
                 invocations.append(item)
     except (OSError, ValueError, TypeError, json.JSONDecodeError, ExportError) as error:
-        return {
-            "source_identity": _canonical_hash([identity, assignment]),
-            "integrity": {"status": "invalid", "error": type(error).__name__},
-            "run_identity": identity,
-            "work": None,
-            "outcome": None,
-            "inference": None,
-            "timing": None,
-        }
+        return _invalid_source(source, error, identity, assignment)
     validation_durations = []
     validation_results = []
-    for entry in state["history"]:
-        if (
-            entry.get("component") == "validation"
-            and entry.get("outcome") != "abandoned"
-        ):
-            output = _safe_json(
-                root / coordinator_prefix / entry["directory"] / "output.json"
-            )
-            duration = _number(output.get("duration_seconds"))
-            if duration is not None:
-                validation_durations.append(duration)
-            validation_results.append(output.get("outcome"))
+    try:
+        for entry in state["history"]:
+            if (
+                entry.get("component") == "validation"
+                and entry.get("outcome") != "abandoned"
+            ):
+                output = _safe_json(
+                    root / coordinator_prefix / entry["directory"] / "output.json"
+                )
+                if validate_component_output("validation", output) != entry.get(
+                    "outcome"
+                ):
+                    raise ValueError("Validation output disagrees with history")
+                # Reuse Export's complete component validator, including the
+                # duration and process contracts, before projecting any field.
+                normalize_component_output("validation", output, [])
+                duration = _number(output.get("duration_seconds"))
+                if "duration_seconds" in output and duration is None:
+                    raise ValueError("invalid Validation duration")
+                if duration is not None:
+                    validation_durations.append(duration)
+                validation_results.append(output["outcome"])
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        ExportError,
+    ) as error:
+        return _invalid_source(source, error, identity, assignment)
     receipt_metrics = [item["metrics"] for item in invocations]
     elapsed_values = [item["elapsed"]["seconds"] for item in invocations]
     invocation_seconds = (
@@ -561,21 +866,25 @@ def summarize_source(source: Path) -> dict[str, Any]:
     completion_acceptance = "unavailable"
     integration_status = "unavailable"
     publication_path = observed["terminal_directory"] / "publication.json"
-    if publication_path.is_file() and not publication_path.is_symlink():
+    if publication_path.exists() or publication_path.is_symlink():
         try:
-            publication = _safe_json(publication_path)
-            if publication.get("schema_version") == 1:
-                publication_seconds = _seconds(
-                    publication.get("started_at"), publication.get("finished_at")
-                )
-                if isinstance(publication.get("admission_outcome"), str):
-                    completion_acceptance = publication["admission_outcome"]
-                if publication.get("status") in {"succeeded", "failed"}:
-                    integration_status = publication["status"]
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            # Publication is optional post-Run evidence. Its report measurement
-            # can be unavailable without changing trust in the sealed Run.
-            publication_seconds = None
+            if publication_path.is_symlink() or not publication_path.is_file():
+                raise ValueError("publication evidence is not a regular file")
+            publication = _validated_publication(_safe_json(publication_path))
+            publication_seconds = _seconds(
+                publication["started_at"], publication["finished_at"]
+            )
+            if publication["admission_outcome"] is not None:
+                completion_acceptance = publication["admission_outcome"]
+            integration_status = publication["status"]
+        except (
+            OSError,
+            TypeError,
+            ValueError,
+            KeyError,
+            json.JSONDecodeError,
+        ) as error:
+            return _invalid_source(source, error, identity, assignment)
     known_nonoverlap = (
         (prep_seconds or 0) + known_invocation_seconds + sum(validation_durations)
     )
@@ -683,13 +992,42 @@ def summarize_source(source: Path) -> dict[str, Any]:
 
 
 def build_report(sources: list[Path]) -> dict[str, Any]:
-    runs = []
-    seen = set()
+    # Replay of byte-equivalent projected evidence is idempotent. Conflicting
+    # evidence claiming the same stable Run identity is instead represented as
+    # one fail-closed source; input ordering can never select trusted totals.
+    grouped: dict[str, dict[str, dict[str, Any]]] = {}
+    order: list[str] = []
     for source in sources:
         run = summarize_source(source)
-        if run["source_identity"] not in seen:
-            seen.add(run["source_identity"])
-            runs.append(run)
+        identity = run["source_identity"]
+        fingerprint = _canonical_hash(run)
+        if identity not in grouped:
+            grouped[identity] = {}
+            order.append(identity)
+        grouped[identity][fingerprint] = run
+    runs = []
+    for identity in order:
+        variants = grouped[identity]
+        if len(variants) == 1:
+            runs.append(next(iter(variants.values())))
+            continue
+        representative = next(iter(variants.values()))
+        runs.append(
+            {
+                "source_identity": identity,
+                "integrity": {
+                    "status": "invalid",
+                    "error": "ConflictingSourceEvidence",
+                    "variant_count": len(variants),
+                    "variant_sha256": sorted(variants),
+                },
+                "run_identity": representative.get("run_identity"),
+                "work": None,
+                "outcome": None,
+                "inference": None,
+                "timing": None,
+            }
+        )
     comparisons = []
     for left_index, left in enumerate(runs):
         for right in runs[left_index + 1 :]:

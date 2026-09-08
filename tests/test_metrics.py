@@ -5,9 +5,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from afk_inference import Capability, FixtureAdapter, InferenceRuntime, ScriptedResult
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
     MAX_JSONL_RECORD_BYTES,
+    _validated_publication,
+    _verify_generic_receipt,
     build_report,
     parse_pi_events,
     summarize_source,
@@ -123,6 +126,27 @@ class MetricsEventTests(unittest.TestCase):
                 parse_pi_events(path)
             self.assertNotIn("secret", str(caught.exception))
 
+    def test_identity_fields_cannot_carry_arbitrary_sensitive_content(self):
+        events = [
+            {
+                "type": "message_end",
+                "message": {
+                    "id": "m1",
+                    "role": "assistant",
+                    "provider": "TOP SECRET prompt content",
+                    "model": "sk-live-credential",
+                    "usage": {"input": 1},
+                },
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_text(json.dumps(events[0]) + "\n")
+            result = parse_pi_events(path)
+        self.assertEqual(result["identities"], [])
+        self.assertNotIn("TOP SECRET", json.dumps(result))
+        self.assertNotIn("sk-live", json.dumps(result))
+
     def test_stream_rejects_an_oversized_record_at_a_fixed_bound(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "events.jsonl"
@@ -132,6 +156,55 @@ class MetricsEventTests(unittest.TestCase):
                 stream.write(b'"}\n')
             with self.assertRaisesRegex(ValueError, "oversized JSONL event at line 1"):
                 parse_pi_events(path)
+
+
+class MetricsIntegrityTests(unittest.TestCase):
+    def test_generic_receipt_binds_script_identity_policy_timing_and_attempts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            InferenceRuntime().invoke(
+                purpose="classify",
+                trusted_task_instructions="Return the value.",
+                untrusted_task_data={"value": "ok"},
+                requested_capability=Capability.NO_TOOLS,
+                execution_root=root,
+                timeout_seconds=1,
+                evidence_directory=root / "evidence",
+                validator=lambda value: value,
+                adapter=FixtureAdapter((ScriptedResult(response="ok"),)),
+            )
+            receipt = json.loads((root / "evidence/receipt.json").read_text())
+            _verify_generic_receipt(root / "evidence", receipt)
+            changed = json.loads(json.dumps(receipt))
+            changed["policy"]["requested_capability"] = "write"
+            with self.assertRaisesRegex(ValueError, "identity or policy"):
+                _verify_generic_receipt(root / "evidence", changed)
+            changed = json.loads(json.dumps(receipt))
+            changed["attempt_count"] = 0
+            with self.assertRaisesRegex(TypeError, "attempts"):
+                _verify_generic_receipt(root / "evidence", changed)
+            changed = json.loads(json.dumps(receipt))
+            changed["hashes"].pop("adapter_script_sha256")
+            with self.assertRaisesRegex(ValueError, "hash catalog"):
+                _verify_generic_receipt(root / "evidence", changed)
+
+    def test_publication_protocol_relationships_are_strict(self):
+        publication = {
+            "schema_version": 1,
+            "status": "succeeded",
+            "admission_outcome": "accepted",
+            "started_at": "2026-01-01T00:00:00Z",
+            "finished_at": "2026-01-01T00:00:01Z",
+            "process": {"exit_code": 0},
+            "error_category": None,
+        }
+        self.assertIs(_validated_publication(publication), publication)
+        fabricated = {**publication, "admission_outcome": "invented"}
+        with self.assertRaises(ValueError):
+            _validated_publication(fabricated)
+        contradictory = {**publication, "status": "failed"}
+        with self.assertRaises(ValueError):
+            _validated_publication(contradictory)
 
 
 class MetricsReportTests(unittest.TestCase):
@@ -165,6 +238,9 @@ class MetricsReportTests(unittest.TestCase):
             coordinator = root / "coordinator"
             for name in ("01-attempt", "02-response"):
                 (coordinator / name / "inference").mkdir(parents=True)
+            # One abandoned invocation was sealed; the other is only an
+            # interrupted directory prefix and must remain partial/unavailable.
+            (coordinator / "02-response/inference/receipt.json").write_text("{}")
             history = [
                 {
                     "component": "attempt",
@@ -218,9 +294,77 @@ class MetricsReportTests(unittest.TestCase):
                 ) as invoke,
             ):
                 report = summarize_source(root)
-        self.assertEqual(invoke.call_count, 2)
+        self.assertEqual(invoke.call_count, 1)
+        self.assertEqual(len(report["inference"]["invocations"]), 2)
+        self.assertEqual(
+            report["inference"]["invocations"][0]["metrics"]["reason"],
+            "unsealed_abandoned_invocation",
+        )
         self.assertIsNone(report["inference"]["totals"]["elapsed_seconds"])
         self.assertEqual(report["timing"]["unattributed_seconds"], 8)
+
+    def test_malformed_validation_output_is_invalid_not_a_metric(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            validation = root / "01-validation"
+            validation.mkdir()
+            (validation / "output.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "outcome": "passed",
+                        "duration_seconds": "forged",
+                    }
+                )
+            )
+            history = [
+                {
+                    "component": "validation",
+                    "directory": "01-validation",
+                    "outcome": "passed",
+                }
+            ]
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": history, "status": "completed"},
+                "coordinator": root,
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": validation,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(report["integrity"]["status"], "invalid")
+        self.assertIsNone(report["timing"])
+
+    def test_divergent_sources_with_one_identity_fail_closed(self):
+        first = {
+            "source_identity": "stable",
+            "integrity": {"status": "verified"},
+            "run_identity": {"run_id": "same"},
+            "work": {
+                "objective_sha256": "a",
+                "base_commit": "b",
+                "validation_conditions_sha256": "c",
+            },
+            "outcome": {"terminal": "completed"},
+            "inference": {"totals": {"usage": {"input": 1}}},
+            "timing": {},
+        }
+        second = json.loads(json.dumps(first))
+        second["outcome"]["terminal"] = "failed"
+        with mock.patch(
+            "afk_metrics.report.summarize_source", side_effect=[first, second, first]
+        ):
+            report = build_report([Path("one"), Path("two"), Path("one")])
+        self.assertEqual(len(report["runs"]), 1)
+        conflict = report["runs"][0]
+        self.assertEqual(conflict["integrity"]["error"], "ConflictingSourceEvidence")
+        self.assertEqual(conflict["integrity"]["variant_count"], 2)
+        self.assertIsNone(conflict["inference"])
 
     def test_human_report_shows_available_model_and_acceptance_evidence(self):
         report = {
