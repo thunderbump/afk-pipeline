@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import stat
 import subprocess
 from pathlib import Path
@@ -575,7 +574,9 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     # publication is being built and make a later open mutate that input.
     parent = resolved.parent
     parent_descriptor = None
-    temporary_name = None
+    publication_descriptor = None
+    admitted = False
+    publication_complete = False
     try:
         expected_parent = require_directory(parent)
         parent_descriptor = os.open(
@@ -597,48 +598,57 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
         if len(raw) > MAX_OUTPUT_BYTES:
             raise PublicationError("publication output exceeds size limit")
 
-        # Reject an alias changed during the build as well as keeping all file
-        # creation relative to the descriptor. A subsequent swap cannot
-        # redirect descriptor-relative creation into the replacement target.
-        current_parent = os.stat(destination.parent)
-        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-            raise OSError("destination parent changed")
-        for _attempt in range(10):
-            temporary_name = f".{resolved.name}.{secrets.token_hex(8)}.tmp"
-            try:
-                descriptor = os.open(
-                    temporary_name,
-                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                    0o600,
-                    dir_fd=parent_descriptor,
-                )
-                break
-            except FileExistsError:
-                continue
-        else:
-            raise OSError("cannot allocate publication staging file")
-        with os.fdopen(descriptor, "wb") as stream:
+        # Keep staging anonymous. A named temporary file could be unlinked and
+        # replaced after its descriptor was closed but before admission.
+        publication_descriptor = os.open(
+            ".",
+            os.O_WRONLY | os.O_TMPFILE,
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+        with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
             os.fchmod(stream.fileno(), 0o644)
-        # Hard-link admission is atomic and refuses a concurrently-created
-        # destination; unlike replace(), it preserves the new-file rule.
+
+        # Check the caller-visible alias immediately on both sides of the
+        # descriptor-relative admission. The second check prevents reporting
+        # success when an ancestor was swapped during link admission.
+        current_parent = os.stat(destination.parent)
+        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+            raise OSError("destination parent changed")
         os.link(
-            temporary_name,
+            f"/proc/self/fd/{publication_descriptor}",
             resolved.name,
-            src_dir_fd=parent_descriptor,
             dst_dir_fd=parent_descriptor,
-            follow_symlinks=False,
+            follow_symlinks=True,
         )
+        admitted = True
+        current_parent = os.stat(destination.parent)
+        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+            raise OSError("destination parent changed")
+        publication_complete = True
     except (OSError, ExportError) as error:
         raise PublicationError("publication destination cannot be created") from error
     finally:
         if parent_descriptor is not None:
-            if temporary_name is not None:
+            if admitted and not publication_complete:
                 try:
-                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                    admitted_stat = os.stat(
+                        resolved.name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                    written_stat = os.fstat(publication_descriptor)
+                    if (admitted_stat.st_dev, admitted_stat.st_ino) == (
+                        written_stat.st_dev,
+                        written_stat.st_ino,
+                    ):
+                        os.unlink(resolved.name, dir_fd=parent_descriptor)
                 except OSError:
                     pass
+            if publication_descriptor is not None:
+                os.close(publication_descriptor)
             os.close(parent_descriptor)
     return publication

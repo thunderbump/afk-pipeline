@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import shutil
 import tempfile
 import unittest
@@ -587,6 +588,57 @@ class MetricsPublicationTests(unittest.TestCase):
 
             self.assertFalse((source / destination.name).exists())
             self.assertFalse((original_parent / destination.name).exists())
+
+    def test_parent_swap_during_admission_is_detected_and_cleaned_up(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            original_parent = root / "original-publication-parent"
+            original_parent.mkdir()
+            parent_alias = root / "publication-parent"
+            parent_alias.symlink_to(original_parent, target_is_directory=True)
+            destination = parent_alias / "publication.json"
+            real_link = os.link
+
+            def link_then_swap(*args, **kwargs):
+                real_link(*args, **kwargs)
+                parent_alias.unlink()
+                parent_alias.symlink_to(source, target_is_directory=True)
+
+            with (
+                mock.patch("afk_metrics.publication.os.link", link_then_swap),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            self.assertFalse((source / destination.name).exists())
+            self.assertFalse((original_parent / destination.name).exists())
+
+    def test_publication_admits_the_written_anonymous_inode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            destination = root / "publication.json"
+            real_link = os.link
+            linked_descriptors = []
+
+            def observe_link(source, *args, **kwargs):
+                prefix = "/proc/self/fd/"
+                self.assertTrue(source.startswith(prefix))
+                descriptor = int(source.removeprefix(prefix))
+                linked_descriptors.append(os.fstat(descriptor).st_ino)
+                return real_link(source, *args, **kwargs)
+
+            with mock.patch("afk_metrics.publication.os.link", observe_link):
+                publication = publish(input_path, destination)
+
+            self.assertEqual(len(linked_descriptors), 1)
+            self.assertEqual(destination.stat().st_ino, linked_descriptors[0])
+            self.assertEqual(json.loads(destination.read_text()), publication)
 
 
 if __name__ == "__main__":
