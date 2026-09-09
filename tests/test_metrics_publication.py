@@ -618,7 +618,7 @@ class MetricsPublicationTests(unittest.TestCase):
 
             self.assertFalse((relocated / destination.name).exists())
 
-    def test_parent_relocation_during_fallback_open_rolls_back_staging(self):
+    def test_parent_relocation_during_fallback_open_retains_staging_safely(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, _bundle, request = self.fixture(root)
@@ -652,9 +652,11 @@ class MetricsPublicationTests(unittest.TestCase):
                 publish(input_path, destination)
 
             self.assertTrue(moved)
-            self.assertEqual(list(relocated.iterdir()), [])
+            retained = list(relocated.glob(".afk-metrics-*.tmp"))
+            self.assertEqual(len(retained), 1)
+            self.assertEqual(retained[0].read_bytes(), b"")
 
-    def test_parent_relocation_during_admission_rolls_back_all_links(self):
+    def test_parent_relocation_during_admission_retains_owned_links(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source, _bundle, request = self.fixture(root)
@@ -690,7 +692,56 @@ class MetricsPublicationTests(unittest.TestCase):
             ):
                 publish(input_path, destination)
 
-            self.assertEqual(list(relocated.iterdir()), [])
+            retained = list(relocated.iterdir())
+            self.assertEqual(len(retained), 2)
+            self.assertTrue((relocated / destination.name).exists())
+            staging = next(relocated.glob(".afk-metrics-*.tmp"))
+            self.assertTrue(staging.samefile(relocated / destination.name))
+
+    def test_relocation_failure_never_unlinks_a_replacement_destination(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            parent = root / "publication-parent"
+            parent.mkdir()
+            destination = parent / "publication.json"
+            relocated = source / "relocated-publication-parent"
+            real_open = os.open
+            real_link = os.link
+            temporary_flag = getattr(os, "O_TMPFILE", 0)
+
+            def reject_anonymous_staging(path, flags, *args, **kwargs):
+                if temporary_flag and flags & temporary_flag == temporary_flag:
+                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
+                return real_open(path, flags, *args, **kwargs)
+
+            def relocate_link_and_replace(*args, **kwargs):
+                parent.rename(relocated)
+                parent.symlink_to(relocated, target_is_directory=True)
+                real_link(*args, **kwargs)
+                published = relocated / destination.name
+                published.unlink()
+                published.write_text("foreign writer")
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.os.open",
+                    side_effect=reject_anonymous_staging,
+                ),
+                mock.patch(
+                    "afk_metrics.publication.os.link",
+                    side_effect=relocate_link_and_replace,
+                ),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            self.assertEqual(
+                (relocated / destination.name).read_text(), "foreign writer"
+            )
+            self.assertEqual(len(list(relocated.glob(".afk-metrics-*.tmp"))), 1)
 
     def test_parent_swap_during_admission_retains_the_owned_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
