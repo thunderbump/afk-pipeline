@@ -570,63 +570,75 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                 raise PublicationError(
                     "publication destination must be separate from inputs"
                 )
-    publication = build_publication(request)
-    raw = (
-        json.dumps(publication, sort_keys=True, separators=(",", ":")) + "\n"
-    ).encode()
-    if len(raw) > MAX_OUTPUT_BYTES:
-        raise PublicationError("publication output exceeds size limit")
-    # Pin the validated parent before creating the one new file. An ancestor
-    # swap therefore cannot redirect caller-owned output into a source Run.
-    parent = destination.parent.resolve()
+    # Pin the already-separated parent before reading and calculating metrics.
+    # A symlinked ancestor can otherwise be redirected to an input while the
+    # publication is being built and make a later open mutate that input.
+    parent = resolved.parent
+    parent_descriptor = None
+    temporary_name = None
     try:
         expected_parent = require_directory(parent)
         parent_descriptor = os.open(
             parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
         )
         opened_parent = os.fstat(parent_descriptor)
-        if (opened_parent.st_dev, opened_parent.st_ino) != (
-            expected_parent.st_dev,
-            expected_parent.st_ino,
+        parent_identity = (opened_parent.st_dev, opened_parent.st_ino)
+        opened_path = Path(f"/proc/self/fd/{parent_descriptor}").resolve(strict=True)
+        if (
+            parent_identity != (expected_parent.st_dev, expected_parent.st_ino)
+            or opened_path != parent
         ):
             raise OSError("destination parent changed")
-        temporary_name = None
-        try:
-            for _attempt in range(10):
-                temporary_name = f".{destination.name}.{secrets.token_hex(8)}.tmp"
-                try:
-                    descriptor = os.open(
-                        temporary_name,
-                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600,
-                        dir_fd=parent_descriptor,
-                    )
-                    break
-                except FileExistsError:
-                    continue
-            else:
-                raise OSError("cannot allocate publication staging file")
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-                os.fchmod(stream.fileno(), 0o644)
-            # Hard-link admission is atomic and refuses a concurrently-created
-            # destination; unlike replace(), it preserves the new-file rule.
-            os.link(
-                temporary_name,
-                destination.name,
-                src_dir_fd=parent_descriptor,
-                dst_dir_fd=parent_descriptor,
-                follow_symlinks=False,
-            )
-        finally:
+
+        publication = build_publication(request)
+        raw = (
+            json.dumps(publication, sort_keys=True, separators=(",", ":")) + "\n"
+        ).encode()
+        if len(raw) > MAX_OUTPUT_BYTES:
+            raise PublicationError("publication output exceeds size limit")
+
+        # Reject an alias changed during the build as well as keeping all file
+        # creation relative to the descriptor. A subsequent swap cannot
+        # redirect descriptor-relative creation into the replacement target.
+        current_parent = os.stat(destination.parent)
+        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+            raise OSError("destination parent changed")
+        for _attempt in range(10):
+            temporary_name = f".{resolved.name}.{secrets.token_hex(8)}.tmp"
+            try:
+                descriptor = os.open(
+                    temporary_name,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=parent_descriptor,
+                )
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise OSError("cannot allocate publication staging file")
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), 0o644)
+        # Hard-link admission is atomic and refuses a concurrently-created
+        # destination; unlike replace(), it preserves the new-file rule.
+        os.link(
+            temporary_name,
+            resolved.name,
+            src_dir_fd=parent_descriptor,
+            dst_dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+    except (OSError, ExportError) as error:
+        raise PublicationError("publication destination cannot be created") from error
+    finally:
+        if parent_descriptor is not None:
             if temporary_name is not None:
                 try:
                     os.unlink(temporary_name, dir_fd=parent_descriptor)
                 except OSError:
                     pass
             os.close(parent_descriptor)
-    except (OSError, ExportError) as error:
-        raise PublicationError("publication destination cannot be created") from error
     return publication

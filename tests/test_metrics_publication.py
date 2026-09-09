@@ -558,6 +558,36 @@ class MetricsPublicationTests(unittest.TestCase):
                 publish(input_path, destination)
             self.assertFalse(destination.exists())
 
+    def test_parent_swap_during_build_cannot_redirect_output_into_source(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            original_parent = root / "original-publication-parent"
+            original_parent.mkdir()
+            parent_alias = root / "publication-parent"
+            parent_alias.symlink_to(original_parent, target_is_directory=True)
+            destination = parent_alias / "publication.json"
+
+            def build_then_swap(value):
+                publication = build_publication(value)
+                parent_alias.unlink()
+                parent_alias.symlink_to(source, target_is_directory=True)
+                return publication
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.build_publication",
+                    side_effect=build_then_swap,
+                ),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            self.assertFalse((source / destination.name).exists())
+            self.assertFalse((original_parent / destination.name).exists())
+
 
 if __name__ == "__main__":
     unittest.main()
