@@ -577,9 +577,6 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     parent = resolved.parent
     parent_descriptor = None
     publication_descriptor = None
-    temporary_name = None
-    admitted = False
-    publication_complete = False
     try:
         expected_parent = require_directory(parent)
         parent_descriptor = os.open(
@@ -603,8 +600,9 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
 
         # Prefer anonymous staging, but O_TMPFILE is not implemented by every
         # otherwise suitable filesystem.  The fallback remains race-safe: its
-        # random, exclusively-created name is used only for cleanup, while the
-        # open inode is admitted through its descriptor below.
+        # random, exclusively-created name is retained rather than unsafely
+        # cleaned by pathname, while the open inode is admitted through its
+        # descriptor below.
         temporary_flag = getattr(os, "O_TMPFILE", 0)
         if temporary_flag:
             try:
@@ -635,9 +633,6 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                         0o600,
                         dir_fd=parent_descriptor,
                     )
-                    # A colliding candidate was never ours. Record a pathname
-                    # for cleanup only after exclusive creation succeeds.
-                    temporary_name = candidate_name
                     break
                 except FileExistsError:
                     continue
@@ -661,45 +656,22 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             dst_dir_fd=parent_descriptor,
             follow_symlinks=True,
         )
-        admitted = True
         current_parent = os.stat(destination.parent)
         if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
             raise OSError("destination parent changed")
-        publication_complete = True
     except (OSError, ExportError) as error:
         raise PublicationError("publication destination cannot be created") from error
     finally:
         if parent_descriptor is not None:
-            if admitted and not publication_complete:
-                try:
-                    admitted_stat = os.stat(
-                        resolved.name,
-                        dir_fd=parent_descriptor,
-                        follow_symlinks=False,
-                    )
-                    written_stat = os.fstat(publication_descriptor)
-                    if (admitted_stat.st_dev, admitted_stat.st_ino) == (
-                        written_stat.st_dev,
-                        written_stat.st_ino,
-                    ):
-                        os.unlink(resolved.name, dir_fd=parent_descriptor)
-                except OSError:
-                    pass
-            if temporary_name is not None and publication_descriptor is not None:
-                try:
-                    temporary_stat = os.stat(
-                        temporary_name,
-                        dir_fd=parent_descriptor,
-                        follow_symlinks=False,
-                    )
-                    written_stat = os.fstat(publication_descriptor)
-                    if (temporary_stat.st_dev, temporary_stat.st_ino) == (
-                        written_stat.st_dev,
-                        written_stat.st_ino,
-                    ):
-                        os.unlink(temporary_name, dir_fd=parent_descriptor)
-                except OSError:
-                    pass
+            # POSIX has no inode-conditional unlink operation.  In particular,
+            # checking a directory entry and then unlinking its name would let
+            # another directory writer substitute a foreign file between the
+            # two operations.  Do not remove either a failed admission or the
+            # named fallback here.  Anonymous staging leaves no name, while a
+            # fallback name is intentionally retained as a hard link to the
+            # immutable publication (or as the foreign replacement that won a
+            # race).  Leaking our own link is preferable to deleting a file we
+            # do not own.
             if publication_descriptor is not None:
                 os.close(publication_descriptor)
             os.close(parent_descriptor)
