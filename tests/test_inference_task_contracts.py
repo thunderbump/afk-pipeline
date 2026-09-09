@@ -34,7 +34,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
                 "1ceb32e12ae3cdc3b27962f5ca021ae06f528cdd306253588e4fa11bd22580ba",
-                "1bb5670cf37f6bf319e199db9a63e549efc8a566e16d9146bf386a8cc8c18c94",
+                "5e973effff4860f2d1f704fb2a4dca24bc8f8cf11c084103ed7515c6f6b4bf68",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],
         )
@@ -145,9 +145,11 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         )
         for task, capability in expected:
             with self.subTest(purpose=task.purpose):
-                expected_version = {"review": 5, "finding_assessment": 4}.get(
-                    task.purpose, 1
-                )
+                expected_version = {
+                    "review": 5,
+                    "finding_assessment": 4,
+                    "feedback_response": 2,
+                }[task.purpose]
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)
                 self.assertEqual(task.untrusted_data["objective"], "objective")

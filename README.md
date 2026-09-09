@@ -1091,6 +1091,31 @@ Feedback Response input is structured JSON:
 }
 ```
 
+Assessed-feedback task version 2 includes each selected finding's original
+`finding.scope_claim`, Assessment's `assessment_rationale`, and final
+`assessment_scope` object with its kind and rationale. This preserves provenance
+when Assessment overrides Review. Only confirmed/current findings are selected;
+no dismissed, related or unknown-owner finding is added to the worker packet.
+The JSON task data is limited to 1 MiB; oversize packets are refused before
+inference, never truncated. The packet adds one scope object per selected
+finding, not historical cycles or another evidence copy. Supplied evidence is read-only reference data; write authority remains the
+prepared workspace.
+
+Response identifies the governing invariant, groups findings sharing a cause,
+and repairs the smallest owned mechanism covering directly affected variants.
+It considers removing unnecessary machinery, without authorizing unrelated
+refactoring or speculative hardening. The existing summary/response text explains
+the cause, change and meaningful regression evidence, or why a useful check was
+unavailable. One response per supplied finding remains mandatory even when a
+single repair addresses several findings. No new reporting fields, planning
+stage, issue mutation or completion authority is introduced. Validation repair
+keeps task version 1 and its distinct failed-Validation input. Both paths still
+pass through the existing deterministic Validation gate.
+
+`tests/fixtures/feedback-response.md` records the retained evidence-binding repair
+sequence and a proposed evaluation. Fixture checks establish transport and
+routing compatibility, not better model convergence or lower cost.
+
 Before creating the result directory, Feedback Response verifies the complete
 Assessment-to-Review-to-Committed-Change evidence chain and requires the prepared
 workspace to be at its exact clean assessed `HEAD`. The branch remains implicit
