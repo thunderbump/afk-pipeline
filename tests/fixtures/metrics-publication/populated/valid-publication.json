@@ -1,0 +1,1607 @@
+{
+  "comparisons": [
+    {
+      "equivalent_frozen_conditions": true,
+      "left": "a27035ff7666208a9666ed4afd021efa8c391a5279f858e047563cb58b79d75c",
+      "ranking": "observational_only",
+      "right": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+      "warnings": []
+    },
+    {
+      "equivalent_frozen_conditions": true,
+      "left": "a27035ff7666208a9666ed4afd021efa8c391a5279f858e047563cb58b79d75c",
+      "ranking": "observational_only",
+      "right": "241b6927116caa4281cdb0bd9b3ea8d3bd93cf38b267ae3ebe82864479372095",
+      "warnings": []
+    },
+    {
+      "equivalent_frozen_conditions": true,
+      "left": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+      "ranking": "observational_only",
+      "right": "241b6927116caa4281cdb0bd9b3ea8d3bd93cf38b267ae3ebe82864479372095",
+      "warnings": []
+    }
+  ],
+  "kind": "afk-metrics-publication",
+  "limitations": [
+    "Metrics do not prove semantic quality or lower code complexity.",
+    "Pi cost is a provider/model-rate estimate, not an actual billed charge.",
+    "Missing usage, pricing, and deterministic timing are unavailable, never zero."
+  ],
+  "producer": {
+    "calculator": "afk_metrics.report",
+    "report_schema_version": 1,
+    "source_revision": null
+  },
+  "project": "operations-webui",
+  "runs": [
+    {
+      "binding": {
+        "bundle_schema_version": 2,
+        "project": "operations-webui",
+        "run_id": "populated-v2",
+        "workflow_run_sha256": "3dd65bdc5e394bf094b6963b68fa85c532d22e7bd50e53d7a33c80098ab3412f"
+      },
+      "stages": [
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "billed_charge": null,
+            "currency": null,
+            "kind": "unavailable",
+            "provenance": {
+              "calculator": null,
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "unavailable"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "succeeded",
+          "ownership": {
+            "component": "attempt",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 1
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "input": 4
+          },
+          "usage_coverage": "partial"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "passed",
+          "ownership": {
+            "component": "validation",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 2
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "completed",
+          "ownership": {
+            "component": "change",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 3
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {
+            "cacheRead": 2,
+            "cacheWrite": 1,
+            "input": 10,
+            "output": 3,
+            "reasoning": 2,
+            "totalTokens": 16
+          },
+          "cost": {
+            "amount": 0.03,
+            "billed_charge": false,
+            "currency": null,
+            "kind": "pi_reported_estimate",
+            "provenance": {
+              "calculator": "Pi model rates",
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "reported_estimate"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "completed",
+          "ownership": {
+            "component": "review",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 4
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "cacheRead": 2,
+            "cacheWrite": 1,
+            "input": 10,
+            "output": 3,
+            "reasoning": 2,
+            "totalTokens": 16
+          },
+          "usage_coverage": "complete"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": 0,
+            "billed_charge": false,
+            "currency": null,
+            "kind": "pi_reported_estimate",
+            "provenance": {
+              "calculator": "Pi model rates",
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "reported_estimate"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "completed",
+          "ownership": {
+            "component": "assessment",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 5
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "totalTokens": 0
+          },
+          "usage_coverage": "complete"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "completed",
+          "ownership": {
+            "component": "iteration",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v2",
+            "sequence": 6
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "billed_charge": null,
+            "currency": null,
+            "kind": "unavailable",
+            "provenance": {
+              "calculator": null,
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "unavailable"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "succeeded",
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "acceptance_planning",
+            "run_id": "populated-v2"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "preparation",
+          "elapsed_seconds": 1.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "preparation",
+            "run_id": "populated-v2"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "publication",
+          "elapsed_seconds": null,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "publication",
+            "run_id": "populated-v2"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "run_wall_span",
+          "elapsed_seconds": 60.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "run_wall_span",
+            "run_id": "populated-v2"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "unattributed",
+          "elapsed_seconds": 59.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "unattributed",
+            "run_id": "populated-v2"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        }
+      ],
+      "summary": {
+        "inference": {
+          "invocations": [
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 0,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": null,
+                  "billed_charge": null,
+                  "currency": null,
+                  "kind": "unavailable",
+                  "provenance": {
+                    "calculator": null,
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "unavailable"
+                },
+                "coverage": "unavailable",
+                "finalized_requests": 0,
+                "identity_coverage": "unavailable",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {}
+              },
+              "model": "gpt-test",
+              "observed_identities": [],
+              "outcome": "succeeded",
+              "provider": null,
+              "purpose": "acceptance_planning",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "1225eb471deef8f67450f89c72dfd2f47a6ae4f239f3f353ea99291084705bea"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 1,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": null,
+                  "billed_charge": null,
+                  "currency": null,
+                  "kind": "unavailable",
+                  "provenance": {
+                    "calculator": null,
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "unavailable"
+                },
+                "coverage": "partial",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {
+                  "input": 4
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "attempt",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "b2e112612529fb7fb39ea7c4777f5bc503375285153795d4380e913fe3b48b24"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 1,
+                  "usage": {
+                    "cacheRead": 2,
+                    "cacheWrite": 1,
+                    "input": 10,
+                    "output": 3,
+                    "reasoning": 2,
+                    "totalTokens": 16
+                  }
+                },
+                "cost": {
+                  "amount": 0.03,
+                  "billed_charge": false,
+                  "currency": null,
+                  "kind": "pi_reported_estimate",
+                  "provenance": {
+                    "calculator": "Pi model rates",
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "reported_estimate"
+                },
+                "coverage": "complete",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {
+                  "cacheRead": 2,
+                  "cacheWrite": 1,
+                  "input": 10,
+                  "output": 3,
+                  "reasoning": 2,
+                  "totalTokens": 16
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "review",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "a2de8922285bf7f3b9614fce19c06aadcd3067e736ed241291b16ca8ac98fc47"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 0,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": 0,
+                  "billed_charge": false,
+                  "currency": null,
+                  "kind": "pi_reported_estimate",
+                  "provenance": {
+                    "calculator": "Pi model rates",
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "reported_estimate"
+                },
+                "coverage": "complete",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": true,
+                "retry_count": 0,
+                "usage": {
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "totalTokens": 0
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "finding_assessment",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "f8f5a7a59e1a5aec6ba90af7348e2ef194da69924df5b2864e36b08aae102dd9"
+            }
+          ],
+          "totals": {
+            "compaction_usage": {
+              "cacheRead": 2,
+              "cacheWrite": 1,
+              "input": 10,
+              "output": 3,
+              "reasoning": 2,
+              "totalTokens": 16
+            },
+            "cost": {
+              "amount": 0.03,
+              "billed_charge": false,
+              "currency": null,
+              "kind": "pi_reported_estimate",
+              "status": "partial"
+            },
+            "elapsed_seconds": 4,
+            "usage": {
+              "cacheRead": 2,
+              "cacheWrite": 1,
+              "input": 14,
+              "output": 3,
+              "reasoning": 2,
+              "totalTokens": 16
+            },
+            "usage_coverage": "partial"
+          }
+        },
+        "integrity": {
+          "status": "verified"
+        },
+        "outcome": {
+          "completion_acceptance": "unavailable",
+          "coordinator_decision": "stop",
+          "coordinator_status": "completed",
+          "integration_status": "unavailable",
+          "repair_count": 0,
+          "retry_count": 0,
+          "terminal": "completed",
+          "validation_results": [
+            "passed"
+          ]
+        },
+        "run_identity": {
+          "bead_id": "central-example",
+          "project": "operations-webui",
+          "run_id": "populated-v2"
+        },
+        "source_identity": "a27035ff7666208a9666ed4afd021efa8c391a5279f858e047563cb58b79d75c",
+        "timing": {
+          "active_execution_intervals": [
+            {
+              "kind": "preparation",
+              "seconds": 1.0
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            }
+          ],
+          "continuation_wait_gaps": "unavailable",
+          "deterministic_steps": {
+            "Change": "unavailable",
+            "Iteration": "unavailable",
+            "Validation": "unavailable"
+          },
+          "inference_invocation_seconds": 4,
+          "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
+          "preparation_seconds": 1.0,
+          "publication_seconds": null,
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "run_wall_span_seconds": 60.0,
+          "unattributed_seconds": 59.0
+        },
+        "work": {
+          "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "objective_sha256": "0d8e8db4f2784d879f4a1e3ad0d2a03c2ef9622001b56859f50900aa6be75e0e",
+          "validation_conditions_sha256": "efc4191ddde0ea3d6991ab19b5d4d86a955e577a6cc1ccdd40902f6c66dd3355"
+        }
+      }
+    },
+    {
+      "binding": {
+        "bundle_schema_version": 3,
+        "project": "operations-webui",
+        "run_id": "populated-v3",
+        "workflow_run_sha256": "f903b9ab6fa3420a0225209860551fa1014b946e8dff004a600171633fd6c5eb"
+      },
+      "stages": [
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "billed_charge": null,
+            "currency": null,
+            "kind": "unavailable",
+            "provenance": {
+              "calculator": null,
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "unavailable"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "succeeded",
+          "ownership": {
+            "component": "attempt",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 1
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "input": 4
+          },
+          "usage_coverage": "partial"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "passed",
+          "ownership": {
+            "component": "validation",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 2
+          },
+          "repository_validation_coverage": "complete",
+          "repository_validation_seconds": 0,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "completed",
+          "ownership": {
+            "component": "change",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 3
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {
+            "cacheRead": 2,
+            "cacheWrite": 1,
+            "input": 10,
+            "output": 3,
+            "reasoning": 2,
+            "totalTokens": 16
+          },
+          "cost": {
+            "amount": 0.03,
+            "billed_charge": false,
+            "currency": null,
+            "kind": "pi_reported_estimate",
+            "provenance": {
+              "calculator": "Pi model rates",
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "reported_estimate"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "completed",
+          "ownership": {
+            "component": "review",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 4
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "cacheRead": 2,
+            "cacheWrite": 1,
+            "input": 10,
+            "output": 3,
+            "reasoning": 2,
+            "totalTokens": 16
+          },
+          "usage_coverage": "complete"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": 0,
+            "billed_charge": false,
+            "currency": null,
+            "kind": "pi_reported_estimate",
+            "provenance": {
+              "calculator": "Pi model rates",
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "reported_estimate"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "completed",
+          "ownership": {
+            "component": "assessment",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 5
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "input": 0,
+            "output": 0,
+            "reasoning": 0,
+            "totalTokens": 0
+          },
+          "usage_coverage": "complete"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "completed",
+          "ownership": {
+            "component": "iteration",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-v3",
+            "sequence": 6
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "billed_charge": null,
+            "currency": null,
+            "kind": "unavailable",
+            "provenance": {
+              "calculator": null,
+              "pi_version": null,
+              "price_table_date": null
+            },
+            "status": "unavailable"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": 1,
+          "outcome": "succeeded",
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "acceptance_planning",
+            "run_id": "populated-v3"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "preparation",
+          "elapsed_seconds": 1.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "preparation",
+            "run_id": "populated-v3"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "publication",
+          "elapsed_seconds": null,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "publication",
+            "run_id": "populated-v3"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "run_wall_span",
+          "elapsed_seconds": 60.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "run_wall_span",
+            "run_id": "populated-v3"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "unattributed",
+          "elapsed_seconds": 59.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "unattributed",
+            "run_id": "populated-v3"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        }
+      ],
+      "summary": {
+        "inference": {
+          "invocations": [
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 0,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": null,
+                  "billed_charge": null,
+                  "currency": null,
+                  "kind": "unavailable",
+                  "provenance": {
+                    "calculator": null,
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "unavailable"
+                },
+                "coverage": "unavailable",
+                "finalized_requests": 0,
+                "identity_coverage": "unavailable",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {}
+              },
+              "model": "gpt-test",
+              "observed_identities": [],
+              "outcome": "succeeded",
+              "provider": null,
+              "purpose": "acceptance_planning",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "7e8b2e12f7428ef7babe35d04321d62b1adc55773a3d7b39dc69e4981a8d7f02"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 1,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": null,
+                  "billed_charge": null,
+                  "currency": null,
+                  "kind": "unavailable",
+                  "provenance": {
+                    "calculator": null,
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "unavailable"
+                },
+                "coverage": "partial",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {
+                  "input": 4
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "attempt",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "3811a22efbf62a78cde5b41e4f86ef478c321c7d20e9c300a2a7968a85ccc259"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 1,
+                  "usage": {
+                    "cacheRead": 2,
+                    "cacheWrite": 1,
+                    "input": 10,
+                    "output": 3,
+                    "reasoning": 2,
+                    "totalTokens": 16
+                  }
+                },
+                "cost": {
+                  "amount": 0.03,
+                  "billed_charge": false,
+                  "currency": null,
+                  "kind": "pi_reported_estimate",
+                  "provenance": {
+                    "calculator": "Pi model rates",
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "reported_estimate"
+                },
+                "coverage": "complete",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": false,
+                "retry_count": 0,
+                "usage": {
+                  "cacheRead": 2,
+                  "cacheWrite": 1,
+                  "input": 10,
+                  "output": 3,
+                  "reasoning": 2,
+                  "totalTokens": 16
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "review",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "4583080fa62b47cf14e3f353f846aab47a42f643f7cd63630eaab0f2a25d59f5"
+            },
+            {
+              "adapter": "pi-v1",
+              "adapter_family": "pi",
+              "attempt_count": 1,
+              "elapsed": {
+                "ended_at": "2026-08-19T00:00:01Z",
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": 1,
+                "started_at": "2026-08-19T00:00:00Z"
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 0,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": 0,
+                  "billed_charge": false,
+                  "currency": null,
+                  "kind": "pi_reported_estimate",
+                  "provenance": {
+                    "calculator": "Pi model rates",
+                    "pi_version": null,
+                    "price_table_date": null
+                  },
+                  "status": "reported_estimate"
+                },
+                "coverage": "complete",
+                "finalized_requests": 1,
+                "identity_coverage": "complete",
+                "request_count_exact": true,
+                "retry_count": 0,
+                "usage": {
+                  "cacheRead": 0,
+                  "cacheWrite": 0,
+                  "input": 0,
+                  "output": 0,
+                  "reasoning": 0,
+                  "totalTokens": 0
+                }
+              },
+              "model": "gpt-test",
+              "observed_identities": [
+                {
+                  "model": "synthetic-observed",
+                  "provider": "synthetic-provider"
+                }
+              ],
+              "outcome": "succeeded",
+              "provider": "synthetic-provider",
+              "purpose": "finding_assessment",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "9196fcaa84a605e1ce51c860fcfff42459ca4342980d1a96d229d991fe780c10"
+            }
+          ],
+          "totals": {
+            "compaction_usage": {
+              "cacheRead": 2,
+              "cacheWrite": 1,
+              "input": 10,
+              "output": 3,
+              "reasoning": 2,
+              "totalTokens": 16
+            },
+            "cost": {
+              "amount": 0.03,
+              "billed_charge": false,
+              "currency": null,
+              "kind": "pi_reported_estimate",
+              "status": "partial"
+            },
+            "elapsed_seconds": 4,
+            "usage": {
+              "cacheRead": 2,
+              "cacheWrite": 1,
+              "input": 14,
+              "output": 3,
+              "reasoning": 2,
+              "totalTokens": 16
+            },
+            "usage_coverage": "partial"
+          }
+        },
+        "integrity": {
+          "status": "verified"
+        },
+        "outcome": {
+          "completion_acceptance": "unavailable",
+          "coordinator_decision": "stop",
+          "coordinator_status": "completed",
+          "integration_status": "unavailable",
+          "repair_count": 0,
+          "retry_count": 0,
+          "terminal": "completed",
+          "validation_results": [
+            "passed"
+          ]
+        },
+        "run_identity": {
+          "bead_id": "central-example",
+          "project": "operations-webui",
+          "run_id": "populated-v3"
+        },
+        "source_identity": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+        "timing": {
+          "active_execution_intervals": [
+            {
+              "kind": "preparation",
+              "seconds": 1.0
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "inference_invocation",
+              "seconds": 1
+            },
+            {
+              "kind": "repository_validation",
+              "seconds": 0
+            }
+          ],
+          "continuation_wait_gaps": "unavailable",
+          "deterministic_steps": {
+            "Change": "unavailable",
+            "Iteration": "unavailable",
+            "Validation": 0
+          },
+          "inference_invocation_seconds": 4,
+          "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
+          "preparation_seconds": 1.0,
+          "publication_seconds": null,
+          "repository_validation_coverage": "complete",
+          "repository_validation_seconds": 0,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "run_wall_span_seconds": 60.0,
+          "unattributed_seconds": 59.0
+        },
+        "work": {
+          "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "objective_sha256": "0d8e8db4f2784d879f4a1e3ad0d2a03c2ef9622001b56859f50900aa6be75e0e",
+          "validation_conditions_sha256": "efc4191ddde0ea3d6991ab19b5d4d86a955e577a6cc1ccdd40902f6c66dd3355"
+        }
+      }
+    },
+    {
+      "binding": {
+        "bundle_schema_version": 3,
+        "project": "operations-webui",
+        "run_id": "populated-abandoned",
+        "workflow_run_sha256": "529719170d8c1f80c412030c65d4c71ccc10b017c9bf2c2e784b86f6536032d5"
+      },
+      "stages": [
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "succeeded",
+          "ownership": {
+            "component": "attempt",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-abandoned",
+            "sequence": 1
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": null,
+          "elapsed_seconds": null,
+          "outcome": "failed",
+          "ownership": {
+            "component": "validation",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-abandoned",
+            "sequence": 2
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
+          "elapsed_seconds": null,
+          "outcome": "abandoned",
+          "ownership": {
+            "component": "response",
+            "kind": "component",
+            "project": "operations-webui",
+            "run_id": "populated-abandoned",
+            "sequence": 3
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "partial"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "preparation",
+          "elapsed_seconds": 1.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "preparation",
+            "run_id": "populated-abandoned"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "publication",
+          "elapsed_seconds": null,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "publication",
+            "run_id": "populated-abandoned"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "run_wall_span",
+          "elapsed_seconds": 60.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "run_wall_span",
+            "run_id": "populated-abandoned"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        },
+        {
+          "compaction_usage": {},
+          "cost": {
+            "amount": null,
+            "kind": "unavailable",
+            "status": "unavailable"
+          },
+          "elapsed_kind": "unattributed",
+          "elapsed_seconds": 59.0,
+          "outcome": null,
+          "ownership": {
+            "kind": "run",
+            "project": "operations-webui",
+            "purpose": "unattributed",
+            "run_id": "populated-abandoned"
+          },
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "retry_count": 0,
+          "usage": {},
+          "usage_coverage": "unavailable"
+        }
+      ],
+      "summary": {
+        "inference": {
+          "invocations": [
+            {
+              "adapter": null,
+              "adapter_family": null,
+              "attempt_count": null,
+              "elapsed": {
+                "ended_at": null,
+                "kind": "invocation_adapter_elapsed_not_pure_inference",
+                "seconds": null,
+                "started_at": null
+              },
+              "metrics": {
+                "compaction": {
+                  "aggregate_count": 0,
+                  "usage": {}
+                },
+                "cost": {
+                  "amount": null,
+                  "kind": "unavailable",
+                  "status": "unavailable"
+                },
+                "coverage": "partial",
+                "reason": "unsealed_abandoned_invocation",
+                "retry_count": 0,
+                "usage": {}
+              },
+              "model": null,
+              "outcome": "interrupted",
+              "provider": null,
+              "purpose": "feedback_response",
+              "response_validator_coverage": "unavailable",
+              "response_validator_seconds": null,
+              "source_event_identity": "acb4fa5723c896ec4997c75a8c04062e380fc48d1e846fa30d6d796d8702049d"
+            }
+          ],
+          "totals": {
+            "compaction_usage": {},
+            "cost": {
+              "amount": null,
+              "billed_charge": null,
+              "currency": null,
+              "kind": "unavailable",
+              "status": "unavailable"
+            },
+            "elapsed_seconds": null,
+            "usage": {},
+            "usage_coverage": "partial"
+          }
+        },
+        "integrity": {
+          "status": "verified"
+        },
+        "outcome": {
+          "completion_acceptance": "unavailable",
+          "coordinator_decision": null,
+          "coordinator_status": "failed",
+          "integration_status": "unavailable",
+          "repair_count": 1,
+          "retry_count": 0,
+          "terminal": "failed",
+          "validation_results": [
+            "failed"
+          ]
+        },
+        "run_identity": {
+          "bead_id": "central-example",
+          "project": "operations-webui",
+          "run_id": "populated-abandoned"
+        },
+        "source_identity": "241b6927116caa4281cdb0bd9b3ea8d3bd93cf38b267ae3ebe82864479372095",
+        "timing": {
+          "active_execution_intervals": [
+            {
+              "kind": "preparation",
+              "seconds": 1.0
+            }
+          ],
+          "continuation_wait_gaps": "unavailable",
+          "deterministic_steps": {
+            "Change": "unavailable",
+            "Iteration": "unavailable",
+            "Validation": "unavailable"
+          },
+          "inference_invocation_seconds": null,
+          "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
+          "preparation_seconds": 1.0,
+          "publication_seconds": null,
+          "repository_validation_coverage": "unavailable",
+          "repository_validation_seconds": null,
+          "response_validator_coverage": "unavailable",
+          "response_validator_seconds": null,
+          "run_wall_span_seconds": 60.0,
+          "unattributed_seconds": 59.0
+        },
+        "work": {
+          "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "objective_sha256": "0d8e8db4f2784d879f4a1e3ad0d2a03c2ef9622001b56859f50900aa6be75e0e",
+          "validation_conditions_sha256": "efc4191ddde0ea3d6991ab19b5d4d86a955e577a6cc1ccdd40902f6c66dd3355"
+        }
+      }
+    }
+  ],
+  "schema_version": 1
+}

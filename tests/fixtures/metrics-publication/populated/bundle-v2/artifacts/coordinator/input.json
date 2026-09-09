@@ -1,0 +1,12 @@
+{
+  "agent_timeout_seconds": 60,
+  "assignment_path": "[redacted-path][redacted-path]",
+  "max_responses": 1,
+  "schema_version": 1,
+  "validation": {
+    "command": [
+      "./scripts/validate"
+    ],
+    "timeout_seconds": 60
+  }
+}

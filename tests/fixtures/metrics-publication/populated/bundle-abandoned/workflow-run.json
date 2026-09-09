@@ -1,0 +1,297 @@
+{
+  "artifacts": [
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/assignment.json",
+      "public_bytes": 298,
+      "public_sha256": "725f0c4bfefc32caca1f3bfaad97e6dab7c59a8039ea0669ed87fe96c07913d5",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/bead.json",
+      "public_bytes": 208,
+      "public_sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "bead.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator-request.json",
+      "public_bytes": 257,
+      "public_sha256": "9b2896cadcb53eebf0cdfdd77d6924588aca03bf14de2fa4dd9c9b9c0ea9d9e9",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "coordinator-request.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "attempt_session_transcript",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "unsafe_or_invalid"
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "public_bytes": 53,
+      "public_sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "public_bytes": 131,
+      "public_sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "public_bytes": 56,
+      "public_sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3",
+      "sanitization_status": "sanitized",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "public_bytes": 126,
+      "public_sha256": "3b226d4ff9bfe4faca7f5051d4371cc080c06363334183a490604745d1351a1d",
+      "sanitization_status": "unchanged",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/assignment.json",
+      "public_bytes": 298,
+      "public_sha256": "725f0c4bfefc32caca1f3bfaad97e6dab7c59a8039ea0669ed87fe96c07913d5",
+      "sanitization_status": "sanitized",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/input.json",
+      "public_bytes": 257,
+      "public_sha256": "9b2896cadcb53eebf0cdfdd77d6924588aca03bf14de2fa4dd9c9b9c0ea9d9e9",
+      "sanitization_status": "sanitized",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/output.json",
+      "public_bytes": 780,
+      "public_sha256": "7d7299deb866d35c9fd28e54b5c4ab147223c46958996009b994d2c4dbc286df",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/state.json",
+      "public_bytes": 882,
+      "public_sha256": "11f31c017b70fe1088405ffbafdfec4f178c1590ec40d465483f9fb709440e12",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/state.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/preparation.json",
+      "public_bytes": 1095,
+      "public_sha256": "d260e61830ffcf8418f2eade57979853453fa303ad45dba1f5b4a4bcf67cf75c",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "preparation.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "public_bytes": 18,
+      "public_sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee",
+      "sanitization_status": "unchanged",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stdout.log"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "attempt_events_private",
+      "media_type": "application/x-ndjson",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "private_attempt_events"
+    }
+  ],
+  "bead": {
+    "id": "central-example"
+  },
+  "evidence": [],
+  "history": [
+    {
+      "component": "attempt",
+      "evidence": [],
+      "inputs": [],
+      "outcome": "succeeded",
+      "output": {
+        "details": {
+          "kind": "attempt"
+        },
+        "outcome": "succeeded"
+      },
+      "sequence": 1
+    },
+    {
+      "component": "validation",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "failed",
+      "output": {
+        "details": {
+          "kind": "validation"
+        },
+        "outcome": "failed"
+      },
+      "sequence": 2
+    },
+    {
+      "component": "response",
+      "evidence": [],
+      "inputs": [
+        2
+      ],
+      "outcome": "abandoned",
+      "output": {
+        "outcome": "abandoned"
+      },
+      "sequence": 3
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "populated-abandoned"
+  },
+  "objective": "Publish one portable Workflow Run.",
+  "response_limit": 1,
+  "schema_version": 3,
+  "status": "failed",
+  "terminal": {
+    "component_outcome": "failed",
+    "exit_code": 1,
+    "failed_component": "validation"
+  }
+}

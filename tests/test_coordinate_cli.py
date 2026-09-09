@@ -855,6 +855,29 @@ class CoordinatorCliTest(unittest.TestCase):
                 ).hexdigest(),
             )
             requests.append(request)
+        combined = build_publication(
+            {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [request["runs"][0] for request in requests],
+            }
+        )
+        invocation_sets = [
+            {
+                row["source_event_identity"]
+                for row in selected["summary"]["inference"]["invocations"]
+            }
+            for selected in combined["runs"]
+        ]
+        self.assertTrue(invocation_sets[0])
+        self.assertTrue(invocation_sets[0] < invocation_sets[1] < invocation_sets[2])
+        for selected in combined["runs"]:
+            self.assertTrue(
+                all(
+                    row["ownership"]["run_id"] == selected["binding"]["run_id"]
+                    for row in selected["stages"]
+                )
+            )
         corrupt_path = prepared / "coordinator/continuations/02/input.json"
         corrupt = json.loads(corrupt_path.read_text())
         corrupt["prior_output"] = "../wrong/output.json"

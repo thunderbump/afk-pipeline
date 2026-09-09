@@ -1,0 +1,13 @@
+{
+  "change": {
+    "objective": "portable",
+    "repository": {},
+    "source": {
+      "directory": "[redacted-path][redacted-path]",
+      "kind": "attempt"
+    },
+    "workspace": "[redacted-path][redacted-path]"
+  },
+  "outcome": "completed",
+  "schema_version": 1
+}

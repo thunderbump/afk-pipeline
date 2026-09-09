@@ -1,0 +1,109 @@
+[
+  {
+    "name": "pi-without-observed-identities",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "invocations",
+      2,
+      "observed_identities"
+    ],
+    "operation": "delete"
+  },
+  {
+    "name": "pi-fields-on-other-family",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "invocations",
+      2,
+      "adapter_family"
+    ],
+    "operation": "set",
+    "value": "fixture"
+  },
+  {
+    "name": "pi-minimal-cost",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "invocations",
+      2,
+      "metrics",
+      "cost"
+    ],
+    "operation": "set",
+    "value": {
+      "status": "unavailable",
+      "kind": "unavailable",
+      "amount": null
+    }
+  },
+  {
+    "name": "totals-with-invocation-provenance",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "totals",
+      "cost",
+      "provenance"
+    ],
+    "operation": "set",
+    "value": {
+      "calculator": null,
+      "pi_version": null,
+      "price_table_date": null
+    }
+  },
+  {
+    "name": "unknown-token-category",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "invocations",
+      2,
+      "metrics",
+      "usage",
+      "promptTokens"
+    ],
+    "operation": "set",
+    "value": 1
+  },
+  {
+    "name": "unknown-run-purpose",
+    "path": [
+      "runs",
+      0,
+      "stages",
+      -1,
+      "ownership",
+      "purpose"
+    ],
+    "operation": "set",
+    "value": "invented"
+  },
+  {
+    "name": "abandoned-with-pi-fields",
+    "path": [
+      "runs",
+      2,
+      "summary",
+      "inference",
+      "invocations",
+      0,
+      "observed_identities"
+    ],
+    "operation": "set",
+    "value": []
+  }
+]

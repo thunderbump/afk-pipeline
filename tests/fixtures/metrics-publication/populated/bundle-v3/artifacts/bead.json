@@ -1,0 +1,9 @@
+{
+  "acceptance_criteria": "The export is safe.",
+  "description": "Export the retained Run.",
+  "id": "central-example",
+  "labels": [
+    "project:operations-webui"
+  ],
+  "title": "Portable publication"
+}

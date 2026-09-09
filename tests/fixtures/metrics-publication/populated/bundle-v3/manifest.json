@@ -1,0 +1,215 @@
+{
+  "files": [
+    {
+      "bytes": 282,
+      "path": "artifacts/assignment.json",
+      "sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4"
+    },
+    {
+      "bytes": 208,
+      "path": "artifacts/bead.json",
+      "sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27"
+    },
+    {
+      "bytes": 249,
+      "path": "artifacts/coordinator-request.json",
+      "sha256": "0a68dbf997de9776024460591b5a544f4f5a03d49b92eaed1b56a3141cd60f47"
+    },
+    {
+      "bytes": 21,
+      "path": "artifacts/coordinator/01-attempt/inference/attempts/1/response.json",
+      "sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/coordinator/01-attempt/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/coordinator/01-attempt/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 7,
+      "path": "artifacts/coordinator/01-attempt/inference/views/task-instructions.txt",
+      "sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b"
+    },
+    {
+      "bytes": 53,
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02"
+    },
+    {
+      "bytes": 131,
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351"
+    },
+    {
+      "bytes": 56,
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3"
+    },
+    {
+      "bytes": 151,
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "sha256": "e1a012eef9a8b7f0235ecaacc6d74965a1db034a2f2eedbe8035c6619c466108"
+    },
+    {
+      "bytes": 18,
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee"
+    },
+    {
+      "bytes": 52,
+      "path": "artifacts/coordinator/03-change/input.json",
+      "sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8"
+    },
+    {
+      "bytes": 303,
+      "path": "artifacts/coordinator/03-change/output.json",
+      "sha256": "2c5abb15d251cba0f7ab9c612fc8f1fc16a6c0e8c67337f498b68be37541e596"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 21,
+      "path": "artifacts/coordinator/04-review/inference/attempts/1/response.json",
+      "sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/coordinator/04-review/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/coordinator/04-review/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 7,
+      "path": "artifacts/coordinator/04-review/inference/views/task-instructions.txt",
+      "sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b"
+    },
+    {
+      "bytes": 52,
+      "path": "artifacts/coordinator/04-review/input.json",
+      "sha256": "a2840276de131dfea3f6e53471c5ac31ded5949c0fdf1c09e89fcbe7e06b4e59"
+    },
+    {
+      "bytes": 756,
+      "path": "artifacts/coordinator/04-review/output.json",
+      "sha256": "c8db55bc21495e9e68096becc0c17a96d6e9a077f0bf3a48bfdf0c1e836ecb6b"
+    },
+    {
+      "bytes": 35,
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/05-assessment/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 21,
+      "path": "artifacts/coordinator/05-assessment/inference/attempts/1/response.json",
+      "sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/coordinator/05-assessment/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/coordinator/05-assessment/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 7,
+      "path": "artifacts/coordinator/05-assessment/inference/views/task-instructions.txt",
+      "sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b"
+    },
+    {
+      "bytes": 56,
+      "path": "artifacts/coordinator/05-assessment/input.json",
+      "sha256": "55d2cb42bd05051e63a27c18b919da912f73fa7b36c1551a70ca834480c6dc97"
+    },
+    {
+      "bytes": 452,
+      "path": "artifacts/coordinator/05-assessment/output.json",
+      "sha256": "f95b1ddfc984e973a19f4202313cdda29fa886600b7ce807290a5f343af8674e"
+    },
+    {
+      "bytes": 55,
+      "path": "artifacts/coordinator/06-iteration/input.json",
+      "sha256": "dff60d96e1222bf098afd9c4725d9851e4d281d40df78c96791eaf11d6b5abc2"
+    },
+    {
+      "bytes": 202,
+      "path": "artifacts/coordinator/06-iteration/output.json",
+      "sha256": "c14416aba787f3e40cb4e567687ed84cef2893da21e70a963627c20b1c362727"
+    },
+    {
+      "bytes": 282,
+      "path": "artifacts/coordinator/assignment.json",
+      "sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4"
+    },
+    {
+      "bytes": 249,
+      "path": "artifacts/coordinator/input.json",
+      "sha256": "0a68dbf997de9776024460591b5a544f4f5a03d49b92eaed1b56a3141cd60f47"
+    },
+    {
+      "bytes": 1323,
+      "path": "artifacts/coordinator/output.json",
+      "sha256": "6beed93b9bcdcf9abb6c71a8cfa04c678568ad60ce33385a6bf86cf82a721cdf"
+    },
+    {
+      "bytes": 1421,
+      "path": "artifacts/coordinator/state.json",
+      "sha256": "92505c307466add1599e1df69ae01e4c569670cddc580f8b86743eddb5dc5ef8"
+    },
+    {
+      "bytes": 21,
+      "path": "artifacts/planner/inference/attempts/1/response.json",
+      "sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/planner/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/planner/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 7,
+      "path": "artifacts/planner/inference/views/task-instructions.txt",
+      "sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b"
+    },
+    {
+      "bytes": 1056,
+      "path": "artifacts/preparation.json",
+      "sha256": "924e4a64c26c5b998e994507ec4bdd41f5d9f82f07e3fb907f4f9380723cfa32"
+    },
+    {
+      "bytes": 31205,
+      "path": "workflow-run.json",
+      "sha256": "f903b9ab6fa3420a0225209860551fa1014b946e8dff004a600171633fd6c5eb"
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "populated-v3"
+  },
+  "kind": "afk-workflow-run",
+  "schema_version": 3
+}
