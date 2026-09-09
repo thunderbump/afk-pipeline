@@ -1,0 +1,1635 @@
+{
+  "artifacts": [
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/assignment.json",
+      "public_bytes": 267,
+      "public_sha256": "44827e18a14532f7520adf96cba4ad3a238855c2815ddd4509a145699493dcb2",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/bead.json",
+      "public_bytes": 208,
+      "public_sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "bead.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator-request.json",
+      "public_bytes": 273,
+      "public_sha256": "5ba033dfac2ece7959ce247fc0b4ea58d4f51651c01ae808ee43b4829532701a",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "coordinator-request.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "attempt_session_transcript",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "unsafe_or_invalid"
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:attempt",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/01-attempt/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/01-attempt/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:attempt",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/01-attempt/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/01-attempt/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:attempt",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/01-attempt/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:attempt",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/01-attempt/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "public_bytes": 53,
+      "public_sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "public_bytes": 131,
+      "public_sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "public_bytes": 56,
+      "public_sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3",
+      "sanitization_status": "sanitized",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "public_bytes": 126,
+      "public_sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b",
+      "sanitization_status": "sanitized",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/input.json",
+      "public_bytes": 52,
+      "public_sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8",
+      "sanitization_status": "sanitized",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/output.json",
+      "public_bytes": 351,
+      "public_sha256": "db0d86c550f92cb5f312e7243739c0a4eb3f6f274cdf65a475c75f9a4a58114f",
+      "sanitization_status": "sanitized",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:review",
+      "source": {
+        "path": "coordinator/04-review/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/04-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/04-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/04-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/04-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/input.json",
+      "public_bytes": 52,
+      "public_sha256": "a2840276de131dfea3f6e53471c5ac31ded5949c0fdf1c09e89fcbe7e06b4e59",
+      "sanitization_status": "sanitized",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/output.json",
+      "public_bytes": 756,
+      "public_sha256": "c8db55bc21495e9e68096becc0c17a96d6e9a077f0bf3a48bfdf0c1e836ecb6b",
+      "sanitization_status": "sanitized",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "path": "coordinator/05-assessment/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/05-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/05-assessment/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/05-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/05-assessment/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/05-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/05-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/input.json",
+      "public_bytes": 56,
+      "public_sha256": "55d2cb42bd05051e63a27c18b919da912f73fa7b36c1551a70ca834480c6dc97",
+      "sanitization_status": "sanitized",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/output.json",
+      "public_bytes": 452,
+      "public_sha256": "f95b1ddfc984e973a19f4202313cdda29fa886600b7ce807290a5f343af8674e",
+      "sanitization_status": "sanitized",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/06-iteration/input.json",
+      "public_bytes": 55,
+      "public_sha256": "dff60d96e1222bf098afd9c4725d9851e4d281d40df78c96791eaf11d6b5abc2",
+      "sanitization_status": "sanitized",
+      "scope": "component:6:iteration",
+      "source": {
+        "path": "coordinator/06-iteration/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/06-iteration/output.json",
+      "public_bytes": 207,
+      "public_sha256": "72cb3ccdc9d9bd9f51b9dbca383275211b560f861b28bc686e608adb59dc4cf2",
+      "sanitization_status": "unchanged",
+      "scope": "component:6:iteration",
+      "source": {
+        "path": "coordinator/06-iteration/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/07-response/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:feedback_response",
+      "source": {
+        "path": "coordinator/07-response/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:feedback_response",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/07-response/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/07-response/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:feedback_response",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/07-response/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/07-response/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:feedback_response",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/07-response/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/07-response/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:feedback_response",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/07-response/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/07-response/input.json",
+      "public_bytes": 26,
+      "public_sha256": "cba2e027925c2a8c9b0ccbe58ab575a62b3651db29d639598ca1aeedd639ad8a",
+      "sanitization_status": "unchanged",
+      "scope": "component:7:response",
+      "source": {
+        "path": "coordinator/07-response/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/07-response/output.json",
+      "public_bytes": 359,
+      "public_sha256": "edfd79222ff2d8d44189ab86dc95c2c4a45fe2b38529eaa049cf9d645274984f",
+      "sanitization_status": "unchanged",
+      "scope": "component:7:response",
+      "source": {
+        "path": "coordinator/07-response/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/08-validation/input.json",
+      "public_bytes": 56,
+      "public_sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3",
+      "sanitization_status": "sanitized",
+      "scope": "component:8:validation",
+      "source": {
+        "path": "coordinator/08-validation/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/08-validation/output.json",
+      "public_bytes": 126,
+      "public_sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b",
+      "sanitization_status": "sanitized",
+      "scope": "component:8:validation",
+      "source": {
+        "path": "coordinator/08-validation/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/09-change/input.json",
+      "public_bytes": 52,
+      "public_sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8",
+      "sanitization_status": "sanitized",
+      "scope": "component:9:change",
+      "source": {
+        "path": "coordinator/09-change/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/09-change/output.json",
+      "public_bytes": 351,
+      "public_sha256": "db0d86c550f92cb5f312e7243739c0a4eb3f6f274cdf65a475c75f9a4a58114f",
+      "sanitization_status": "sanitized",
+      "scope": "component:9:change",
+      "source": {
+        "path": "coordinator/09-change/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/10-review/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:review",
+      "source": {
+        "path": "coordinator/10-review/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/10-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/10-review/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/10-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/10-review/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/10-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/10-review/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/10-review/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/10-review/input.json",
+      "public_bytes": 52,
+      "public_sha256": "a2840276de131dfea3f6e53471c5ac31ded5949c0fdf1c09e89fcbe7e06b4e59",
+      "sanitization_status": "sanitized",
+      "scope": "component:10:review",
+      "source": {
+        "path": "coordinator/10-review/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/10-review/output.json",
+      "public_bytes": 756,
+      "public_sha256": "c8db55bc21495e9e68096becc0c17a96d6e9a077f0bf3a48bfdf0c1e836ecb6b",
+      "sanitization_status": "sanitized",
+      "scope": "component:10:review",
+      "source": {
+        "path": "coordinator/10-review/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/11-assessment/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "path": "coordinator/11-assessment/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/11-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/11-assessment/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/11-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/11-assessment/inference/views/task-instructions.txt",
+      "public_bytes": 7,
+      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/11-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/11-assessment/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:finding_assessment",
+      "source": {
+        "bytes": 43,
+        "path": "coordinator/11-assessment/inference/prompt.json",
+        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/11-assessment/input.json",
+      "public_bytes": 56,
+      "public_sha256": "55d2cb42bd05051e63a27c18b919da912f73fa7b36c1551a70ca834480c6dc97",
+      "sanitization_status": "sanitized",
+      "scope": "component:11:assessment",
+      "source": {
+        "path": "coordinator/11-assessment/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/11-assessment/output.json",
+      "public_bytes": 452,
+      "public_sha256": "f95b1ddfc984e973a19f4202313cdda29fa886600b7ce807290a5f343af8674e",
+      "sanitization_status": "sanitized",
+      "scope": "component:11:assessment",
+      "source": {
+        "path": "coordinator/11-assessment/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/12-iteration/input.json",
+      "public_bytes": 55,
+      "public_sha256": "dff60d96e1222bf098afd9c4725d9851e4d281d40df78c96791eaf11d6b5abc2",
+      "sanitization_status": "sanitized",
+      "scope": "component:12:iteration",
+      "source": {
+        "path": "coordinator/12-iteration/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/12-iteration/output.json",
+      "public_bytes": 202,
+      "public_sha256": "67d845c72b6a3d4fd9673bb2f990977d0640e58cedee0ca0791ddb512fb8165f",
+      "sanitization_status": "unchanged",
+      "scope": "component:12:iteration",
+      "source": {
+        "path": "coordinator/12-iteration/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/assignment.json",
+      "public_bytes": 267,
+      "public_sha256": "44827e18a14532f7520adf96cba4ad3a238855c2815ddd4509a145699493dcb2",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/continuations/01/input.json",
+      "public_bytes": 154,
+      "public_sha256": "c1bc3918e7a203f9d5180747acb53d01ba96e2f6e646d432381fddf3449f2136",
+      "sanitization_status": "unchanged",
+      "scope": "continuation:01",
+      "source": {
+        "path": "coordinator/continuations/01/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/continuations/01/output.json",
+      "public_bytes": 2558,
+      "public_sha256": "915d4cc115558264e4470764327201b03e5de138a817db6e6a1720ee4d56a212",
+      "sanitization_status": "unchanged",
+      "scope": "continuation:01",
+      "source": {
+        "path": "coordinator/continuations/01/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/continuations/01/state.json",
+      "public_bytes": 2842,
+      "public_sha256": "ef0a7187b6c32760488c7cba12d02318c3dec637b67e3ac54e707d34c6fe4328",
+      "sanitization_status": "unchanged",
+      "scope": "continuation:01",
+      "source": {
+        "path": "coordinator/continuations/01/state.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/input.json",
+      "public_bytes": 273,
+      "public_sha256": "5ba033dfac2ece7959ce247fc0b4ea58d4f51651c01ae808ee43b4829532701a",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/output.json",
+      "public_bytes": 1328,
+      "public_sha256": "3cda000129deb0747d3d4f5f713aaeda569c59bf0e777be3fe51ae321c3f1d0c",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/state.json",
+      "public_bytes": 1426,
+      "public_sha256": "785908d5b3c3cfc268b1be9395f5f14ac5817b2543170b4700a293f1a93cd1d2",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/state.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/preparation.json",
+      "public_bytes": 1204,
+      "public_sha256": "82930b36c2e3298f7676bafe6d6052feb14075523e592223965dcaf3efa9bf39",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "preparation.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "public_bytes": 18,
+      "public_sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee",
+      "sanitization_status": "unchanged",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stdout.log"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "diff",
+      "media_type": "text/x-diff; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "public_bytes": 35,
+      "public_sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/review.diff"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:8:validation",
+      "source": {
+        "path": "coordinator/08-validation/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/08-validation/stdout.log",
+      "public_bytes": 18,
+      "public_sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee",
+      "sanitization_status": "unchanged",
+      "scope": "component:8:validation",
+      "source": {
+        "path": "coordinator/08-validation/stdout.log"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "diff",
+      "media_type": "text/x-diff; charset=utf-8",
+      "path": "artifacts/coordinator/10-review/review.diff",
+      "public_bytes": 35,
+      "public_sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d",
+      "sanitization_status": "unchanged",
+      "scope": "component:10:review",
+      "source": {
+        "path": "coordinator/10-review/review.diff"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:10:review",
+      "source": {
+        "path": "coordinator/10-review/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:11:assessment",
+      "source": {
+        "path": "coordinator/11-assessment/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "attempt_events_private",
+      "media_type": "application/x-ndjson",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "private_attempt_events"
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/05-assessment/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/10-review/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:10:review",
+      "source": {
+        "path": "coordinator/10-review/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/11-assessment/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:11:assessment",
+      "source": {
+        "path": "coordinator/11-assessment/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    }
+  ],
+  "bead": {
+    "id": "central-example"
+  },
+  "evidence": [],
+  "history": [
+    {
+      "component": "attempt",
+      "evidence": [],
+      "inputs": [],
+      "outcome": "succeeded",
+      "output": {
+        "details": {
+          "kind": "attempt"
+        },
+        "outcome": "succeeded"
+      },
+      "sequence": 1
+    },
+    {
+      "component": "validation",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "passed",
+      "output": {
+        "details": {
+          "kind": "validation"
+        },
+        "outcome": "passed"
+      },
+      "sequence": 2
+    },
+    {
+      "component": "change",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "kind": "change"
+        },
+        "outcome": "completed"
+      },
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "evidence": [],
+      "inputs": [
+        2,
+        3
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "audit": {
+            "completed": true,
+            "scopes": [
+              "objective",
+              "acceptance_criteria",
+              "reviewed_diff",
+              "supplied_evidence"
+            ]
+          },
+          "findings": [
+            {
+              "details": "Fix it.",
+              "lens": "behavior",
+              "locations": [
+                {
+                  "line": 1,
+                  "path": "README.md"
+                }
+              ],
+              "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              },
+              "title": "Example"
+            }
+          ],
+          "kind": "review",
+          "summary": "One finding."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 4
+    },
+    {
+      "component": "assessment",
+      "evidence": [],
+      "inputs": [
+        4
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "decisions": [
+            {
+              "defect_decision": "confirmed",
+              "finding_index": 0,
+              "rationale": "Relevant.",
+              "scope": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              }
+            }
+          ],
+          "kind": "assessment",
+          "summary": "Address it."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 5
+    },
+    {
+      "component": "iteration",
+      "evidence": [],
+      "inputs": [
+        5
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "actionable_findings": 1,
+          "completed_responses": 0,
+          "decision": "exhausted",
+          "kind": "iteration",
+          "max_responses": 0,
+          "reason": "Ready."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 6
+    },
+    {
+      "component": "response",
+      "evidence": [],
+      "inputs": [
+        5
+      ],
+      "outcome": "completed",
+      "output": {
+        "agent": {
+          "status": "completed"
+        },
+        "details": {
+          "finding_responses": [
+            {
+              "finding_index": 0,
+              "response": "Repaired."
+            }
+          ],
+          "kind": "response",
+          "summary": "Repaired."
+        },
+        "outcome": "completed",
+        "process": {
+          "exit_code": 0,
+          "signal": null
+        },
+        "repository": {
+          "after": null,
+          "before": null,
+          "unchanged": false
+        }
+      },
+      "sequence": 7
+    },
+    {
+      "component": "validation",
+      "evidence": [],
+      "inputs": [
+        7
+      ],
+      "outcome": "passed",
+      "output": {
+        "details": {
+          "kind": "validation"
+        },
+        "outcome": "passed"
+      },
+      "sequence": 8
+    },
+    {
+      "component": "change",
+      "evidence": [],
+      "inputs": [
+        7
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "kind": "change"
+        },
+        "outcome": "completed"
+      },
+      "sequence": 9
+    },
+    {
+      "component": "review",
+      "evidence": [],
+      "inputs": [
+        8,
+        9
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "audit": {
+            "completed": true,
+            "scopes": [
+              "objective",
+              "acceptance_criteria",
+              "reviewed_diff",
+              "supplied_evidence"
+            ]
+          },
+          "findings": [
+            {
+              "details": "Fix it.",
+              "lens": "behavior",
+              "locations": [
+                {
+                  "line": 1,
+                  "path": "README.md"
+                }
+              ],
+              "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              },
+              "title": "Example"
+            }
+          ],
+          "kind": "review",
+          "summary": "One finding."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 10
+    },
+    {
+      "component": "assessment",
+      "evidence": [],
+      "inputs": [
+        10
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "decisions": [
+            {
+              "defect_decision": "confirmed",
+              "finding_index": 0,
+              "rationale": "Relevant.",
+              "scope": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              }
+            }
+          ],
+          "kind": "assessment",
+          "summary": "Address it."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 11
+    },
+    {
+      "component": "iteration",
+      "evidence": [],
+      "inputs": [
+        11
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "actionable_findings": 1,
+          "completed_responses": 1,
+          "decision": "stop",
+          "kind": "iteration",
+          "max_responses": 1,
+          "reason": "Ready."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 12
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "populated-shared-continuation-stage.continuation.01"
+  },
+  "inference_sessions": [
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/01-attempt/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:attempt",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/04-review/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:review",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/05-assessment/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:finding_assessment",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/07-response/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:feedback_response",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/10-review/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:review",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/11-assessment/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:finding_assessment",
+      "validation_status": "accepted"
+    }
+  ],
+  "objective": "Publish one portable Workflow Run.",
+  "response_limit": 0,
+  "schema_version": 3,
+  "status": "completed",
+  "terminal": {
+    "decision": "stop"
+  }
+}

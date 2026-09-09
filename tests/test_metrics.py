@@ -1028,6 +1028,9 @@ class MetricsReportTests(unittest.TestCase):
                 },
                 "coordinator": coordinator,
                 "continuations": [continuation],
+                # The real lineage adapter retains the original copy while
+                # selecting the continuation copy for this history entry.
+                "_metrics_retained_inference_paths": {original},
                 "preparation": {"timestamps": {}, "repository": {}},
                 "terminal_directory": continuation,
                 "output": {"outcome": "completed"},

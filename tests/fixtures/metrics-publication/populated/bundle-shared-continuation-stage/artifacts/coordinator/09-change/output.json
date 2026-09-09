@@ -1,0 +1,13 @@
+{
+  "change": {
+    "objective": "portable",
+    "repository": {},
+    "source": {
+      "directory": "/tmp/tmpan6w6hcf/shared-continuation-stage/source-run/coordinator/01-attempt",
+      "kind": "attempt"
+    },
+    "workspace": "/tmp/tmpan6w6hcf/shared-continuation-stage/source-run/workspace"
+  },
+  "outcome": "completed",
+  "schema_version": 1
+}

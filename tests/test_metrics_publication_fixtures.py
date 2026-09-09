@@ -141,25 +141,47 @@ class PopulatedPublicationTests(unittest.TestCase):
             destination = Path(temporary) / "cases"
             publication = generate(destination)
             self.assert_cases(destination, publication)
-            self.assertEqual(
-                json.loads(
-                    (destination / "evidence-coverage-variants.json").read_text()
-                ),
-                json.loads((FIXTURES / "evidence-coverage-variants.json").read_text()),
+            committed_coverage = json.loads(
+                (FIXTURES / "evidence-coverage-variants.json").read_text()
             )
-            coverage_variants = json.loads(
+            coverage_publication = json.loads(
                 (destination / "evidence-coverage-variants.json").read_text()
-            )["variants"]
+            )
+            self.assertEqual(coverage_publication["schema_version"], 2)
             self.assertEqual(
-                [case["evidence_coverage"]["expected"] for case in coverage_variants],
-                [0, 1],
+                [
+                    run["summary"]["inference"]["evidence_coverage"]
+                    for run in coverage_publication["runs"]
+                ],
+                [
+                    {"status": "complete", "expected": 5, "measured": 5, "missing": []},
+                    {"status": "complete", "expected": 6, "measured": 6, "missing": []},
+                ],
+            )
+            no_action, shared = coverage_publication["runs"]
+            self.assertNotIn(
+                "feedback_response",
+                {
+                    row["purpose"]
+                    for row in no_action["summary"]["inference"]["invocations"]
+                },
             )
             self.assertEqual(
-                coverage_variants[1]["started_stages"][0][
-                    "unique_source_event_identities"
-                ],
+                shared["binding"]["run_id"].split(".")[-2:],
+                ["continuation", "01"],
+            )
+            self.assertEqual(
+                [row["ownership"].get("sequence") for row in shared["stages"]].count(4),
                 1,
             )
+            for actual, expected in zip(
+                coverage_publication["runs"], committed_coverage["runs"], strict=True
+            ):
+                self.assertEqual(actual["stages"], expected["stages"])
+                self.assertEqual(
+                    actual["summary"]["inference"]["evidence_coverage"],
+                    expected["summary"]["inference"]["evidence_coverage"],
+                )
             # Authenticated hashes include temporary private paths. Measurements
             # and stage projection, unlike those opaque identities, reproduce.
             committed = json.loads((FIXTURES / "valid-publication.json").read_text())

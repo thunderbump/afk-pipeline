@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest import mock
 
 import afk_export
+from afk_coordinate.contract import expected_input_sources
 from afk_metrics.publication import build_publication
 from tests import test_export_cli
 
@@ -49,6 +50,82 @@ def message(identity, usage):
             "usage": usage,
         },
     }
+
+
+def append_response_cycle(source, *, no_action):
+    """Append one valid synthetic response cycle to a sealed preparer Run."""
+    coordinator = source / "coordinator"
+    history = json.loads((coordinator / "state.json").read_text())["history"]
+    first_iteration = coordinator / "06-iteration/output.json"
+    value = json.loads(first_iteration.read_text())
+    value["policy"].update(decision="continue", next_response_number=1)
+    write_json(first_iteration, value)
+    specifications = (
+        ("response", None, "completed"),
+        ("validation", "02-validation", "passed"),
+        ("change", "03-change", "completed"),
+        ("review", "04-review", "completed"),
+        ("assessment", "05-assessment", "completed"),
+        ("iteration", "06-iteration", "completed"),
+    )
+    for sequence, (component, template, outcome) in enumerate(specifications, 7):
+        directory = f"{sequence:02d}-{component}"
+        history.append(
+            {
+                "sequence": sequence,
+                "component": component,
+                "directory": directory,
+                "input_from": expected_input_sources(component, history),
+                "outcome": outcome,
+            }
+        )
+        target = coordinator / directory
+        if template is not None:
+            shutil.copytree(coordinator / template, target)
+            continue
+        target.mkdir()
+        write_json(target / "input.json", {"schema_version": 1})
+        write_json(
+            target / "output.json",
+            {
+                "schema_version": 1,
+                "outcome": "completed",
+                "process": None if no_action else {"exit_code": 0, "signal": None},
+                "agent": None if no_action else {"status": "completed"},
+                "response": {
+                    "summary": "No action." if no_action else "Repaired.",
+                    "finding_responses": []
+                    if no_action
+                    else [{"finding_index": 0, "response": "Repaired."}],
+                },
+                "repository": {"unchanged": no_action},
+            },
+        )
+    final_iteration = coordinator / "12-iteration/output.json"
+    value = json.loads(final_iteration.read_text())
+    value["policy"].update(decision="stop", completed_responses=1, max_responses=1)
+    value["policy"].pop("next_response_number", None)
+    write_json(final_iteration, value)
+    state = {
+        "schema_version": 1,
+        "status": "completed",
+        "next_sequence": 13,
+        "next_component": None,
+        "active_invocation": None,
+        "history": history,
+        "terminal": {"decision": "stop"},
+    }
+    write_json(coordinator / "state.json", state)
+    write_json(
+        coordinator / "output.json",
+        {
+            "schema_version": 1,
+            "outcome": "completed",
+            "decision": "stop",
+            "history": history,
+        },
+    )
+    return history
 
 
 def generate(destination):
@@ -237,53 +314,145 @@ def generate(destination):
                 {"schema_version": 1, "project": "operations-webui", "runs": requests}
             )
         write_json(destination / "valid-publication.json", publication)
+
+        # These edge cases are full publication-v2 artifacts produced through
+        # Export and publication intake, rather than hand-authored count claims.
+        coverage_requests = []
+        full_usage = {
+            "input": 1,
+            "output": 1,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 2,
+            "reasoning": 0,
+        }
+        for name, no_action in (
+            ("verified-no-action-response", True),
+            ("shared-continuation-stage", False),
+        ):
+            edge = test_export_cli.ExportCliTests().sealed_preparer(root / name)
+            for assignment_path in (
+                edge / "assignment.json",
+                edge / "coordinator/assignment.json",
+            ):
+                assignment = json.loads(assignment_path.read_text())
+                assignment.pop("command")
+                assignment["worker"] = "inference"
+                write_json(assignment_path, assignment)
+            preparation = edge / "preparation.json"
+            value = json.loads(preparation.read_text())
+            value["run"]["id"] = f"populated-{name}"
+            write_json(preparation, value)
+            history = append_response_cycle(edge, no_action=no_action)
+            coordinator = edge / "coordinator"
+            for sequence, purpose in (
+                (1, "attempt"),
+                (4, "review"),
+                (5, "finding_assessment"),
+                (10, "review"),
+                (11, "finding_assessment"),
+            ):
+                add_pi(
+                    coordinator
+                    / f"{sequence:02d}-{history[sequence - 1]['component']}/inference",
+                    purpose,
+                    [
+                        message(
+                            f"{name}-{sequence}", {**full_usage, "cost": {"total": 0}}
+                        )
+                    ],
+                )
+            if not no_action:
+                add_pi(
+                    coordinator / "07-response/inference",
+                    "feedback_response",
+                    [message(f"{name}-7", {**full_usage, "cost": {"total": 0}})],
+                )
+                original_history = history[:6]
+                original_iteration = coordinator / "06-iteration/output.json"
+                value = json.loads(original_iteration.read_text())
+                value["policy"].update(decision="exhausted", max_responses=0)
+                value["policy"].pop("next_response_number", None)
+                write_json(original_iteration, value)
+                for request_path in (
+                    edge / "coordinator-request.json",
+                    coordinator / "input.json",
+                ):
+                    value = json.loads(request_path.read_text())
+                    value["max_responses"] = 0
+                    write_json(request_path, value)
+                original_state = {
+                    "schema_version": 1,
+                    "status": "completed",
+                    "next_sequence": 7,
+                    "next_component": None,
+                    "active_invocation": None,
+                    "history": original_history,
+                    "terminal": {"decision": "exhausted"},
+                }
+                write_json(coordinator / "state.json", original_state)
+                write_json(
+                    coordinator / "output.json",
+                    {
+                        "schema_version": 1,
+                        "outcome": "completed",
+                        "decision": "exhausted",
+                        "history": original_history,
+                    },
+                )
+                value = json.loads(preparation.read_text())
+                value["coordinator"]["decision"] = "exhausted"
+                write_json(preparation, value)
+                continuation_input = {
+                    "schema_version": 1,
+                    "additional_responses": 1,
+                    "completed_responses": 0,
+                    "effective_max_responses": 1,
+                    "prior_output": "../../output.json",
+                }
+                continuation = coordinator / "continuations/01"
+                continuation.mkdir(parents=True)
+                write_json(continuation / "input.json", continuation_input)
+                write_json(
+                    continuation / "state.json",
+                    {
+                        "schema_version": 1,
+                        "status": "completed",
+                        "next_sequence": 13,
+                        "next_component": None,
+                        "active_invocation": None,
+                        "history": history,
+                        "terminal": {"decision": "stop"},
+                        "continuation": continuation_input,
+                    },
+                )
+                write_json(
+                    continuation / "output.json",
+                    {
+                        "schema_version": 1,
+                        "outcome": "completed",
+                        "decision": "stop",
+                        "history": history,
+                    },
+                )
+                # The continuation history retains sequence 4 by reference to
+                # its one authenticated coordinator path. It must be projected
+                # once for the selected continuation Run.
+            bundle = destination / f"bundle-{name}"
+            afk_export.export_run(edge, bundle, schema_version=3)
+            coverage_requests.append(
+                {"source": str(edge), "bundle": str(bundle), "selection": "latest"}
+            )
+        with mock.patch("afk_metrics.publication._source_revision", return_value=None):
+            coverage_publication = build_publication(
+                {
+                    "schema_version": 1,
+                    "project": "operations-webui",
+                    "runs": coverage_requests,
+                }
+            )
         write_json(
-            destination / "evidence-coverage-variants.json",
-            {
-                "schema_version": 1,
-                "kind": "afk-metrics-evidence-coverage-fixtures",
-                "variants": [
-                    {
-                        "name": "verified-no-action-response",
-                        "started_stages": [
-                            {
-                                "ownership": {
-                                    "kind": "component",
-                                    "sequence": 7,
-                                    "component": "response",
-                                },
-                                "classification": "verified_no_action",
-                            }
-                        ],
-                        "evidence_coverage": {
-                            "status": "complete",
-                            "expected": 0,
-                            "measured": 0,
-                            "missing": [],
-                        },
-                    },
-                    {
-                        "name": "shared-continuation-stage",
-                        "started_stages": [
-                            {
-                                "ownership": {
-                                    "kind": "component",
-                                    "sequence": 4,
-                                    "component": "review",
-                                },
-                                "authenticated_receipt_paths": 2,
-                                "unique_source_event_identities": 1,
-                            }
-                        ],
-                        "evidence_coverage": {
-                            "status": "complete",
-                            "expected": 1,
-                            "measured": 1,
-                            "missing": [],
-                        },
-                    },
-                ],
-            },
+            destination / "evidence-coverage-variants.json", coverage_publication
         )
     return publication
 

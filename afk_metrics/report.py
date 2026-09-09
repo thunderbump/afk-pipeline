@@ -1378,8 +1378,17 @@ def summarize_source(
         all_inference_relatives.update(
             discover_component_inference(root, coordinator, continuation_roots)
         )
+        # Retention says only that a path belongs to the observed lineage. Only
+        # stages absent from the selected terminal history are out of selection;
+        # another path for a selected stage still needs the authenticated alias
+        # identity check below.
         all_inference_relatives.update(retained_inference_relatives)
-        out_of_selection_relatives.update(retained_inference_relatives)
+        selected_directories = {entry["directory"] for entry in state["history"]}
+        out_of_selection_relatives.update(
+            relative
+            for relative in retained_inference_relatives
+            if Path(relative).parent.name not in selected_directories
+        )
     except (OSError, ValueError) as error:
         return _invalid_source(source, error, identity, assignment)
 

@@ -1,0 +1,12 @@
+{
+  "agent_timeout_seconds": 60,
+  "assignment_path": "/tmp/tmpan6w6hcf/verified-no-action-response/source-run/assignment.json",
+  "max_responses": 1,
+  "schema_version": 1,
+  "validation": {
+    "command": [
+      "./scripts/validate"
+    ],
+    "timeout_seconds": 60
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "outcome": "completed",
+  "policy": {
+    "actionable_findings": 1,
+    "completed_responses": 0,
+    "decision": "exhausted",
+    "max_responses": 0,
+    "reason": "Ready."
+  },
+  "schema_version": 1
+}

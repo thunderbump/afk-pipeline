@@ -1,0 +1,8 @@
+{
+  "artifacts": {
+    "stderr": "stderr.log",
+    "stdout": "stdout.log"
+  },
+  "outcome": "passed",
+  "schema_version": 1
+}

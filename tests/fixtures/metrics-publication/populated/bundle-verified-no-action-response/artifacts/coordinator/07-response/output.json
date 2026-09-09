@@ -1,0 +1,13 @@
+{
+  "agent": null,
+  "outcome": "completed",
+  "process": null,
+  "repository": {
+    "unchanged": true
+  },
+  "response": {
+    "finding_responses": [],
+    "summary": "No action."
+  },
+  "schema_version": 1
+}

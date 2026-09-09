@@ -1,0 +1,23 @@
+{
+  "agent": {
+    "status": "completed"
+  },
+  "outcome": "completed",
+  "process": {
+    "exit_code": 0,
+    "signal": null
+  },
+  "repository": {
+    "unchanged": false
+  },
+  "response": {
+    "finding_responses": [
+      {
+        "finding_index": 0,
+        "response": "Repaired."
+      }
+    ],
+    "summary": "Repaired."
+  },
+  "schema_version": 1
+}
