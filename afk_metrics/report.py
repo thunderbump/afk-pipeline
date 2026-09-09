@@ -23,6 +23,7 @@ from afk_export import (
     MAX_JSON_BYTES,
     ExportError,
     ExportUsageError,
+    discover_component_inference,
     hash_file_beneath,
     load_source,
     locate_invocation_file,
@@ -1362,11 +1363,24 @@ def summarize_source(
     expected_inference: list[tuple[str, str, dict[str, Any]]] = []
     all_inference_relatives: set[str] = {"planner/inference"}
     abandoned_candidates: set[str] = set()
+    stage_alias_relatives: set[str] = set()
     command_attempt_relatives: set[str] = set()
     checkpoint_states = observed.get("_metrics_inference_states")
     checkpoint_evidence = observed.get("_metrics_evidence_sha256")
     if not isinstance(checkpoint_evidence, dict):
         checkpoint_evidence = None
+    try:
+        retained_inference_relatives = {
+            Path(path).relative_to(root).as_posix()
+            for path in observed.get("_metrics_retained_inference_paths", set())
+        }
+        all_inference_relatives.update(
+            discover_component_inference(root, coordinator, continuation_roots)
+        )
+        all_inference_relatives.update(retained_inference_relatives)
+        stage_alias_relatives.update(retained_inference_relatives)
+    except (OSError, ValueError) as error:
+        return _invalid_source(source, error, identity, assignment)
 
     def checkpointed_state(relative: str, path: Path) -> str:
         if isinstance(checkpoint_states, dict):
@@ -1443,6 +1457,16 @@ def summarize_source(
         )
     inference_components = {"attempt", "review", "assessment", "response"}
     for entry in state["history"]:
+        # Cumulative continuations can retain the same stage under more than one
+        # root. Those paths are aliases of one authenticated owner, not orphaned
+        # stages and not additional expected invocations.
+        entry_aliases = set()
+        for base in (coordinator, *continuation_roots):
+            alias_path = base / entry["directory"] / "inference"
+            if alias_path.exists() or alias_path.is_symlink():
+                alias_relative = alias_path.relative_to(root).as_posix()
+                entry_aliases.add(alias_relative)
+                all_inference_relatives.add(alias_relative)
         # Abandoned denotes coordinator progression, not absence of evidence.
         # An interrupted component may already have sealed an invocation before
         # its component output was abandoned, so discover it like any other.
@@ -1460,6 +1484,7 @@ def summarize_source(
         all_inference_relatives.add(relative)
         component = entry["component"]
         if component in inference_components and not verified_no_action_response(entry):
+            stage_alias_relatives.update(entry_aliases)
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
@@ -1476,7 +1501,7 @@ def summarize_source(
                 )
             )
             if component == "attempt" and "command" in assignment:
-                command_attempt_relatives.add(relative)
+                command_attempt_relatives.update(entry_aliases | {relative})
             if entry.get("outcome") == "abandoned":
                 abandoned_candidates.add(relative)
 
@@ -1522,7 +1547,11 @@ def summarize_source(
     if any(
         state_value == "sealed"
         and (
-            relative not in expected_relatives or relative in command_attempt_relatives
+            (
+                relative not in expected_relatives
+                and relative not in stage_alias_relatives
+            )
+            or relative in command_attempt_relatives
         )
         for relative, state_value in observed_states.items()
     ):
@@ -1534,7 +1563,6 @@ def summarize_source(
         )
 
     invocations = []
-    sealed_receipt_metrics = []
     seen = set()
     try:
         for relative, purpose, stage_owner in candidates:
@@ -1551,8 +1579,6 @@ def summarize_source(
                 item = _invocation(
                     root, relative, purpose, expected_evidence=checkpoint_evidence
                 )
-            if state_at_checkpoint == "sealed":
-                sealed_receipt_metrics.append(item["metrics"])
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
@@ -1841,15 +1867,11 @@ def summarize_source(
     else:
         usage_coverage = "partial"
     if missing_evidence:
-        measured_usage_coverages = [
-            metrics.get("coverage", "unavailable") for metrics in sealed_receipt_metrics
-        ]
+        # Receipt-level coverage can be partial solely because bookkeeping
+        # events omitted usage. Only an actual token subtotal (including
+        # measured zero) proves a relevant Run-level usage measurement exists.
         usage_coverage = (
-            "partial"
-            if any(
-                value in {"complete", "partial"} for value in measured_usage_coverages
-            )
-            else "unavailable"
+            "partial" if total_usage or total_compaction_usage else "unavailable"
         )
         total_cost_status = "partial" if available_costs else "unavailable"
     result = {

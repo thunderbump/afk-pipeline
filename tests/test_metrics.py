@@ -835,7 +835,7 @@ class MetricsReportTests(unittest.TestCase):
         self.assertEqual(report["inference"]["totals"]["usage"], {"input": 1})
         self.assertEqual(report["inference"]["totals"]["usage_coverage"], "partial")
         self.assertEqual(
-            missing_report["inference"]["totals"]["usage_coverage"], "partial"
+            missing_report["inference"]["totals"]["usage_coverage"], "unavailable"
         )
         # The synthetic invocation has no authenticated endpoints, so its
         # duration cannot safely be subtracted from wall time.

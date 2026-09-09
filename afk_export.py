@@ -694,7 +694,13 @@ def load_source(
         raise ExportError("Coordinator terminal evidence disagrees")
     if preparation is not None:
         validate_preparer_terminal(preparation, original_output)
-    state, output, terminal_directory, continuations = load_continuation_lineage(
+    (
+        state,
+        output,
+        terminal_directory,
+        continuations,
+        retained_inference_paths,
+    ) = load_continuation_lineage(
         coordinator,
         request,
         original_state,
@@ -727,6 +733,7 @@ def load_source(
         "coordinator": coordinator,
         "terminal_directory": terminal_directory,
         "continuations": continuations,
+        "_metrics_retained_inference_paths": retained_inference_paths,
         "redactions": {
             value
             for value in redactions
@@ -784,6 +791,27 @@ def load_continuation_lineage(
     except ValueError as error:
         raise ExportError(str(error)) from error
 
+    all_continuations = [item.directory for item in observed.sealed]
+    if observed.active is not None:
+        all_continuations.append(observed.active.directory)
+    retained_inference_paths = set()
+    all_roots = [coordinator, *all_continuations]
+    checkpoints = [
+        (coordinator, state),
+        *((item.directory, item.state) for item in observed.sealed),
+    ]
+    if observed.active is not None:
+        checkpoints.append((observed.active.directory, observed.active.state))
+    inference_components = {"attempt", "review", "assessment", "response"}
+    for _checkpoint_root, checkpoint in checkpoints:
+        for record in checkpoint["history"]:
+            if record["component"] not in inference_components:
+                continue
+            for base in all_roots:
+                path = base / record["directory"] / "inference"
+                if path.exists() or path.is_symlink():
+                    retained_inference_paths.add(path)
+
     if terminal_continuation is not None:
         selected = observed.selected
         return (
@@ -796,6 +824,7 @@ def load_continuation_lineage(
                 if selected.directory != coordinator
                 and item.directory.name <= selected.directory.name
             ],
+            retained_inference_paths,
         )
 
     continuations = [item.directory for item in observed.sealed]
@@ -803,8 +832,14 @@ def load_continuation_lineage(
         continuations.append(observed.active.directory)
     if observed.sealed:
         terminal = observed.sealed[-1]
-        return terminal.state, terminal.output, terminal.directory, continuations
-    return state, output, coordinator, continuations
+        return (
+            terminal.state,
+            terminal.output,
+            terminal.directory,
+            continuations,
+            retained_inference_paths,
+        )
+    return state, output, coordinator, continuations, retained_inference_paths
 
 
 def locate_invocation_file(coordinator, continuation_directories, record, name):
@@ -816,6 +851,17 @@ def locate_invocation_file(coordinator, continuation_directories, record, name):
             return path
     # Return the canonical base location so the bounded reader reports absence.
     return coordinator / record["directory"] / name
+
+
+def discover_component_inference(root, coordinator, continuation_directories):
+    """List lexical component inference paths, including unreferenced stages."""
+    relatives = set()
+    for base in (coordinator, *continuation_directories):
+        for component in base.iterdir():
+            inference = component / "inference"
+            if inference.exists() or inference.is_symlink():
+                relatives.add(inference.relative_to(root).as_posix())
+    return relatives
 
 
 def validate_preparation(source, value):
@@ -1536,6 +1582,16 @@ def artifact_candidates(observed):
                     unsafe_path=not safe_name,
                     declaration=kind,
                 )
+
+        # History is the discriminator for expected inference stages, but it is
+        # not a discovery allowlist. Checkpoint every component-level inference
+        # directory so a sealed receipt under an unreferenced stage is rejected
+        # by metrics accounting rather than silently omitted.
+        for relative in discover_component_inference(
+            root, observed["coordinator"], observed.get("continuations", [])
+        ):
+            if relative not in inference_states:
+                checkpoint_inference(relative, "unreferenced_inference")
 
     # Colliding published candidates need distinct bundle paths even though
     # they correctly retain the same Run-relative source identity.

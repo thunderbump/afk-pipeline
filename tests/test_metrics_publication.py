@@ -140,6 +140,74 @@ class MetricsPublicationTests(unittest.TestCase):
             self.assertEqual(totals["usage_coverage"], "unavailable")
             self.assertEqual(totals["cost"]["status"], "unavailable")
 
+    def test_unreferenced_sealed_receipt_fails_publication_accounting(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            orphan = source / "coordinator/99-orphan/inference"
+            orphan.parent.mkdir()
+            test_export_cli.ExportCliTests().add_inference_receipt(orphan)
+            bundle = root / "bundle"
+            afk_export.export_run(source, bundle, schema_version=3)
+            request = {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [
+                    {
+                        "source": str(source),
+                        "bundle": str(bundle),
+                        "selection": "latest",
+                    }
+                ],
+            }
+
+            with self.assertRaisesRegex(
+                PublicationError, "source metrics verification failed"
+            ):
+                build_publication(request)
+
+    def test_missing_stage_with_bookkeeping_only_receipt_has_unavailable_usage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            events = inference / "attempts/1/events.jsonl"
+            events.write_text('{"type":"compaction_end","result":{}}\n')
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["attempts"][0]["artifacts"]["events_sha256"] = hashlib.sha256(
+                events.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            bundle = root / "bundle"
+            afk_export.export_run(source, bundle, schema_version=3)
+            publication = build_publication(
+                {
+                    "schema_version": 1,
+                    "project": "operations-webui",
+                    "runs": [
+                        {
+                            "source": str(source),
+                            "bundle": str(bundle),
+                            "selection": "latest",
+                        }
+                    ],
+                }
+            )
+
+            inference_summary = publication["runs"][0]["summary"]["inference"]
+            self.assertEqual(
+                inference_summary["evidence_coverage"]["status"], "partial"
+            )
+            self.assertEqual(
+                inference_summary["invocations"][0]["metrics"]["coverage"], "partial"
+            )
+            self.assertEqual(inference_summary["totals"]["usage"], {})
+            self.assertEqual(
+                inference_summary["totals"]["usage_coverage"], "unavailable"
+            )
+
     def test_stage_projection_preserves_measured_zero_and_unavailable_metrics(self):
         for duration in (None, 0, 1.5):
             with (
