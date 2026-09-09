@@ -1283,10 +1283,18 @@ def summarize_source(
 
     candidates: list[tuple[str, str, dict[str, Any]]] = []
     abandoned_candidates: set[str] = set()
-    if (root / "planner/inference").exists():
+    checkpoint_states = observed.get("_metrics_inference_states")
+
+    def checkpointed_exists(relative: str, path: Path) -> bool:
+        if isinstance(checkpoint_states, dict) and relative in checkpoint_states:
+            return checkpoint_states[relative] != "absent"
+        return path.exists() or path.is_symlink()
+
+    planner_relative = "planner/inference"
+    if checkpointed_exists(planner_relative, root / planner_relative):
         candidates.append(
             (
-                "planner/inference",
+                planner_relative,
                 "acceptance_planning",
                 {"kind": "run", "purpose": "acceptance_planning"},
             )
@@ -1302,21 +1310,11 @@ def summarize_source(
             "inference/receipt.json",
         )
         inference_path = receipt_path.parent
-        relative = relative_evidence(inference_path)
-        checkpoint_states = observed.get("_metrics_abandoned_inference_states")
-        if (
-            entry.get("outcome") == "abandoned"
-            and isinstance(checkpoint_states, dict)
-            and relative in checkpoint_states
-        ):
-            # Bound publication installs this map while admitting artifacts.
-            # Do not discover an abandoned inference directory that appeared
-            # after that checkpoint; retain an admitted unsealed directory as
-            # an unavailable invocation even if it subsequently disappears.
-            inference_exists = checkpoint_states[relative] != "absent"
-        else:
-            inference_exists = inference_path.exists() or inference_path.is_symlink()
-        if inference_exists:
+        # Keep this key lexical, exactly as Export's checkpoint does. Resolving
+        # it would let an in-tree symlink evade an absent-path checkpoint by
+        # changing the key to its target.
+        relative = inference_path.relative_to(root).as_posix()
+        if checkpointed_exists(relative, inference_path):
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",

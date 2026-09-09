@@ -339,6 +339,105 @@ class MetricsPublicationTests(unittest.TestCase):
                 )
             )
 
+    def test_transient_planner_and_component_inference_are_not_published(self):
+        for relative, purpose in (
+            ("planner/inference", "acceptance_planning"),
+            ("coordinator/01-attempt/inference", "attempt"),
+        ):
+            with (
+                self.subTest(relative=relative),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source, _bundle, request = self.fixture(root)
+                inference = source / relative
+                actual_summarize = __import__(
+                    "afk_metrics.publication", fromlist=["summarize_source"]
+                ).summarize_source
+
+                def summarize_with_transient_inference(
+                    *args,
+                    _inference=inference,
+                    _purpose=purpose,
+                    _relative=relative,
+                    _summarize=actual_summarize,
+                    **kwargs,
+                ):
+                    _inference.parent.mkdir(parents=True, exist_ok=True)
+                    ExportCliTests().add_inference_receipt(_inference)
+                    invocation_path = _inference / "invocation.json"
+                    invocation = json.loads(invocation_path.read_text())
+                    invocation["purpose"] = _purpose
+                    invocation_path.write_text(json.dumps(invocation) + "\n")
+                    receipt_path = _inference / "receipt.json"
+                    receipt = json.loads(receipt_path.read_text())
+                    receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                        invocation_path.read_bytes()
+                    ).hexdigest()
+                    receipt_path.write_text(json.dumps(receipt) + "\n")
+                    try:
+                        return _summarize(*args, **kwargs)
+                    finally:
+                        shutil.rmtree(_inference)
+                        if _relative == "planner/inference":
+                            _inference.parent.rmdir()
+
+                with mock.patch(
+                    "afk_metrics.publication.summarize_source",
+                    side_effect=summarize_with_transient_inference,
+                ):
+                    publication = build_publication(request)
+                self.assertFalse(
+                    any(
+                        row["purpose"] == purpose
+                        for row in publication["runs"][0]["summary"]["inference"][
+                            "invocations"
+                        ]
+                    )
+                )
+
+    def test_transient_in_tree_symlink_cannot_bypass_inference_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            target = source / "coordinator/04-review/transient-inference"
+            ExportCliTests().add_inference_receipt(target)
+            invocation_path = target / "invocation.json"
+            invocation = json.loads(invocation_path.read_text())
+            invocation["purpose"] = "finding_assessment"
+            invocation_path.write_text(json.dumps(invocation) + "\n")
+            receipt_path = target / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                invocation_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            inference = source / "coordinator/05-assessment/inference"
+            actual_summarize = __import__(
+                "afk_metrics.publication", fromlist=["summarize_source"]
+            ).summarize_source
+
+            def summarize_with_transient_symlink(*args, **kwargs):
+                inference.symlink_to("../04-review/transient-inference")
+                try:
+                    return actual_summarize(*args, **kwargs)
+                finally:
+                    inference.unlink()
+
+            with mock.patch(
+                "afk_metrics.publication.summarize_source",
+                side_effect=summarize_with_transient_symlink,
+            ):
+                publication = build_publication(request)
+            self.assertFalse(
+                any(
+                    row["purpose"] == "finding_assessment"
+                    for row in publication["runs"][0]["summary"]["inference"][
+                        "invocations"
+                    ]
+                )
+            )
+
     def test_publication_input_read_is_bounded_and_requires_a_regular_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

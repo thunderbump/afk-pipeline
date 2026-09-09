@@ -1253,10 +1253,10 @@ def artifact_candidates(observed):
     result = []
     seen = set()
     # Publication reuses this exact authenticated observation while calculating
-    # metrics.  Retain the abandoned-inference state seen by this checkpoint so
-    # the report cannot discover a directory created after artifact admission.
-    abandoned_inference_states = {}
-    observed["_metrics_abandoned_inference_states"] = abandoned_inference_states
+    # metrics. Retain every inference path's lexical availability at this
+    # checkpoint so the report never discovers a path created during projection.
+    inference_states = {}
+    observed["_metrics_inference_states"] = inference_states
 
     def add(
         relative,
@@ -1321,6 +1321,39 @@ def artifact_candidates(observed):
             }
         )
 
+    def checkpoint_inference(relative, scope):
+        """Bind metrics discovery to a lexical Run-relative inference path."""
+        inference_path = root / relative
+        receipt_is_file = (inference_path / "receipt.json").is_file()
+        state = (
+            "sealed"
+            if receipt_is_file
+            else (
+                "unsealed"
+                if inference_path.exists() or inference_path.is_symlink()
+                else "absent"
+            )
+        )
+        inference_states[relative] = state
+        if state != "sealed":
+            # Availability is semantic metrics evidence even when there are no
+            # receipt-authenticated bytes to admit. Keep it private while making
+            # both normalization checkpoints compare the exact observed state.
+            marker = json.dumps(
+                {"state": state}, sort_keys=True, separators=(",", ":")
+            ).encode("utf-8")
+            add(
+                relative,
+                scope,
+                "inference_evidence_checkpoint",
+                "application/json",
+                0,
+                validated_raw=marker,
+                expected_sha256=digest(marker),
+                private_source=True,
+            )
+        return state
+
     # Only accepted Run-relative payload names are considered.  Private paths and
     # command credentials inside structured records are sanitized field by field.
     if observed["coordinator"].resolve() != root.resolve():
@@ -1375,17 +1408,18 @@ def artifact_candidates(observed):
             0,
             validated_raw=observed["acceptance_routing"]["policy_raw"],
         )
-        inference_relative = "planner/inference"
-        if (root / inference_relative).exists() or (
-            root / inference_relative
-        ).is_symlink():
-            for item in receipt_bound_inference_artifacts(
-                root,
-                inference_relative,
-                "acceptance_planning",
-                None,
-            ):
-                add(**item)
+    inference_relative = "planner/inference"
+    planner_inference_state = checkpoint_inference(
+        inference_relative, "acceptance_planning"
+    )
+    if planner_inference_state != "absent":
+        for item in receipt_bound_inference_artifacts(
+            root,
+            inference_relative,
+            "acceptance_planning",
+            None,
+        ):
+            add(**item)
     if observed["state"] is not None:
         coordinator_prefix = (
             ""
@@ -1428,38 +1462,12 @@ def artifact_candidates(observed):
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
             }.get(entry["component"], entry["component"])
-            inference_path = root / inference_relative
-            receipt_is_file = evidence_path.is_file()
-            inference_exists = inference_path.exists() or inference_path.is_symlink()
-            if entry["outcome"] == "abandoned":
-                evidence_state = (
-                    "sealed"
-                    if receipt_is_file
-                    else ("unsealed" if inference_exists else "absent")
-                )
-                abandoned_inference_states[inference_relative] = evidence_state
-                if not receipt_is_file:
-                    # No receipt means there are no admissible inference bytes,
-                    # but the presence/absence state is itself consumed by the
-                    # report. Represent it in the normalized checkpoint without
-                    # publishing the private directory.
-                    marker = json.dumps(
-                        {"state": evidence_state},
-                        sort_keys=True,
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                    add(
-                        inference_relative,
-                        f"component:{entry['sequence']}:{entry['component']}",
-                        "inference_evidence_checkpoint",
-                        "application/json",
-                        0,
-                        validated_raw=marker,
-                        expected_sha256=digest(marker),
-                        private_source=True,
-                    )
-            if receipt_is_file or (
-                entry["outcome"] != "abandoned" and inference_exists
+            evidence_state = checkpoint_inference(
+                inference_relative,
+                f"component:{entry['sequence']}:{entry['component']}",
+            )
+            if evidence_state == "sealed" or (
+                entry["outcome"] != "abandoned" and evidence_state == "unsealed"
             ):
                 for item in receipt_bound_inference_artifacts(
                     root,
