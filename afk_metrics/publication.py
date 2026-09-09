@@ -584,6 +584,25 @@ def _verify_parent_is_separate(
         raise OSError("destination parent moved beneath an input")
 
 
+def _unlink_owned_publication(
+    parent_descriptor: int, name: str | None, publication_descriptor: int
+) -> None:
+    """Remove a link to the staged inode after its parent enters an input."""
+
+    if name is None:
+        return
+    expected = os.fstat(publication_descriptor)
+    try:
+        actual = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except FileNotFoundError:
+        return
+    if stat.S_ISREG(actual.st_mode) and (actual.st_dev, actual.st_ino) == (
+        expected.st_dev,
+        expected.st_ino,
+    ):
+        os.unlink(name, dir_fd=parent_descriptor)
+
+
 def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     request = load_publication_request(input_path)
     destination = Path(destination)
@@ -609,12 +628,13 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     parent = resolved.parent
     parent_descriptor = None
     publication_descriptor = None
+    staging_name = None
     input_descriptors: list[int] = []
+    input_identities: set[tuple[int, int]] = set()
     try:
         # Keep the input roots alive for the whole publication.  Their inode
         # identities then remain usable even if a directory writer relocates
         # either an input or the pinned destination parent during calculation.
-        input_identities = set()
         for item in request["runs"]:
             for name in ("source", "bundle"):
                 input_root = Path(item[name]).resolve(strict=True)
@@ -698,6 +718,10 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                     continue
             else:
                 raise OSError("cannot allocate publication staging file")
+            # The parent can be renamed between the preceding verification and
+            # os.open().  Detect that before putting publication bytes there;
+            # the exception path below removes the just-created owned name.
+            _verify_parent_is_separate(parent_descriptor, input_identities)
 
         with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
@@ -723,6 +747,27 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             raise OSError("destination parent changed")
         _verify_parent_is_separate(parent_descriptor, input_identities)
     except (OSError, ExportError) as error:
+        # Directory ancestry checks cannot be atomic with open/link.  If a
+        # concurrent writer moved the pinned parent beneath an input in that
+        # window, remove every name for our still-open inode before reporting
+        # failure.  Identity checks preserve a destination installed by a
+        # racing publisher rather than unlinking by name alone.
+        if parent_descriptor is not None and publication_descriptor is not None:
+            try:
+                parent_is_input = bool(
+                    _directory_ancestors(parent_descriptor) & input_identities
+                )
+                if parent_is_input:
+                    _unlink_owned_publication(
+                        parent_descriptor, resolved.name, publication_descriptor
+                    )
+                    _unlink_owned_publication(
+                        parent_descriptor, staging_name, publication_descriptor
+                    )
+            except OSError as cleanup_error:
+                raise PublicationError(
+                    "publication destination cannot be safely rolled back"
+                ) from cleanup_error
         raise PublicationError("publication destination cannot be created") from error
     finally:
         if parent_descriptor is not None:
