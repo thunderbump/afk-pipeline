@@ -339,6 +339,43 @@ class MetricsPublicationTests(unittest.TestCase):
                 )
             )
 
+            # Likewise, a directory captured as unsealed must not be upgraded
+            # when a complete receipt appears only during metrics projection.
+            inference.mkdir(parents=True)
+
+            def summarize_with_transient_receipt(*args, **kwargs):
+                inference.rmdir()
+                fixtures.add_inference_receipt(inference)
+                invocation_path = inference / "invocation.json"
+                invocation = json.loads(invocation_path.read_text())
+                invocation["purpose"] = "feedback_response"
+                invocation_path.write_text(json.dumps(invocation) + "\n")
+                receipt_path = inference / "receipt.json"
+                receipt = json.loads(receipt_path.read_text())
+                receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+                    invocation_path.read_bytes()
+                ).hexdigest()
+                receipt_path.write_text(json.dumps(receipt) + "\n")
+                try:
+                    return actual_summarize(*args, **kwargs)
+                finally:
+                    shutil.rmtree(inference)
+                    inference.mkdir()
+
+            with mock.patch(
+                "afk_metrics.publication.summarize_source",
+                side_effect=summarize_with_transient_receipt,
+            ):
+                publication = build_publication(request)
+            response = next(
+                row
+                for row in publication["runs"][0]["summary"]["inference"]["invocations"]
+                if row["purpose"] == "feedback_response"
+            )
+            self.assertEqual(
+                response["metrics"]["reason"], "unsealed_abandoned_invocation"
+            )
+
     def test_transient_planner_and_component_inference_are_not_published(self):
         for relative, purpose in (
             ("planner/inference", "acceptance_planning"),

@@ -1285,10 +1285,18 @@ def summarize_source(
     abandoned_candidates: set[str] = set()
     checkpoint_states = observed.get("_metrics_inference_states")
 
+    def checkpointed_state(relative: str, path: Path) -> str:
+        if isinstance(checkpoint_states, dict):
+            # Publication's map is a closed snapshot, not a cache. A path that
+            # was not selected and checkpointed by Export must remain absent
+            # even if lineage discovery finds it later during projection.
+            return checkpoint_states.get(relative, "absent")
+        if (path / "receipt.json").is_file():
+            return "sealed"
+        return "unsealed" if path.exists() or path.is_symlink() else "absent"
+
     def checkpointed_exists(relative: str, path: Path) -> bool:
-        if isinstance(checkpoint_states, dict) and relative in checkpoint_states:
-            return checkpoint_states[relative] != "absent"
-        return path.exists() or path.is_symlink()
+        return checkpointed_state(relative, path) != "absent"
 
     planner_relative = "planner/inference"
     if checkpointed_exists(planner_relative, root / planner_relative):
@@ -1336,8 +1344,12 @@ def summarize_source(
     seen = set()
     try:
         for relative, purpose, stage_owner in candidates:
-            receipt_path = root / relative / "receipt.json"
-            if relative in abandoned_candidates and not receipt_path.is_file():
+            inference_path = root / relative
+            state_at_checkpoint = checkpointed_state(relative, inference_path)
+            if relative in abandoned_candidates and state_at_checkpoint == "unsealed":
+                # An unsealed abandoned stage is permanently unavailable for
+                # this projection. Never upgrade it from a receipt that appears
+                # after Export captured the source observation.
                 item = _unavailable_invocation(relative, purpose)
             else:
                 item = _invocation(root, relative, purpose)
