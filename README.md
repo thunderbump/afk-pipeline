@@ -535,12 +535,11 @@ rejected with instructions to use capability-based `outside_help`. Historical
 v1 Run and Preflight evidence remains readable through the exporter, but no
 current Run path produces or admits it.
 
-Inference roles can be selected without rebuilding adapter commands. For example,
-`"inference_roles": {"review": {"model": "gpt-5.6-terra", "thinking": "low"}}`
-changes only Review; omitted roles and fields keep their defaults. The preparer
-freezes all four effective settings in Run evidence. Exact-argv `AFK_*_AGENT_COMMAND`
-environment overrides still take precedence, and `assignment.command` remains the
-implementation-worker seam.
+Production inference roles use the model, thinking and capability policies in
+`afk_inference/runtime.py`; Run configuration does not override them. Use
+`assignment.worker: "inference"` for the runtime-backed implementation worker,
+or `assignment.command` for an explicit external worker. Each runtime invocation
+retains the effective policy in its evidence.
 
 The trusted host process runs `bd show <bead-id> --json` only in the configured
 central Beads workspace. Run admission requires the Bead to have exactly one
