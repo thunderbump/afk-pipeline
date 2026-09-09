@@ -1,8 +1,10 @@
 import hashlib
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
+from afk_assess.contract import validate_assessment
 from afk_assess.task import ASSESSMENT_INSTRUCTIONS
 from afk_assess.task import build_task as build_assessment_task
 from afk_inference import Capability, ResponseRejected
@@ -10,6 +12,7 @@ from afk_parent_review.task import SYSTEM_PROMPT as PARENT_PROMPT
 from afk_parent_review.task import build_task as build_parent_review_task
 from afk_plan.task import SYSTEM_PROMPT as PLAN_PROMPT
 from afk_plan.task import build_task as build_plan_task
+from afk_respond.contract import actionable_findings
 from afk_respond.task import REPAIR_INSTRUCTIONS, RESPONSE_INSTRUCTIONS
 from afk_respond.task import build_task as build_response_task
 from afk_review.task import REVIEW_INSTRUCTIONS
@@ -34,7 +37,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
                 "1ceb32e12ae3cdc3b27962f5ca021ae06f528cdd306253588e4fa11bd22580ba",
-                "5e973effff4860f2d1f704fb2a4dca24bc8f8cf11c084103ed7515c6f6b4bf68",
+                "5db6cc1d54fd0a630ae997ecd2bc10be3016a093cc482b7200eba131a1d0d4c2",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],
         )
@@ -77,6 +80,93 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             self.assertEqual(task.capability, Capability.NO_TOOLS)
             with self.assertRaises(ResponseRejected):
                 task.validator({})
+
+    def test_schema_repair_keeps_shared_evidence_per_selected_finding(self):
+        review = {
+            "findings": [
+                {"title": "Pi accepts minimal unavailable cost"},
+                {"title": "Add an unrelated adapter variant"},
+                {"title": "Totals accept invocation-only provenance"},
+                {"title": "Rejected speculative variant"},
+            ]
+        }
+        assessment = {
+            "summary": "Only existing owned variants.",
+            "decisions": [
+                {
+                    "finding_index": index,
+                    "defect_decision": decision,
+                    "rationale": "Cost shape ownership.",
+                    "scope": {
+                        "kind": scope,
+                        "rationale": "Only existing cost variants.",
+                    },
+                }
+                for index, decision, scope in (
+                    (0, "confirmed", "current"),
+                    (1, "confirmed", "unknown"),
+                    (2, "confirmed", "current"),
+                    (3, "rejected", "current"),
+                )
+            ],
+        }
+        selected = actionable_findings(review, validate_assessment(review, assessment))
+        task = build_response_task({}, selected, "Repair existing metrics cost intake.")
+        self.assertEqual(task.contract_version, 3)
+        self.assertEqual(
+            [
+                item["finding_index"]
+                for item in task.untrusted_data["actionable_findings"]
+            ],
+            [0, 2],
+        )
+        self.assertEqual(set(task.untrusted_data), {"objective", "actionable_findings"})
+        for clause in (
+            "authoritative discriminator",
+            "permitted and rejected variants",
+            "public intake/parser seam",
+            "Do not invent unsupported variants",
+            "same explanation",
+            "checks actually run",
+        ):
+            self.assertIn(clause, task.trusted_instructions)
+        explanation = (
+            "Cause: cost shape was selected by field presence instead of owner and "
+            "adapter family. Change: separate Pi invocation, unsealed invocation, "
+            "and totals cost. Checked: public intake accepts full Pi cost and "
+            "minimal unsealed cost; rejects minimal Pi cost and provenance on "
+            "totals. Unrelated adapter support is outside the assessed repair."
+        )
+        shared = {
+            "summary": "One cost-shape repair addresses both findings.",
+            "finding_responses": [
+                {"finding_index": index, "response": explanation} for index in (0, 2)
+            ],
+        }
+        self.assertEqual(task.validator(json.dumps(shared)), shared)
+        for indices in ((0,), (0, 0, 2), (0, 1, 2), (0, True, 2)):
+            with self.subTest(indices=indices), self.assertRaises(ResponseRejected):
+                task.validator(
+                    json.dumps(
+                        {
+                            **shared,
+                            "finding_responses": [
+                                {"finding_index": index, "response": explanation}
+                                for index in indices
+                            ],
+                        }
+                    )
+                )
+        # Retained free-form Response text remains valid. Prose quality is an
+        # instruction/review concern, not a new keyword-based acceptance gate.
+        retained = {
+            "summary": "Fixed it.",
+            "finding_responses": [
+                {"finding_index": index, "response": "Updated the implementation."}
+                for index in (0, 2)
+            ],
+        }
+        self.assertEqual(task.validator(json.dumps(retained)), retained)
 
     def test_fixed_version_roles_bind_rendered_data_and_deterministic_validator(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -158,7 +248,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 expected_version = {
                     "review": 5,
                     "finding_assessment": 4,
-                    "feedback_response": 2,
+                    "feedback_response": 3,
                 }[task.purpose]
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)

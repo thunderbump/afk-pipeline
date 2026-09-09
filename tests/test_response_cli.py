@@ -306,7 +306,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(
             selected["assessment_rationale"], "Fixture assessment rationale."
         )
-        self.assertEqual(prompt["task_contract_version"], 2)
+        self.assertEqual(prompt["task_contract_version"], 3)
         for clause in (
             "governing invariant",
             "shared cause",
