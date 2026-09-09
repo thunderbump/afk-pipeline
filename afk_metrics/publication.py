@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import subprocess
 from pathlib import Path
@@ -575,6 +577,7 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     parent = resolved.parent
     parent_descriptor = None
     publication_descriptor = None
+    temporary_name = None
     admitted = False
     publication_complete = False
     try:
@@ -598,14 +601,42 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
         if len(raw) > MAX_OUTPUT_BYTES:
             raise PublicationError("publication output exceeds size limit")
 
-        # Keep staging anonymous. A named temporary file could be unlinked and
-        # replaced after its descriptor was closed but before admission.
-        publication_descriptor = os.open(
-            ".",
-            os.O_WRONLY | os.O_TMPFILE,
-            0o600,
-            dir_fd=parent_descriptor,
-        )
+        # Prefer anonymous staging, but O_TMPFILE is not implemented by every
+        # otherwise suitable filesystem.  The fallback remains race-safe: its
+        # random, exclusively-created name is used only for cleanup, while the
+        # open inode is admitted through its descriptor below.
+        temporary_flag = getattr(os, "O_TMPFILE", 0)
+        if temporary_flag:
+            try:
+                publication_descriptor = os.open(
+                    ".",
+                    os.O_WRONLY | temporary_flag,
+                    0o600,
+                    dir_fd=parent_descriptor,
+                )
+            except OSError as error:
+                if error.errno not in {
+                    errno.EINVAL,
+                    errno.EISDIR,
+                    errno.ENOSYS,
+                    errno.EOPNOTSUPP,
+                }:
+                    raise
+        if publication_descriptor is None:
+            for _attempt in range(10):
+                temporary_name = f".{resolved.name}.{secrets.token_hex(8)}.tmp"
+                try:
+                    publication_descriptor = os.open(
+                        temporary_name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                        0o600,
+                        dir_fd=parent_descriptor,
+                    )
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise OSError("cannot allocate publication staging file")
         with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
             stream.flush()
@@ -650,5 +681,10 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                     pass
             if publication_descriptor is not None:
                 os.close(publication_descriptor)
+            if temporary_name is not None:
+                try:
+                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                except OSError:
+                    pass
             os.close(parent_descriptor)
     return publication

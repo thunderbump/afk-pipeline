@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import json
 import os
@@ -615,6 +616,45 @@ class MetricsPublicationTests(unittest.TestCase):
 
             self.assertFalse((source / destination.name).exists())
             self.assertFalse((original_parent / destination.name).exists())
+
+    def test_publication_falls_back_when_anonymous_staging_is_unsupported(self):
+        for unsupported in (errno.EOPNOTSUPP, errno.EINVAL):
+            with (
+                self.subTest(errno=unsupported),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                _source, _bundle, request = self.fixture(root)
+                input_path = root / "input.json"
+                input_path.write_text(json.dumps(request))
+                destination = root / "publication.json"
+                real_open = os.open
+                temporary_flag = getattr(os, "O_TMPFILE", 0)
+
+                def reject_anonymous_staging(
+                    path,
+                    flags,
+                    *args,
+                    _temporary_flag=temporary_flag,
+                    _unsupported=unsupported,
+                    _real_open=real_open,
+                    **kwargs,
+                ):
+                    if _temporary_flag and flags & _temporary_flag == _temporary_flag:
+                        raise OSError(_unsupported, "anonymous staging unsupported")
+                    return _real_open(path, flags, *args, **kwargs)
+
+                with mock.patch(
+                    "afk_metrics.publication.os.open",
+                    side_effect=reject_anonymous_staging,
+                ):
+                    publication = publish(input_path, destination)
+
+                self.assertEqual(json.loads(destination.read_text()), publication)
+                self.assertEqual(
+                    [path for path in root.iterdir() if path.name.endswith(".tmp")],
+                    [],
+                )
 
     def test_publication_admits_the_written_anonymous_inode(self):
         with tempfile.TemporaryDirectory() as temporary:
