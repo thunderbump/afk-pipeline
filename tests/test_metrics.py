@@ -1,6 +1,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -1033,6 +1034,51 @@ class MetricsReportTests(unittest.TestCase):
                 "_metrics_retained_inference_paths": {original},
                 "preparation": {"timestamps": {}, "repository": {}},
                 "terminal_directory": continuation,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(report["integrity"]["status"], "invalid")
+        self.assertIsNone(report["inference"])
+
+    def test_distinct_stages_reject_the_same_authenticated_invocation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coordinator = root / "coordinator"
+            original = coordinator / "01-review/inference"
+            original.parent.mkdir(parents=True)
+            InferenceRuntime().invoke(
+                purpose="review",
+                trusted_task_instructions="Return the value.",
+                untrusted_task_data={"value": "ok"},
+                requested_capability=Capability.READ_ONLY,
+                execution_root=root,
+                timeout_seconds=1,
+                evidence_directory=original,
+                validator=lambda value: value,
+                adapter=FixtureAdapter((ScriptedResult(response="ok"),)),
+            )
+            # Preserve the byte-identical invocation identity while assigning
+            # the copied evidence to a different stage directory.
+            shutil.copytree(original, coordinator / "02-review/inference")
+            history = [
+                {
+                    "sequence": sequence,
+                    "component": "review",
+                    "directory": f"{sequence:02d}-review",
+                    "outcome": "completed",
+                }
+                for sequence in (1, 2)
+            ]
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": history, "status": "completed"},
+                "coordinator": coordinator,
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": coordinator / "02-review",
                 "output": {"outcome": "completed"},
                 "request": {"validation": {}},
                 "bead_id": None,

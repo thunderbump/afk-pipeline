@@ -1574,11 +1574,15 @@ def summarize_source(
                 )
             invocation_identities[relative] = item["source_event_identity"]
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
-            if key not in seen:
-                seen.add(key)
-                if include_stage_binding:
-                    item["_stage_owner"] = stage_owner
-                invocations.append(item)
+            # Expected stages are already collapsed by owner above. Reusing an
+            # authenticated invocation identity here therefore cannot be a
+            # continuation alias: it assigns one receipt to distinct stages.
+            if key in seen:
+                raise ValueError("inference invocation has duplicate ownership")
+            seen.add(key)
+            if include_stage_binding:
+                item["_stage_owner"] = stage_owner
+            invocations.append(item)
 
         # A repeated continuation path is an alias only when its authenticated
         # invocation identity matches the selected path for that stage. Merely
