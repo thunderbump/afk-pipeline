@@ -8,7 +8,6 @@ if scenario == "invalid-events":
 
 criterion = {
     "id": "criterion-1",
-    "source_text": "The change is implemented and tested.",
     "statement": "Implement and test the change.",
 }
 value = {
@@ -36,12 +35,10 @@ if scenario == "capability-fan-in":
         "criteria": [
             {
                 "id": "criterion-1",
-                "source_text": "The caller repository check passes.",
                 "statement": "Pass the caller repository check.",
             },
             {
                 "id": "criterion-2",
-                "source_text": "The outside-helper repository check passes.",
                 "statement": "Pass the outside-helper repository check.",
             },
         ],
@@ -83,7 +80,6 @@ elif scenario in {
 }:
     criterion = {
         "id": "criterion-1",
-        "source_text": "Commit the result.",
         "statement": "Commit the result.",
     }
     if scenario == "capability-run-decompose":
@@ -138,7 +134,7 @@ elif scenario in {
         }
 
 if scenario in {"invalid", "invalid-proposal"}:
-    value["criteria"][0]["source_text"] = "Only part of the requirement."
+    value["criteria"][0]["id"] = "criterion-unknown"
 
 print(json.dumps({"type": "agent_start"}), flush=True)
 print(

@@ -30,7 +30,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         self.assertEqual(
             [hashlib.sha256(prompt.encode()).hexdigest() for prompt in prompts],
             [
-                "0bc2c611c5ad00a462bb682eed013fc79ffb5dc40e261384bb73a461aab0fee3",
+                "4a0366addfb3771fa4017b285de4ee0375248fa0dc789d9d9aa88cb6f85ed5a9",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
                 "1ceb32e12ae3cdc3b27962f5ca021ae06f528cdd306253588e4fa11bd22580ba",
@@ -58,9 +58,19 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         planner = build_plan_task(request)
         fan_in = {"schema_version": 2}
         parent = build_parent_review_task(fan_in)
-        self.assertEqual((planner.contract_version, parent.contract_version), (3, 2))
+        self.assertEqual((planner.contract_version, parent.contract_version), (4, 2))
         self.assertEqual(
-            planner.untrusted_data, {**request, "source_project": "afk-pipeline"}
+            planner.untrusted_data,
+            {
+                **request,
+                "source_project": "afk-pipeline",
+                "source_criteria": [
+                    {
+                        "id": "criterion-1",
+                        "source_text": request["parent"]["acceptance_criteria"],
+                    }
+                ],
+            },
         )
         self.assertIs(parent.untrusted_data, fan_in)
         for task in (planner, parent):

@@ -50,6 +50,10 @@ class ParentAcceptanceReviewCliTest(unittest.TestCase):
 
     def test_accepts_published_v2_capability_fan_in(self):
         self.request, _ = v2_repository_plan()
+        self.request["parent"]["acceptance_criteria"] = (
+            "1. The caller repository check passes.\n"
+            "2. The outside-helper repository check passes."
+        )
         fixture = ROOT / "tests" / "fixture_plan_agent.py"
         fake_bd = ROOT / "tests" / "fixtures" / "fake_bd.py"
 

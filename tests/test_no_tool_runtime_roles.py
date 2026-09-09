@@ -20,7 +20,6 @@ def direct_proposal():
         "criteria": [
             {
                 "id": "criterion-1",
-                "source_text": "The change is implemented and tested.",
                 "statement": "Implement and test the change.",
             }
         ],
@@ -119,7 +118,16 @@ class NoToolRuntimeRoleTest(unittest.TestCase):
         self.assertEqual(receipt["terminal_response"], json.dumps(direct_proposal()))
         self.assertEqual(
             prompt["untrusted_task_data"],
-            {**self.request, "source_project": "afk-pipeline"},
+            {
+                **self.request,
+                "source_project": "afk-pipeline",
+                "source_criteria": [
+                    {
+                        "id": "criterion-1",
+                        "source_text": "The change is implemented and tested.",
+                    }
+                ],
+            },
         )
         self.assertEqual(output["outcome"], "completed")
 
