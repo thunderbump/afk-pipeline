@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import stat
 import subprocess
 from pathlib import Path
@@ -551,6 +552,38 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _directory_ancestors(descriptor: int) -> set[tuple[int, int]]:
+    """Return inode identities from an open directory through filesystem root."""
+
+    ancestors = set()
+    current = os.dup(descriptor)
+    try:
+        while True:
+            facts = os.fstat(current)
+            identity = (facts.st_dev, facts.st_ino)
+            ancestors.add(identity)
+            parent = os.open(
+                "..", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
+            )
+            parent_facts = os.fstat(parent)
+            if (parent_facts.st_dev, parent_facts.st_ino) == identity:
+                os.close(parent)
+                return ancestors
+            os.close(current)
+            current = parent
+    finally:
+        os.close(current)
+
+
+def _verify_parent_is_separate(
+    parent_descriptor: int, input_identities: set[tuple[int, int]]
+) -> None:
+    """Reject a pinned destination parent relocated beneath a pinned input."""
+
+    if _directory_ancestors(parent_descriptor) & input_identities:
+        raise OSError("destination parent moved beneath an input")
+
+
 def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     request = load_publication_request(input_path)
     destination = Path(destination)
@@ -576,7 +609,29 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     parent = resolved.parent
     parent_descriptor = None
     publication_descriptor = None
+    input_descriptors: list[int] = []
     try:
+        # Keep the input roots alive for the whole publication.  Their inode
+        # identities then remain usable even if a directory writer relocates
+        # either an input or the pinned destination parent during calculation.
+        input_identities = set()
+        for item in request["runs"]:
+            for name in ("source", "bundle"):
+                input_root = Path(item[name]).resolve(strict=True)
+                expected_input = require_directory(input_root)
+                descriptor = os.open(
+                    input_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+                )
+                facts = os.fstat(descriptor)
+                if (facts.st_dev, facts.st_ino) != (
+                    expected_input.st_dev,
+                    expected_input.st_ino,
+                ):
+                    os.close(descriptor)
+                    raise OSError("publication input changed")
+                input_descriptors.append(descriptor)
+                input_identities.add((facts.st_dev, facts.st_ino))
+
         expected_parent = require_directory(parent)
         parent_descriptor = os.open(
             parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
@@ -591,6 +646,10 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             raise OSError("destination parent changed")
 
         publication = build_publication(request)
+        # Unlike a pathname comparison, this detects the pinned parent itself
+        # being renamed below a source or bundle and its old pathname being
+        # replaced by a symlink back to that same inode.
+        _verify_parent_is_separate(parent_descriptor, input_identities)
         raw = (
             json.dumps(publication, sort_keys=True, separators=(",", ":")) + "\n"
         ).encode()
@@ -598,13 +657,11 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             raise PublicationError("publication output exceeds size limit")
 
         # Prefer anonymous staging, but O_TMPFILE is not implemented by every
-        # otherwise suitable filesystem.  A named temporary file cannot be
-        # safely removed when another directory writer may replace its entry
-        # before unlink.  The fallback therefore creates the advertised
-        # destination itself exclusively.  A failed fallback write can leave
-        # only that documented destination, which the caller can reclaim; it
-        # never accumulates hidden staging names.
-        anonymous_staging = False
+        # otherwise suitable filesystem.  The fallback also stages privately:
+        # its exclusively-created name is retained because POSIX has no safe
+        # inode-conditional unlink.  Admission below hard-links the open inode,
+        # so consumers can never observe an empty or partially-written public
+        # destination, including when writing or syncing fails.
         temporary_flag = getattr(os, "O_TMPFILE", 0)
         if temporary_flag:
             try:
@@ -614,7 +671,6 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                     0o600,
                     dir_fd=parent_descriptor,
                 )
-                anonymous_staging = True
             except OSError as error:
                 if error.errno not in {
                     errno.EINVAL,
@@ -624,15 +680,24 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                 }:
                     raise
         if publication_descriptor is None:
+            _verify_parent_is_separate(parent_descriptor, input_identities)
             current_parent = os.stat(destination.parent)
             if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
                 raise OSError("destination parent changed")
-            publication_descriptor = os.open(
-                resolved.name,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=parent_descriptor,
-            )
+            for _attempt in range(10):
+                staging_name = f".afk-metrics-{secrets.token_hex(8)}.tmp"
+                try:
+                    publication_descriptor = os.open(
+                        staging_name,
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                        0o600,
+                        dir_fd=parent_descriptor,
+                    )
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise OSError("cannot allocate publication staging file")
 
         with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
@@ -640,22 +705,23 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             os.fsync(stream.fileno())
             os.fchmod(stream.fileno(), 0o644)
 
-        if anonymous_staging:
-            # Check the caller-visible alias immediately on both sides of the
-            # descriptor-relative admission. The second check prevents
-            # reporting success when an ancestor was swapped during linking.
-            current_parent = os.stat(destination.parent)
-            if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-                raise OSError("destination parent changed")
-            os.link(
-                f"/proc/self/fd/{publication_descriptor}",
-                resolved.name,
-                dst_dir_fd=parent_descriptor,
-                follow_symlinks=True,
-            )
+        # Check both the caller-visible alias and the pinned directory's real
+        # ancestry immediately before admission.  The latter closes the case
+        # where the same parent inode was moved below an input.
+        _verify_parent_is_separate(parent_descriptor, input_identities)
         current_parent = os.stat(destination.parent)
         if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
             raise OSError("destination parent changed")
+        os.link(
+            f"/proc/self/fd/{publication_descriptor}",
+            resolved.name,
+            dst_dir_fd=parent_descriptor,
+            follow_symlinks=True,
+        )
+        current_parent = os.stat(destination.parent)
+        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+            raise OSError("destination parent changed")
+        _verify_parent_is_separate(parent_descriptor, input_identities)
     except (OSError, ExportError) as error:
         raise PublicationError("publication destination cannot be created") from error
     finally:
@@ -663,4 +729,6 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             if publication_descriptor is not None:
                 os.close(publication_descriptor)
             os.close(parent_descriptor)
+        for descriptor in input_descriptors:
+            os.close(descriptor)
     return publication

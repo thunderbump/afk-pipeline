@@ -590,6 +590,34 @@ class MetricsPublicationTests(unittest.TestCase):
             self.assertFalse((source / destination.name).exists())
             self.assertFalse((original_parent / destination.name).exists())
 
+    def test_relocated_pinned_parent_is_rejected_before_source_mutation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            parent = root / "publication-parent"
+            parent.mkdir()
+            destination = parent / "publication.json"
+            relocated = source / "relocated-publication-parent"
+
+            def build_then_relocate(value):
+                publication = build_publication(value)
+                parent.rename(relocated)
+                parent.symlink_to(relocated, target_is_directory=True)
+                return publication
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.build_publication",
+                    side_effect=build_then_relocate,
+                ),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            self.assertFalse((relocated / destination.name).exists())
+
     def test_parent_swap_during_admission_retains_the_owned_publication(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -658,7 +686,9 @@ class MetricsPublicationTests(unittest.TestCase):
                     publication = publish(input_path, destination)
 
                 self.assertEqual(json.loads(destination.read_text()), publication)
-                self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
+                staging = list(root.glob(".afk-metrics-*.tmp"))
+                self.assertEqual(len(staging), 1)
+                self.assertTrue(staging[0].samefile(destination))
 
     def test_fallback_exclusive_destination_admission_preserves_race_winner(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -670,23 +700,26 @@ class MetricsPublicationTests(unittest.TestCase):
             real_open = os.open
             temporary_flag = getattr(os, "O_TMPFILE", 0)
 
-            def race_destination(path, flags, *args, **kwargs):
+            def reject_anonymous_staging(path, flags, *args, **kwargs):
                 if temporary_flag and flags & temporary_flag == temporary_flag:
                     raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                if path == destination.name and kwargs.get("dir_fd") is not None:
-                    destination.write_text("race winner")
                 return real_open(path, flags, *args, **kwargs)
 
+            def race_destination(*args, **kwargs):
+                destination.write_text("race winner")
+                raise FileExistsError(errno.EEXIST, "destination exists")
+
             with (
-                mock.patch("afk_metrics.publication.os.open", race_destination),
+                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
+                mock.patch("afk_metrics.publication.os.link", race_destination),
                 self.assertRaisesRegex(PublicationError, "cannot be created"),
             ):
                 publish(input_path, destination)
 
             self.assertEqual(destination.read_text(), "race winner")
-            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
+            self.assertEqual(len(list(root.glob(".afk-metrics-*.tmp"))), 1)
 
-    def test_failed_fallback_write_leaves_only_advertised_destination(self):
+    def test_failed_fallback_write_never_advertises_incomplete_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
@@ -711,10 +744,11 @@ class MetricsPublicationTests(unittest.TestCase):
             ):
                 publish(input_path, destination)
 
-            self.assertTrue(destination.exists())
-            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
-            destination.unlink()
             self.assertFalse(destination.exists())
+            staging = list(root.glob(".afk-metrics-*.tmp"))
+            self.assertEqual(len(staging), 1)
+            # The incomplete inode is never advertised under the destination.
+            staging[0].unlink()
 
     def test_fallback_accepts_maximum_length_destination_basename(self):
         with tempfile.TemporaryDirectory() as temporary:
