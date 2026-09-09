@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import errno
 import hashlib
 import json
 import os
 import re
-import secrets
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -115,6 +114,7 @@ def load_publication_request(path: Path) -> dict[str, Any]:
     runs = value.get("runs")
     if (
         set(value) != {"schema_version", "project", "runs"}
+        or type(value.get("schema_version")) is not int
         or value.get("schema_version") != 1
         or not isinstance(value.get("project"), str)
         or not value["project"]
@@ -197,6 +197,7 @@ def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
             files = manifest.get("files")
             if (
                 set(manifest) != {"schema_version", "kind", "identity", "files"}
+                or type(schema) is not int
                 or schema not in {2, 3}
                 or manifest.get("kind") != "afk-workflow-run"
                 or not isinstance(files, list)
@@ -261,6 +262,7 @@ def _read_bundle(bundle: Path) -> tuple[int, dict[str, Any], bytes, str]:
     workflow = _json_object(workflow_raw, "bundle workflow Run")
     if (
         manifest.get("identity") != workflow.get("identity")
+        or type(workflow.get("schema_version")) is not int
         or workflow.get("schema_version") != schema
     ):
         raise PublicationError("bundle manifest identity is invalid")
@@ -552,38 +554,6 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _directory_ancestors(descriptor: int) -> set[tuple[int, int]]:
-    """Return inode identities from an open directory through filesystem root."""
-
-    ancestors = set()
-    current = os.dup(descriptor)
-    try:
-        while True:
-            facts = os.fstat(current)
-            identity = (facts.st_dev, facts.st_ino)
-            ancestors.add(identity)
-            parent = os.open(
-                "..", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=current
-            )
-            parent_facts = os.fstat(parent)
-            if (parent_facts.st_dev, parent_facts.st_ino) == identity:
-                os.close(parent)
-                return ancestors
-            os.close(current)
-            current = parent
-    finally:
-        os.close(current)
-
-
-def _verify_parent_is_separate(
-    parent_descriptor: int, input_identities: set[tuple[int, int]]
-) -> None:
-    """Reject a pinned destination parent relocated beneath a pinned input."""
-
-    if _directory_ancestors(parent_descriptor) & input_identities:
-        raise OSError("destination parent moved beneath an input")
-
-
 def publish(input_path: Path, destination: Path) -> dict[str, Any]:
     request = load_publication_request(input_path)
     destination = Path(destination)
@@ -603,145 +573,44 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                 raise PublicationError(
                     "publication destination must be separate from inputs"
                 )
-    # Pin the already-separated parent before reading and calculating metrics.
-    # A symlinked ancestor can otherwise be redirected to an input while the
-    # publication is being built and make a later open mutate that input.
-    parent = resolved.parent
-    parent_descriptor = None
-    publication_descriptor = None
-    staging_name = None
-    input_descriptors: list[int] = []
-    input_identities: set[tuple[int, int]] = set()
+    # The caller controls stable parent/input topology (central-354d). Fully
+    # build before allocating a private name; readers use only the final path.
+    publication = build_publication(request)
+    raw = (
+        json.dumps(publication, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode()
+    if len(raw) > MAX_OUTPUT_BYTES:
+        raise PublicationError("publication output exceeds size limit")
+
+    staging = None
+    descriptor = None
+    committed = False
     try:
-        # Keep the input roots alive for the whole publication.  Their inode
-        # identities then remain usable even if a directory writer relocates
-        # either an input or the pinned destination parent during calculation.
-        for item in request["runs"]:
-            for name in ("source", "bundle"):
-                input_root = Path(item[name]).resolve(strict=True)
-                expected_input = require_directory(input_root)
-                descriptor = os.open(
-                    input_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
-                )
-                facts = os.fstat(descriptor)
-                if (facts.st_dev, facts.st_ino) != (
-                    expected_input.st_dev,
-                    expected_input.st_ino,
-                ):
-                    os.close(descriptor)
-                    raise OSError("publication input changed")
-                input_descriptors.append(descriptor)
-                input_identities.add((facts.st_dev, facts.st_ino))
-
-        expected_parent = require_directory(parent)
-        parent_descriptor = os.open(
-            parent, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        descriptor, staging = tempfile.mkstemp(
+            prefix=".afk-metrics-", suffix=".tmp", dir=resolved.parent
         )
-        opened_parent = os.fstat(parent_descriptor)
-        parent_identity = (opened_parent.st_dev, opened_parent.st_ino)
-        opened_path = Path(f"/proc/self/fd/{parent_descriptor}").resolve(strict=True)
-        if (
-            parent_identity != (expected_parent.st_dev, expected_parent.st_ino)
-            or opened_path != parent
-        ):
-            raise OSError("destination parent changed")
-
-        publication = build_publication(request)
-        # Unlike a pathname comparison, this detects the pinned parent itself
-        # being renamed below a source or bundle and its old pathname being
-        # replaced by a symlink back to that same inode.
-        _verify_parent_is_separate(parent_descriptor, input_identities)
-        raw = (
-            json.dumps(publication, sort_keys=True, separators=(",", ":")) + "\n"
-        ).encode()
-        if len(raw) > MAX_OUTPUT_BYTES:
-            raise PublicationError("publication output exceeds size limit")
-
-        # Prefer anonymous staging, but O_TMPFILE is not implemented by every
-        # otherwise suitable filesystem.  The fallback also stages privately:
-        # its exclusively-created name is retained because POSIX has no safe
-        # inode-conditional unlink.  Admission below hard-links the open inode,
-        # so consumers can never observe an empty or partially-written public
-        # destination, including when writing or syncing fails.
-        temporary_flag = getattr(os, "O_TMPFILE", 0)
-        if temporary_flag:
-            try:
-                publication_descriptor = os.open(
-                    ".",
-                    os.O_WRONLY | temporary_flag,
-                    0o600,
-                    dir_fd=parent_descriptor,
-                )
-            except OSError as error:
-                if error.errno not in {
-                    errno.EINVAL,
-                    errno.EISDIR,
-                    errno.ENOSYS,
-                    errno.EOPNOTSUPP,
-                }:
-                    raise
-        if publication_descriptor is None:
-            _verify_parent_is_separate(parent_descriptor, input_identities)
-            current_parent = os.stat(destination.parent)
-            if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-                raise OSError("destination parent changed")
-            for _attempt in range(10):
-                staging_name = f".afk-metrics-{secrets.token_hex(8)}.tmp"
-                try:
-                    publication_descriptor = os.open(
-                        staging_name,
-                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600,
-                        dir_fd=parent_descriptor,
-                    )
-                    break
-                except FileExistsError:
-                    continue
-            else:
-                raise OSError("cannot allocate publication staging file")
-            # The parent can be renamed between the preceding verification and
-            # os.open().  Detect that before putting publication bytes there;
-            # the exception path below removes the just-created owned name.
-            _verify_parent_is_separate(parent_descriptor, input_identities)
-
-        with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
+        stream = os.fdopen(descriptor, "wb")
+        descriptor = None  # The stream now owns the descriptor, including failures.
+        with stream:
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
             os.fchmod(stream.fileno(), 0o644)
-
-        # Check both the caller-visible alias and the pinned directory's real
-        # ancestry immediately before admission.  The latter closes the case
-        # where the same parent inode was moved below an input.
-        _verify_parent_is_separate(parent_descriptor, input_identities)
-        current_parent = os.stat(destination.parent)
-        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-            raise OSError("destination parent changed")
-        os.link(
-            f"/proc/self/fd/{publication_descriptor}",
-            resolved.name,
-            dst_dir_fd=parent_descriptor,
-            follow_symlinks=True,
-        )
-        current_parent = os.stat(destination.parent)
-        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-            raise OSError("destination parent changed")
-        _verify_parent_is_separate(parent_descriptor, input_identities)
-    except (OSError, ExportError) as error:
-        # Do not attempt pathname cleanup here.  POSIX provides no operation
-        # that conditionally unlinks a directory entry only when it still
-        # names a particular open inode.  A stat-then-unlink rollback would let
-        # a concurrent writer replace an owned link between those calls and
-        # would then delete the writer's file.  Retaining an inaccessible or
-        # relocated owned link is safer than mutating an unrelated entry; the
-        # caller receives failure and can arrange cleanup while excluding
-        # concurrent directory writers.
+        # This is the commit point: existing names are never overwritten and
+        # consumers cannot observe a partially written final file.
+        os.link(staging, resolved)
+        committed = True
+    except OSError as error:
         raise PublicationError("publication destination cannot be created") from error
     finally:
-        if parent_descriptor is not None:
-            if publication_descriptor is not None:
-                os.close(publication_descriptor)
-            os.close(parent_descriptor)
-        for descriptor in input_descriptors:
+        if descriptor is not None:
             os.close(descriptor)
+        if staging is not None:
+            try:
+                os.unlink(staging)
+            except OSError as error:
+                state = "committed" if committed else "failed before commit"
+                raise PublicationError(
+                    f"publication {state}; staging cleanup failed"
+                ) from error
     return publication

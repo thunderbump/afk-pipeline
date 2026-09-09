@@ -682,7 +682,16 @@ class CoordinatorCliTest(unittest.TestCase):
         _assignment_path, request_path = self.prepare_run(
             max_responses=0, full_review=True
         )
-        run = self.root / "multiple-continuations"
+        assignment = json.loads(_assignment_path.read_text())
+        assignment["source"] = {"kind": "bead", "id": "central-example"}
+        self.write_json(_assignment_path, assignment)
+        import shutil
+
+        from tests.test_export_cli import ExportCliTests
+
+        prepared = ExportCliTests().sealed_preparer(self.root / "metrics")
+        run = prepared / "coordinator"
+        shutil.rmtree(run)
         exhausted = self.invoke(
             request_path,
             run,
@@ -796,6 +805,63 @@ class CoordinatorCliTest(unittest.TestCase):
             (original_bundle / "workflow-run.json").read_text()
         )
         self.assertEqual(original_record["terminal"], {"decision": "exhausted"})
+
+        # Wrap the same real fixture lineage in the prepared identity required
+        # by metrics publication, then exercise every public selector.
+        from afk_metrics.publication import PublicationError, build_publication
+
+        for source_name, target_name in (
+            ("assignment.json", "assignment.json"),
+            ("input.json", "coordinator-request.json"),
+        ):
+            shutil.copyfile(run / source_name, prepared / target_name)
+        preparation_path = prepared / "preparation.json"
+        preparation = json.loads(preparation_path.read_text())
+        preparation["coordinator"]["decision"] = "exhausted"
+        preparation["repository"]["worktree"] = str(self.workspace)
+        preparation["repository"]["base_commit"] = base
+        preparation_path.write_text(json.dumps(preparation))
+        requests = []
+        for selection, suffix, responses in (
+            ("original", "", 0),
+            ("01", ".continuation.01", 1),
+            ("latest", ".continuation.02", 2),
+        ):
+            selected_bundle = self.root / ("metrics-bundle-" + selection)
+            export_run(
+                prepared,
+                selected_bundle,
+                terminal_continuation=None if selection == "latest" else selection,
+            )
+            request = {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [
+                    {
+                        "source": str(prepared),
+                        "bundle": str(selected_bundle),
+                        "selection": selection,
+                    }
+                ],
+            }
+            publication = build_publication(request)
+            selected = publication["runs"][0]
+            self.assertEqual(selected["binding"]["run_id"], "run-example" + suffix)
+            self.assertEqual(selected["summary"]["outcome"]["repair_count"], responses)
+            self.assertEqual(
+                selected["binding"]["workflow_run_sha256"],
+                hashlib.sha256(
+                    (selected_bundle / "workflow-run.json").read_bytes()
+                ).hexdigest(),
+            )
+            requests.append(request)
+        corrupt_path = prepared / "coordinator/continuations/02/input.json"
+        corrupt = json.loads(corrupt_path.read_text())
+        corrupt["prior_output"] = "../wrong/output.json"
+        corrupt_path.write_text(json.dumps(corrupt))
+        for request in requests:
+            with self.assertRaises(PublicationError):
+                build_publication(request)
 
         second_input = json.loads((second_directory / "input.json").read_text())
         second_input["prior_output"] = "../wrong/output.json"

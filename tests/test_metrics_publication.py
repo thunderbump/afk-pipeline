@@ -69,7 +69,22 @@ class MetricsPublicationTests(unittest.TestCase):
                 self.assertEqual(run["binding"]["bundle_schema_version"], schema)
                 self.assertEqual(run["binding"]["run_id"], "run-example")
                 self.assertEqual(
-                    run["summary"]["source_identity"], run["summary"]["source_identity"]
+                    run["summary"]["source_identity"],
+                    hashlib.sha256(
+                        json.dumps(
+                            {
+                                "identity": {
+                                    "project": "operations-webui",
+                                    "run_id": "run-example",
+                                },
+                                "assignment": json.loads(
+                                    (source / "assignment.json").read_text()
+                                ),
+                            },
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest(),
                 )
                 self.assertTrue(
                     any(row["ownership"].get("sequence") == 2 for row in run["stages"])
@@ -77,6 +92,49 @@ class MetricsPublicationTests(unittest.TestCase):
                 serialized = output.read_text()
                 self.assertNotIn(str(source), serialized)
                 self.assertNotIn(str(bundle), serialized)
+
+    def test_schema_version_requires_an_integer(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            for version in (True, 1.0):
+                with self.subTest(version=version):
+                    input_path.write_text(
+                        json.dumps({**request, "schema_version": version})
+                    )
+                    with self.assertRaises(PublicationError):
+                        load_publication_request(input_path)
+            manifest_path = bundle / "manifest.json"
+            manifest = json.loads(manifest_path.read_text())
+            manifest["schema_version"] = 3.0
+            manifest_path.write_text(json.dumps(manifest))
+            with self.assertRaises(PublicationError):
+                build_publication(request)
+
+    def test_legacy_report_accepts_a_source_named_publish(self):
+        import subprocess
+        import sys
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            # An invalid source still produces an integrity report with exit 1;
+            # argparse exit 2 would mean the legacy invocation was misrouted.
+            (root / "publish").mkdir()
+            for option in (
+                ["--destination", str(root / "report")],
+                ["--destination=" + str(root / "report-equals")],
+            ):
+                result = subprocess.run(
+                    [sys.executable, "-m", "afk_metrics", "publish", *option],
+                    cwd=root,
+                    env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1])},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertEqual(json.loads(result.stdout)["runs"], 1)
 
     def test_bundle_hash_and_semantic_mismatch_fail_without_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -560,227 +618,120 @@ class MetricsPublicationTests(unittest.TestCase):
                 publish(input_path, destination)
             self.assertFalse(destination.exists())
 
-    def test_parent_swap_during_build_cannot_redirect_output_into_source(self):
+    def test_named_staging_success_removes_temporary_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
+            source, bundle, request = self.fixture(root)
+            before = {
+                path: path.read_bytes()
+                for directory in (source, bundle)
+                for path in directory.rglob("*")
+                if path.is_file()
+            }
             input_path = root / "input.json"
             input_path.write_text(json.dumps(request))
-            original_parent = root / "original-publication-parent"
-            original_parent.mkdir()
-            parent_alias = root / "publication-parent"
-            parent_alias.symlink_to(original_parent, target_is_directory=True)
-            destination = parent_alias / "publication.json"
+            parent = root / "output"
+            parent.mkdir()
+            alias = root / "alias"
+            alias.symlink_to(parent, target_is_directory=True)
+            destination = alias / ("p" * 255)
+            result = publish(input_path, destination)
+            self.assertEqual(json.loads(destination.read_text()), result)
+            self.assertEqual(list(parent.iterdir()), [parent / destination.name])
+            self.assertEqual({path: path.read_bytes() for path in before}, before)
 
-            def build_then_swap(value):
-                publication = build_publication(value)
-                parent_alias.unlink()
-                parent_alias.symlink_to(source, target_is_directory=True)
-                return publication
+    def test_existing_files_and_dangling_symlinks_are_preserved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            existing = root / "existing.json"
+            existing.write_text("previous owner")
+            dangling = root / "dangling.json"
+            dangling.symlink_to(root / "absent")
+            for destination in (existing, dangling):
+                with (
+                    self.subTest(path=destination.name),
+                    self.assertRaises(PublicationError),
+                ):
+                    publish(input_path, destination)
+            self.assertEqual(existing.read_text(), "previous owner")
+            self.assertTrue(dangling.is_symlink())
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
+
+    def test_concurrent_publishers_admit_one_complete_file(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Barrier
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            destination = root / "publication.json"
+            barrier = Barrier(2)
+            real_link = os.link
+
+            def admit(staging, target):
+                self.assertFalse(destination.exists())
+                self.assertEqual(
+                    json.loads(Path(staging).read_text())["kind"],
+                    "afk-metrics-publication",
+                )
+                barrier.wait(timeout=10)
+                return real_link(staging, target)
+
+            def run(_index):
+                try:
+                    return publish(input_path, destination)
+                except PublicationError:
+                    return None
 
             with (
-                mock.patch(
-                    "afk_metrics.publication.build_publication",
-                    side_effect=build_then_swap,
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
+                mock.patch("afk_metrics.publication.os.link", admit),
+                ThreadPoolExecutor(2) as pool,
             ):
-                publish(input_path, destination)
+                results = list(pool.map(run, range(2)))
+            winners = [value for value in results if value is not None]
+            self.assertEqual(len(winners), 1)
+            self.assertEqual(json.loads(destination.read_text()), winners[0])
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
 
-            self.assertFalse((source / destination.name).exists())
-            self.assertFalse((original_parent / destination.name).exists())
-
-    def test_relocated_pinned_parent_is_rejected_before_source_mutation(self):
+    def test_temporary_name_collisions_never_delete_unowned_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
+            _source, _bundle, request = self.fixture(root)
             input_path = root / "input.json"
             input_path.write_text(json.dumps(request))
-            parent = root / "publication-parent"
-            parent.mkdir()
-            destination = parent / "publication.json"
-            relocated = source / "relocated-publication-parent"
-
-            def build_then_relocate(value):
-                publication = build_publication(value)
-                parent.rename(relocated)
-                parent.symlink_to(relocated, target_is_directory=True)
-                return publication
-
-            with (
-                mock.patch(
-                    "afk_metrics.publication.build_publication",
-                    side_effect=build_then_relocate,
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            self.assertFalse((relocated / destination.name).exists())
-
-    def test_parent_relocation_during_fallback_open_retains_staging_safely(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            parent = root / "publication-parent"
-            parent.mkdir()
-            destination = parent / "publication.json"
-            relocated = source / "relocated-publication-parent"
+            collider = root / ".afk-metrics-collision.tmp"
+            collider.write_text("unowned")
             real_open = os.open
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-            moved = False
+            collisions = 0
 
-            def relocate_during_staging(path, flags, *args, **kwargs):
-                nonlocal moved
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                if not moved and str(path).startswith(".afk-metrics-"):
-                    parent.rename(relocated)
-                    parent.symlink_to(relocated, target_is_directory=True)
-                    moved = True
+            def open_with_collision(path, flags, *args, **kwargs):
+                nonlocal collisions
+                if flags & os.O_EXCL and Path(path).name.startswith(".afk-metrics-"):
+                    collisions += 1
+                    # Exercise the OS exclusive-create failure, rather than
+                    # inventing ownership of the name that failed allocation.
+                    return real_open(collider, flags, *args, **kwargs)
                 return real_open(path, flags, *args, **kwargs)
 
             with (
-                mock.patch(
-                    "afk_metrics.publication.os.open",
-                    side_effect=relocate_during_staging,
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
+                mock.patch("afk_metrics.publication.os.open", open_with_collision),
+                mock.patch("tempfile.TMP_MAX", 3),
+                self.assertRaises(PublicationError),
             ):
-                publish(input_path, destination)
+                publish(input_path, root / "publication.json")
+            self.assertEqual(collisions, 3)
+            self.assertEqual(collider.read_text(), "unowned")
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [collider])
 
-            self.assertTrue(moved)
-            retained = list(relocated.glob(".afk-metrics-*.tmp"))
-            self.assertEqual(len(retained), 1)
-            self.assertEqual(retained[0].read_bytes(), b"")
-
-    def test_parent_relocation_during_admission_retains_owned_links(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            parent = root / "publication-parent"
-            parent.mkdir()
-            destination = parent / "publication.json"
-            relocated = source / "relocated-publication-parent"
-            real_open = os.open
-            real_link = os.link
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
-
-            def relocate_then_link(*args, **kwargs):
-                parent.rename(relocated)
-                parent.symlink_to(relocated, target_is_directory=True)
-                return real_link(*args, **kwargs)
-
+    def test_precommit_io_failures_clean_staging_without_advertising_output(self):
+        for operation in ("fsync", "link"):
             with (
-                mock.patch(
-                    "afk_metrics.publication.os.open",
-                    side_effect=reject_anonymous_staging,
-                ),
-                mock.patch(
-                    "afk_metrics.publication.os.link", side_effect=relocate_then_link
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            retained = list(relocated.iterdir())
-            self.assertEqual(len(retained), 2)
-            self.assertTrue((relocated / destination.name).exists())
-            staging = next(relocated.glob(".afk-metrics-*.tmp"))
-            self.assertTrue(staging.samefile(relocated / destination.name))
-
-    def test_relocation_failure_never_unlinks_a_replacement_destination(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            parent = root / "publication-parent"
-            parent.mkdir()
-            destination = parent / "publication.json"
-            relocated = source / "relocated-publication-parent"
-            real_open = os.open
-            real_link = os.link
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
-
-            def relocate_link_and_replace(*args, **kwargs):
-                parent.rename(relocated)
-                parent.symlink_to(relocated, target_is_directory=True)
-                real_link(*args, **kwargs)
-                published = relocated / destination.name
-                published.unlink()
-                published.write_text("foreign writer")
-
-            with (
-                mock.patch(
-                    "afk_metrics.publication.os.open",
-                    side_effect=reject_anonymous_staging,
-                ),
-                mock.patch(
-                    "afk_metrics.publication.os.link",
-                    side_effect=relocate_link_and_replace,
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            self.assertEqual(
-                (relocated / destination.name).read_text(), "foreign writer"
-            )
-            self.assertEqual(len(list(relocated.glob(".afk-metrics-*.tmp"))), 1)
-
-    def test_parent_swap_during_admission_retains_the_owned_publication(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            original_parent = root / "original-publication-parent"
-            original_parent.mkdir()
-            parent_alias = root / "publication-parent"
-            parent_alias.symlink_to(original_parent, target_is_directory=True)
-            destination = parent_alias / "publication.json"
-            real_link = os.link
-
-            def link_then_swap(*args, **kwargs):
-                real_link(*args, **kwargs)
-                parent_alias.unlink()
-                parent_alias.symlink_to(source, target_is_directory=True)
-
-            with (
-                mock.patch("afk_metrics.publication.os.link", link_then_swap),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            self.assertFalse((source / destination.name).exists())
-            # Cleanup cannot conditionally unlink an inode: an attacker could
-            # replace the pathname after an identity check. Retain our inode in
-            # the pinned parent rather than risk deleting a foreign file.
-            retained = original_parent / destination.name
-            self.assertTrue(retained.exists())
-            self.assertEqual(
-                json.loads(retained.read_text())["kind"], "afk-metrics-publication"
-            )
-
-    def test_publication_falls_back_when_anonymous_staging_is_unsupported(self):
-        for unsupported in (errno.EOPNOTSUPP, errno.EINVAL):
-            with (
-                self.subTest(errno=unsupported),
+                self.subTest(operation=operation),
                 tempfile.TemporaryDirectory() as temporary,
             ):
                 root = Path(temporary)
@@ -788,138 +739,93 @@ class MetricsPublicationTests(unittest.TestCase):
                 input_path = root / "input.json"
                 input_path.write_text(json.dumps(request))
                 destination = root / "publication.json"
-                real_open = os.open
-                temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-                def reject_anonymous_staging(
-                    path,
-                    flags,
-                    *args,
-                    _temporary_flag=temporary_flag,
-                    _unsupported=unsupported,
-                    _real_open=real_open,
-                    **kwargs,
+                # Unsupported hard links must not fall back to direct writes.
+                error = OSError(
+                    errno.EOPNOTSUPP if operation == "link" else errno.EIO,
+                    "injected IO failure",
+                )
+                with (
+                    mock.patch(
+                        f"afk_metrics.publication.os.{operation}", side_effect=error
+                    ),
+                    self.assertRaises(PublicationError),
                 ):
-                    if _temporary_flag and flags & _temporary_flag == _temporary_flag:
-                        raise OSError(_unsupported, "anonymous staging unsupported")
-                    return _real_open(path, flags, *args, **kwargs)
+                    publish(input_path, destination)
+                self.assertFalse(destination.exists())
+                self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
 
-                with mock.patch(
-                    "afk_metrics.publication.os.open",
-                    side_effect=reject_anonymous_staging,
-                ):
-                    publication = publish(input_path, destination)
-
-                self.assertEqual(json.loads(destination.read_text()), publication)
-                staging = list(root.glob(".afk-metrics-*.tmp"))
-                self.assertEqual(len(staging), 1)
-                self.assertTrue(staging[0].samefile(destination))
-
-    def test_fallback_exclusive_destination_admission_preserves_race_winner(self):
+    def test_failed_write_keeps_final_name_absent_and_cleans_staging(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
             input_path = root / "input.json"
             input_path.write_text(json.dumps(request))
             destination = root / "publication.json"
-            real_open = os.open
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
+            real_fdopen = os.fdopen
 
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
+            def fdopen(descriptor, mode, **kwargs):
+                stream = real_fdopen(descriptor, mode, **kwargs)
+                if mode != "wb":
+                    return stream
+                proxy = mock.MagicMock(wraps=stream)
+                proxy.__enter__.return_value = proxy
+                proxy.__exit__.side_effect = lambda *_args: stream.close()
 
-            def race_destination(*args, **kwargs):
-                destination.write_text("race winner")
-                raise FileExistsError(errno.EEXIST, "destination exists")
+                def fail_write(raw):
+                    self.assertFalse(destination.exists())
+                    stream.write(raw[:10])
+                    raise OSError(errno.ENOSPC, "disk full")
 
-            with (
-                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
-                mock.patch("afk_metrics.publication.os.link", race_destination),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            self.assertEqual(destination.read_text(), "race winner")
-            self.assertEqual(len(list(root.glob(".afk-metrics-*.tmp"))), 1)
-
-    def test_failed_fallback_write_never_advertises_incomplete_destination(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            destination = root / "publication.json"
-            real_open = os.open
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
+                proxy.write.side_effect = fail_write
+                return proxy
 
             with (
-                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
-                mock.patch(
-                    "afk_metrics.publication.os.fsync",
-                    side_effect=OSError(errno.EIO, "write failed"),
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
+                mock.patch("afk_metrics.publication.os.fdopen", fdopen),
+                self.assertRaises(PublicationError),
             ):
                 publish(input_path, destination)
-
             self.assertFalse(destination.exists())
-            staging = list(root.glob(".afk-metrics-*.tmp"))
-            self.assertEqual(len(staging), 1)
-            # The incomplete inode is never advertised under the destination.
-            staging[0].unlink()
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
 
-    def test_fallback_accepts_maximum_length_destination_basename(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            destination = root / ("p" * 255)
-            real_open = os.open
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
-
-            with mock.patch(
-                "afk_metrics.publication.os.open", reject_anonymous_staging
+    def test_cleanup_failure_reports_whether_publication_committed(self):
+        for committed in (False, True):
+            with (
+                self.subTest(committed=committed),
+                tempfile.TemporaryDirectory() as temporary,
             ):
-                publication = publish(input_path, destination)
+                root = Path(temporary)
+                _source, _bundle, request = self.fixture(root)
+                input_path = root / "input.json"
+                input_path.write_text(json.dumps(request))
+                destination = root / "publication.json"
+                real_link = os.link
 
-            self.assertEqual(json.loads(destination.read_text()), publication)
+                def link(*args, committed=committed, real_link=real_link):
+                    if not committed:
+                        raise OSError(errno.EIO, "cannot link")
+                    return real_link(*args)
 
-    def test_publication_admits_the_written_anonymous_inode(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            destination = root / "publication.json"
-            real_link = os.link
-            linked_descriptors = []
-
-            def observe_link(source, *args, **kwargs):
-                prefix = "/proc/self/fd/"
-                self.assertTrue(source.startswith(prefix))
-                descriptor = int(source.removeprefix(prefix))
-                linked_descriptors.append(os.fstat(descriptor).st_ino)
-                return real_link(source, *args, **kwargs)
-
-            with mock.patch("afk_metrics.publication.os.link", observe_link):
-                publication = publish(input_path, destination)
-
-            self.assertEqual(len(linked_descriptors), 1)
-            self.assertEqual(destination.stat().st_ino, linked_descriptors[0])
-            self.assertEqual(json.loads(destination.read_text()), publication)
+                expected = (
+                    "publication committed; staging cleanup failed"
+                    if committed
+                    else "publication failed before commit; staging cleanup failed"
+                )
+                with (
+                    mock.patch("afk_metrics.publication.os.link", link),
+                    mock.patch(
+                        "afk_metrics.publication.os.unlink",
+                        side_effect=OSError(errno.EIO, "cannot clean"),
+                    ),
+                    self.assertRaisesRegex(PublicationError, expected),
+                ):
+                    publish(input_path, destination)
+                self.assertEqual(destination.exists(), committed)
+                if committed:
+                    self.assertEqual(
+                        json.loads(destination.read_text())["kind"],
+                        "afk-metrics-publication",
+                    )
+                self.assertEqual(len(list(root.glob(".afk-metrics-*.tmp"))), 1)
 
 
 if __name__ == "__main__":

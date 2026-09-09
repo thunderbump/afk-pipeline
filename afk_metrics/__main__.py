@@ -104,7 +104,10 @@ def _human(report):
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] == "publish":
+    legacy_report = any(
+        arg == "--destination" or arg.startswith("--destination=") for arg in arguments
+    )
+    if arguments and arguments[0] == "publish" and not legacy_report:
         parser = argparse.ArgumentParser(
             prog="python3 -m afk_metrics publish",
             description="publish bound AFK metrics snapshots",

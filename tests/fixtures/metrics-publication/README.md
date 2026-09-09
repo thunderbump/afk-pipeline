@@ -16,6 +16,12 @@ The input is exactly:
 
 `selection` is `original`, `latest`, or the exact numeric retained continuation directory identifier (for example `01`). There must be 1–25 entries. Source and bundle paths are local producer inputs and never occur in output. The destination must be a new absolute file outside every source and bundle.
 
+The caller owns a stable output parent and stable source/bundle root topology for the whole call. The existing parent must support local regular-file hard links. Stable symlink aliases are supported. Cooperating publishers may race to create the same final name but must not replace or delete each other's entries. Directory relocation, entry substitution and changing mount aliases are outside this contract.
+
+The producer serializes and bounds the complete object before allocating a private staging file in the output parent. It writes, flushes, syncs and closes that file, then creates the final hard link without overwrite and removes staging. A successful return leaves only the final file. A pre-commit failure does not create the final name; an existing winner remains untouched. If staging cleanup fails after commit, the complete final file remains and the error explicitly says `committed; staging cleanup failed`. Inspect that output before retrying. Crash cleanup and power-loss durability are not guaranteed. There is no direct-write fallback on filesystems without hard links.
+
+The existing local report command remains `python3 -m afk_metrics SOURCES... --destination DIRECTORY`. Its `--destination` option selects legacy report mode, including when a source directory is named `publish`.
+
 ## Envelope (frozen v1)
 
 A publication object has **exactly** these fields:
@@ -43,7 +49,41 @@ Each Run object has exactly `binding`, `summary`, and `stages`.
 
 The producer verifies the manifest identity and the workflow file's declared size/hash. It independently normalizes the selected source observation and compares all semantic Run fields. Only bundle `artifacts`, v3 `inference_sessions`, and operational publication delivery fields are excluded. Schema version is normalized to the verified bundle version. Caller-provided digests are not accepted.
 
-`summary` is the complete schema-1 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, and `timing`. See the fixture for nested report fields. `source_identity` is the key used by comparisons.
+`summary` is the complete schema-1 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, and `timing`. The nested contract is listed below. `source_identity` is the key used by comparisons.
+
+## Nested summary contract
+
+A published summary always has `integrity: {"status":"verified"}`. Invalid evidence rejects the publication rather than emitting an invalid summary. `source_identity` is the SHA-256 of compact, sorted-key JSON containing the authenticated `identity` and frozen `assignment`. This differs from the hash of the exported workflow bytes.
+
+* `run_identity`: `project`, selected `run_id`, and `bead_id`, which can be `null` where unavailable.
+* `work`: `objective_sha256`, nullable `base_commit`, and `validation_conditions_sha256`. The hashes describe frozen conditions, not measured quality.
+* `outcome`: `terminal` is `completed | failed`; `coordinator_status` is `completed | failed`; `coordinator_decision` is `stop | exhausted | null`. `validation_results` lists retained Validation outcomes, `passed | failed | timed_out | interrupted`. `repair_count` counts Response components and `retry_count` counts observed inference retries. `completion_acceptance` and `integration_status` are currently the literal `unavailable`.
+* `inference`: `invocations` and `totals`, described below.
+* `timing`: the fields described below.
+
+All coverage fields use `complete | partial | unavailable`. All token objects contain only measured non-negative numeric fields from `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, and `reasoning`. Missing keys do not mean zero. Counts are non-negative integers. Seconds are non-negative numbers or `null` unless a legacy sentinel is explicitly stated below.
+
+`inference.totals` has `elapsed_seconds`, `usage`, `compaction_usage`, `usage_coverage`, and `cost`. Cost has `status: reported_estimate | partial | unavailable`, `kind: pi_reported_estimate | unavailable`, nullable numeric `amount`, `currency: null`, and `billed_charge: false | null`. A partial amount is the measured subtotal. No currency or invoice charge is inferred.
+
+Each invocation has:
+
+* `source_event_identity`: authenticated invocation hash or an opaque stable fallback for unsealed abandoned evidence.
+* `purpose`: `acceptance_planning | attempt | review | finding_assessment | feedback_response`.
+* Nullable string `adapter`, `adapter_family`, `provider`, and `model`. Pi invocations also have `observed_identities`, an array of objects with nullable `provider` and `model`.
+* `outcome`: `succeeded | failed | interrupted`; nullable `attempt_count`.
+* `elapsed`: `kind: invocation_adapter_elapsed_not_pure_inference`, nullable `seconds`, and nullable timestamp strings `started_at` and `ended_at`.
+* `response_validator_seconds`, `response_validator_coverage`, and `metrics`.
+
+Invocation `metrics` always has `coverage`, `usage`, `compaction` with `aggregate_count` and `usage`, `retry_count`, and `cost`. Pi metrics additionally have `finalized_requests`, boolean `request_count_exact`, and `identity_coverage`. Their cost has the totals cost fields plus `provenance` with `calculator: "Pi model rates" | null`, `pi_version: null`, and `price_table_date: null`. Unsupported or unsealed invocations instead include `reason: unsupported_adapter | unsealed_abandoned_invocation` and the minimal unavailable cost object with `status`, `kind`, and `amount: null`. These variants are intentional; consumers must not require Pi-only fields for other adapters.
+
+`timing` has:
+
+* Nullable second values `run_wall_span_seconds`, `preparation_seconds`, `publication_seconds`, `inference_invocation_seconds`, `repository_validation_seconds`, `response_validator_seconds`, and `unattributed_seconds`.
+* `repository_validation_coverage` and `response_validator_coverage`.
+* `active_execution_intervals`: objects with `kind: preparation | inference_invocation | repository_validation | publication` and measured `seconds`. Publication entries also have `nonoverlapping_seconds`. These are measured duration rows, not a disjoint timeline and not values to sum into wall time.
+* `deterministic_steps`: `Validation` is measured seconds or the string `unavailable`; `Change` and `Iteration` are the string `unavailable`.
+* `continuation_wait_gaps`: the string `unavailable`.
+* `overlap_note`: explanatory string. Unattributed time subtracts the union of authenticated intervals from wall span; nested response validation is not subtracted twice.
 
 ## Stage rows
 
