@@ -486,7 +486,7 @@ schema:
     }
   },
   "assignment": {
-    "command": ["agent", "--mode", "json", "Read", "{assignment_path}"],
+    "worker": "inference",
     "timeout_seconds": 1800
   },
   "coordinator": {
@@ -567,7 +567,8 @@ collisions. It never fetches, clones, reuses, or replaces a destination. Beads
 connection settings remain in the preparer environment and are not forwarded to
 Coordinator workers or written to durable evidence.
 
-The assignment command must contain exactly one argv element equal to
+Configuration `assignment` accepts `{"worker":"inference","timeout_seconds":1800}`
+or the explicit command form. For command workers, the assignment command must contain exactly one argv element equal to
 `{assignment_path}`. During preparation that element is replaced, without a
 shell, by the generated absolute `assignment.json` path. Embedded or repeated
 placeholders, commands without the placeholder, and commands that use the
@@ -802,17 +803,26 @@ wrapper stderr, and runner stdout/stderr stay routed only to the artifact logs.
   "schema_version": 1,
   "objective": "Make the requested change and commit it.",
   "workspace": "/absolute/path/to/prepared/checkout",
-  "command": ["agent", "--mode", "json", "work instructions"],
+  "worker": "inference",
   "timeout_seconds": 1800,
   "source": {"kind": "bead", "id": "example-123"}
 }
 ```
 
-`source` is optional metadata. `command` is an argv array and is executed
-directly, without a shell. Credentials belong to the execution environment;
-never place secrets in the Assignment because `input.json` is durable.
-`objective` is the durable human-readable work description; the runner command
-decides how to present that structured Assignment to its agent.
+`source` is optional metadata. Choose exactly one current worker form:
+`"worker": "inference"`, or `"command": ["worker", "arguments"]`.
+Inference uses the shared runtime's Pi adapter with `gpt-5.6-sol`, medium thinking,
+and WRITE capability. Its versioned Attempt task carries the objective and frozen
+scope reference, requests a commit and actual check results, and accepts a plain
+text summary. It seals `inference/receipt.json`; root events/stderr are derived
+views of those receipt artifacts. The existing metrics reader measures that receipt
+once, without also counting root logs.
+
+The command form executes argv directly without a shell and retains the existing
+agent event protocol. It supports external/demo workers without an inference
+receipt; their inference metrics remain unavailable. There is no automatic
+fallback, new historical parser, or metrics requirement for command workers.
+Credentials belong to the execution environment, never durable Assignment data.
 
 New prepared Assignments also freeze `work_base`, the canonical initial commit
 ID. Attempt requires its initial HEAD to match it, and committed-source proof

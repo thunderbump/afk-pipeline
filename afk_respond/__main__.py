@@ -1,5 +1,4 @@
 import json
-import shutil
 import subprocess
 import sys
 import time
@@ -10,13 +9,13 @@ from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
 from afk_evidence.access import EvidenceUnavailable
 from afk_inference import invoke
+from afk_inference.component import publish_runtime_logs, runtime_process
 from afk_related_work import snapshot_ids
 from afk_respond.contract import actionable_findings, validate_input
 from afk_respond.task import build_task
 from afk_review.contract import validate_review
 from afk_runtime import (
     commits_between_heads,
-    process_result,
     progress,
     repository_state,
     seal_json,
@@ -339,22 +338,6 @@ def observe_repository_transition(workspace, before):
         except (OSError, subprocess.SubprocessError) as error:
             observation_error = str(error)
     return after, commits, descends_from_before, observation_error
-
-
-def publish_runtime_logs(result: Path, receipt: object) -> None:
-    attempts = receipt["attempts"]
-    for artifact, filename in (("events", "events.jsonl"), ("stderr", "stderr.log")):
-        source = attempts[-1]["artifacts"].get(artifact) if attempts else None
-        if source:
-            shutil.copyfile(result / "inference" / source, result / filename)
-        else:
-            (result / filename).touch()
-
-
-def runtime_process(receipt: object) -> dict[str, object]:
-    attempts = receipt["attempts"]
-    process = attempts[-1].get("process", {}) if attempts else {}
-    return process_result(process.get("exit_code"), process.get("error"))
 
 
 def read_json(path):

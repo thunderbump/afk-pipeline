@@ -7,6 +7,8 @@ from pathlib import Path
 from afk_assess.contract import validate_assessment
 from afk_assess.task import ASSESSMENT_INSTRUCTIONS
 from afk_assess.task import build_task as build_assessment_task
+from afk_attempt.task import ATTEMPT_INSTRUCTIONS
+from afk_attempt.task import build_task as build_attempt_task
 from afk_inference import Capability, ResponseRejected
 from afk_parent_review.task import SYSTEM_PROMPT as PARENT_PROMPT
 from afk_parent_review.task import build_task as build_parent_review_task
@@ -23,6 +25,7 @@ from tests.test_plan_contract import planner_input
 class RoleLocalInferenceTaskContractTest(unittest.TestCase):
     def test_trusted_task_renderers_have_explicit_snapshots(self):
         prompts = (
+            ATTEMPT_INSTRUCTIONS,
             PLAN_PROMPT,
             PARENT_PROMPT,
             REVIEW_INSTRUCTIONS,
@@ -33,6 +36,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         self.assertEqual(
             [hashlib.sha256(prompt.encode()).hexdigest() for prompt in prompts],
             [
+                "6231accc3f36a73e9d9dd99cfb1d6fed69eec5cfcce7d88230c1abe3e12984fb",
                 "4a0366addfb3771fa4017b285de4ee0375248fa0dc789d9d9aa88cb6f85ed5a9",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
                 "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
@@ -80,6 +84,34 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             self.assertEqual(task.capability, Capability.NO_TOOLS)
             with self.assertRaises(ResponseRejected):
                 task.validator({})
+
+    def test_attempt_task_preserves_scope_reference_and_accepts_prose(self):
+        assignment = {
+            "objective": "Implement the owned change.",
+            "work_base": "a" * 40,
+            "related_work": {"path": "/frozen/context.jsonl", "sha256": "b" * 64},
+            "worker": "inference",
+            "workspace": "/workspace",
+        }
+        task = build_attempt_task(assignment)
+        self.assertEqual(task.purpose, "attempt")
+        self.assertEqual(task.contract_version, 1)
+        self.assertEqual(task.capability, Capability.WRITE)
+        self.assertEqual(
+            task.untrusted_data,
+            {
+                key: assignment[key]
+                for key in ("objective", "work_base", "related_work")
+            },
+        )
+        self.assertEqual(
+            task.validator("Implemented; checks passed."), "Implemented; checks passed."
+        )
+        for value in ("", "   ", {}, None):
+            with self.subTest(value=value), self.assertRaises(ResponseRejected):
+                task.validator(value)
+        self.assertIn("Only included record IDs", task.trusted_instructions)
+        self.assertIn("not additional work", task.trusted_instructions)
 
     def test_schema_repair_keeps_shared_evidence_per_selected_finding(self):
         review = {

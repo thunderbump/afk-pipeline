@@ -307,9 +307,10 @@ def run(bead_id, config_path):
         source_record = safe_bead(bead_id, bead)
         assignment_path = artifact / "assignment.json"
         assignment_defaults = dict(config["assignment"])
-        assignment_defaults["command"] = assignment_command(
-            assignment_defaults["command"], assignment_path
-        )
+        if "command" in assignment_defaults:
+            assignment_defaults["command"] = assignment_command(
+                assignment_defaults["command"], assignment_path
+            )
         assignment = {
             "schema_version": 1,
             "objective": objective(bead),
@@ -966,9 +967,14 @@ def absolute_path(value, fact):
 
 
 def validate_assignment_defaults(value):
+    if isinstance(value, dict) and set(value) == {"worker", "timeout_seconds"}:
+        if value["worker"] != "inference":
+            raise PreparationError("configuration assignment worker must be inference")
+        positive(value["timeout_seconds"], "assignment timeout_seconds")
+        return
     if not isinstance(value, dict) or set(value) != {"command", "timeout_seconds"}:
         raise PreparationError(
-            "configuration assignment must contain command and timeout_seconds"
+            "configuration assignment requires worker=inference or command, plus timeout_seconds"
         )
     argv(value["command"], "assignment command")
     if value["command"].count(ASSIGNMENT_PATH_PLACEHOLDER) != 1 or any(

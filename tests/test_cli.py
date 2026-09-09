@@ -8,6 +8,8 @@ import time
 import unittest
 from pathlib import Path
 
+from tests.inference_cli_fixture import install_pi
+
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_agent.py"
 
@@ -60,6 +62,174 @@ class AttemptExecutorTest(unittest.TestCase):
         (self.workspace / "README.md").write_text("fixture repository\n")
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Initial state")
+
+    def test_inference_worker_seals_receipt_and_keeps_root_logs_as_views(self):
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        install_pi(bin_directory, ROOT / "tests/fixture_attempt_agent.py", "commit")
+        assignment = {
+            "schema_version": 1,
+            "objective": "Implement the current objective.",
+            "workspace": str(self.workspace),
+            "worker": "inference",
+            "timeout_seconds": 5,
+        }
+        input_path = self.root / "assignment.json"
+        input_path.write_text(json.dumps(assignment))
+        result = self.root / "attempt"
+        completed = subprocess.run(
+            [sys.executable, "-m", "afk_attempt", str(input_path), str(result)],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PATH": str(bin_directory) + os.pathsep + os.environ["PATH"],
+            },
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        receipt = json.loads((result / "inference/receipt.json").read_text())
+        prompt = json.loads((result / "inference/prompt.json").read_text())
+        self.assertEqual(output["outcome"], "succeeded")
+        self.assertEqual(receipt["outcome"], "succeeded")
+        self.assertEqual(prompt["task_contract_version"], 1)
+        self.assertEqual(
+            prompt["untrusted_task_data"]["objective"], assignment["objective"]
+        )
+        self.assertNotIn("command", prompt["untrusted_task_data"])
+        self.assertEqual(len(output["repository"]["commits_between_heads"]), 1)
+        for name in ("events.jsonl", "stderr.log"):
+            self.assertEqual(
+                (result / name).read_bytes(),
+                (result / "inference/attempts/1" / name).read_bytes(),
+            )
+
+    def test_inference_failures_seal_receipts_without_command_fallback(self):
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        for scenario, outcome in (
+            ("fail", "failed"),
+            ("malformed", "failed"),
+            ("empty", "failed"),
+            ("hang", "timed_out"),
+        ):
+            with self.subTest(scenario=scenario):
+                install_pi(
+                    bin_directory, ROOT / "tests/fixture_attempt_agent.py", scenario
+                )
+                input_path = self.root / f"{scenario}.json"
+                input_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "objective": "Exercise current failure handling.",
+                            "workspace": str(self.workspace),
+                            "worker": "inference",
+                            "timeout_seconds": 1,
+                        }
+                    )
+                )
+                result = self.root / scenario
+                completed = subprocess.run(
+                    [sys.executable, "-m", "afk_attempt", str(input_path), str(result)],
+                    cwd=ROOT,
+                    env={
+                        **os.environ,
+                        "PATH": str(bin_directory) + os.pathsep + os.environ["PATH"],
+                    },
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                    timeout=15,
+                )
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(output["outcome"], outcome)
+                self.assertEqual(output["repository"]["commits_between_heads"], [])
+                self.assertTrue((result / "inference/receipt.json").is_file())
+
+    def test_inference_interrupt_is_sealed_without_waiting_for_timeout(self):
+        bin_directory = self.root / "bin"
+        bin_directory.mkdir()
+        install_pi(bin_directory, ROOT / "tests/fixture_attempt_agent.py", "hang")
+        input_path = self.root / "assignment.json"
+        input_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "objective": "Exercise interruption.",
+                    "workspace": str(self.workspace),
+                    "worker": "inference",
+                    "timeout_seconds": 60,
+                }
+            )
+        )
+        result = self.root / "attempt"
+        child = subprocess.Popen(
+            [sys.executable, "-m", "afk_attempt", str(input_path), str(result)],
+            cwd=ROOT,
+            env={
+                **os.environ,
+                "PATH": str(bin_directory) + os.pathsep + os.environ["PATH"],
+            },
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while (
+                not (self.workspace / "worker-started").exists()
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            self.assertTrue((self.workspace / "worker-started").exists())
+            child.send_signal(signal.SIGINT)
+            _stdout, stderr = child.communicate(timeout=10)
+            self.assertEqual(child.returncode, 1, stderr)
+            self.assertEqual(
+                json.loads((result / "output.json").read_text())["outcome"],
+                "interrupted",
+            )
+            self.assertEqual(
+                json.loads((result / "inference/receipt.json").read_text())["outcome"],
+                "interrupted",
+            )
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate()
+
+    def test_worker_selection_is_explicit_and_mutually_exclusive(self):
+        for choice in (
+            {"worker": "unknown"},
+            {"worker": "inference", "command": ["unused"]},
+        ):
+            with self.subTest(choice=choice):
+                input_path = self.root / "assignment.json"
+                input_path.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": 1,
+                            "objective": "Reject ambiguous selection.",
+                            "workspace": str(self.workspace),
+                            "timeout_seconds": 1,
+                            **choice,
+                        }
+                    )
+                )
+                result = self.root / "rejected"
+                completed = subprocess.run(
+                    [sys.executable, "-m", "afk_attempt", str(input_path), str(result)],
+                    cwd=ROOT,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertEqual(completed.returncode, 2)
+                self.assertFalse(result.exists())
 
     def test_successful_attempt_seals_input_output_and_logs(self):
         assignment = {

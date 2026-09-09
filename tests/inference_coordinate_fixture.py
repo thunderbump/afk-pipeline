@@ -14,7 +14,9 @@ prompt = (
     else prompt_argument
 )
 rendered = " ".join([*arguments[:-1], prompt])
-if "implementation reviewer" in rendered:
+if "implementation worker for one AFK Attempt" in rendered:
+    fixture, scenario = root / "fixture_attempt_agent.py", "commit"
+elif "implementation reviewer" in rendered:
     fixture, scenario = root / "fixture_review_agent.py", review_scenario
 elif "finding assessor" in rendered:
     fixture, scenario = root / "fixture_assessment_agent.py", assessment_scenario

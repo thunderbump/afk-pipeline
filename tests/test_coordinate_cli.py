@@ -678,6 +678,81 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("continuation lineage", resumed.stderr)
         self.assertEqual(state_path.read_bytes(), before)
 
+    def test_current_inference_attempt_exports_bound_metrics_once(self):
+        import shutil
+
+        from afk_export import export_run
+        from afk_metrics.publication import build_publication
+        from tests import test_export_cli
+
+        assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
+        assignment = json.loads(assignment_path.read_text())
+        assignment.pop("command")
+        assignment["worker"] = "inference"
+        assignment["source"] = {"kind": "bead", "id": "central-example"}
+        self.write_json(assignment_path, assignment)
+        prepared = test_export_cli.ExportCliTests().sealed_preparer(
+            self.root / "prepared"
+        )
+        run = prepared / "coordinator"
+        shutil.rmtree(run)
+        completed = self.invoke(
+            request_path,
+            run,
+            review_scenario="no-findings",
+            assessment_scenario="no-findings",
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        for source, destination in (
+            ("assignment.json", "assignment.json"),
+            ("input.json", "coordinator-request.json"),
+        ):
+            shutil.copyfile(run / source, prepared / destination)
+        preparation_path = prepared / "preparation.json"
+        preparation = json.loads(preparation_path.read_text())
+        preparation["repository"]["worktree"] = str(self.workspace)
+        preparation["repository"]["base_commit"] = json.loads(
+            (run / "assignment.json").read_text()
+        )["work_base"]
+        self.write_json(preparation_path, preparation)
+        bundle = self.root / "bundle"
+        export_run(prepared, bundle, schema_version=3)
+        publication = build_publication(
+            {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [
+                    {
+                        "source": str(prepared),
+                        "bundle": str(bundle),
+                        "selection": "original",
+                    }
+                ],
+            }
+        )
+        selected = publication["runs"][0]
+        attempts = [
+            row
+            for row in selected["summary"]["inference"]["invocations"]
+            if row["purpose"] == "attempt"
+        ]
+        self.assertEqual(len(attempts), 1)
+        self.assertEqual(attempts[0]["metrics"]["usage"]["input"], 7)
+        self.assertEqual(attempts[0]["metrics"]["cost"]["amount"], 0.001)
+        self.assertEqual(
+            selected["summary"]["inference"]["totals"]["usage"]["input"], 7
+        )
+        stage = next(
+            row
+            for row in selected["stages"]
+            if row["ownership"].get("component") == "attempt"
+        )
+        self.assertEqual(stage["ownership"]["sequence"], 1)
+        self.assertEqual(stage["usage"], attempts[0]["metrics"]["usage"])
+        self.assertEqual(stage["elapsed_seconds"], attempts[0]["elapsed"]["seconds"])
+
     def test_each_exhausted_continuation_adds_a_fresh_response_allowance(self):
         _assignment_path, request_path = self.prepare_run(
             max_responses=0, full_review=True

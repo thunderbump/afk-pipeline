@@ -881,6 +881,28 @@ class RunPreparerCliTest(unittest.TestCase):
         )
         self.assertFalse((self.root / "runs").exists())
 
+    def test_inference_assignment_is_frozen_without_command_placeholder(self):
+        config = json.loads(self.config.read_text())
+        config["assignment"] = {"worker": "inference", "timeout_seconds": 5}
+        self.config.write_text(json.dumps(config))
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(result.stdout)
+        assignment = json.loads((artifact / "assignment.json").read_text())
+        self.assertEqual(assignment["worker"], "inference")
+        self.assertNotIn("command", assignment)
+        receipt = json.loads(
+            (artifact / "coordinator/01-attempt/inference/receipt.json").read_text()
+        )
+        self.assertEqual(receipt["outcome"], "succeeded")
+
+    def test_ambiguous_worker_configuration_is_rejected_before_run_creation(self):
+        config = json.loads(self.config.read_text())
+        config["assignment"]["worker"] = "inference"
+        self.config.write_text(json.dumps(config))
+        result = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse((self.root / "runs").exists())
+
     def test_assignment_command_requires_one_exact_path_placeholder_before_mutation(
         self,
     ):

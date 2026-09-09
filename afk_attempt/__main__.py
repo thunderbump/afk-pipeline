@@ -5,6 +5,9 @@ from pathlib import Path
 
 from afk_agent import agent_response
 from afk_attempt.contract import validate_assignment
+from afk_attempt.task import build_task
+from afk_inference import invoke
+from afk_inference.component import publish_runtime_logs, runtime_process
 from afk_runtime import (
     commits_between_heads,
     process_result,
@@ -60,16 +63,48 @@ def main() -> int:
         f"(timeout={assignment['timeout_seconds']}s; "
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
-    execution = run_command(
-        assignment["command"],
-        workspace,
-        assignment["timeout_seconds"],
-        events_path,
-        stderr_path,
-    )
+    inference_result = None
+    if assignment.get("worker") == "inference":
+        task = build_task(assignment)
+        inference_result = invoke(
+            purpose=task.purpose,
+            task_contract_version=task.contract_version,
+            trusted_task_instructions=task.trusted_instructions,
+            untrusted_task_data=task.untrusted_data,
+            requested_capability=task.capability,
+            execution_root=workspace,
+            timeout_seconds=assignment["timeout_seconds"],
+            evidence_directory=attempt_directory / "inference",
+            validator=task.validator,
+        )
+        publish_runtime_logs(attempt_directory, inference_result.receipt)
+        process = runtime_process(inference_result.receipt)
+        execution = {
+            "timed_out": inference_result.outcome == "timed_out",
+            "interrupted": inference_result.outcome == "interrupted",
+        }
+        agent = (
+            {"status": "completed"}
+            if inference_result.outcome == "succeeded"
+            else {"status": "error"}
+        )
+        succeeded = inference_result.outcome == "succeeded"
+    else:
+        execution = run_command(
+            assignment["command"],
+            workspace,
+            assignment["timeout_seconds"],
+            events_path,
+            stderr_path,
+        )
+        process = process_result(execution["exit_code"], execution["error"])
+        agent = None if execution["error"] else agent_response(events_path)["agent"]
+        succeeded = (
+            execution["exit_code"] == 0
+            and agent is not None
+            and agent["status"] == "completed"
+        )
     progress("agent child completed")
-    exit_code = execution["exit_code"]
-    runner_error = execution["error"]
 
     progress("observing repository after attempt")
     observation_error = None
@@ -84,19 +119,13 @@ def main() -> int:
             commits = commits_between_heads(workspace, before, after)
         except (OSError, subprocess.SubprocessError) as error:
             observation_error = str(error)
-    agent = None if runner_error else agent_response(events_path)["agent"]
     outcome = (
         "interrupted"
         if execution["interrupted"]
         else "timed_out"
         if execution["timed_out"]
         else "succeeded"
-        if (
-            exit_code == 0
-            and agent is not None
-            and agent["status"] == "completed"
-            and observation_error is None
-        )
+        if (succeeded and observation_error is None)
         else "failed"
     )
     output = {
@@ -104,7 +133,7 @@ def main() -> int:
         "outcome": outcome,
         "started_at": started_at,
         "finished_at": timestamp(),
-        "process": process_result(exit_code, runner_error),
+        "process": process,
         "agent": agent,
         "repository": {
             "before": before,
