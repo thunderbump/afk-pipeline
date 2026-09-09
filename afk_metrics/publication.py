@@ -7,7 +7,6 @@ import hashlib
 import json
 import os
 import re
-import secrets
 import stat
 import subprocess
 from pathlib import Path
@@ -599,10 +598,13 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
             raise PublicationError("publication output exceeds size limit")
 
         # Prefer anonymous staging, but O_TMPFILE is not implemented by every
-        # otherwise suitable filesystem.  The fallback remains race-safe: its
-        # random, exclusively-created name is retained rather than unsafely
-        # cleaned by pathname, while the open inode is admitted through its
-        # descriptor below.
+        # otherwise suitable filesystem.  A named temporary file cannot be
+        # safely removed when another directory writer may replace its entry
+        # before unlink.  The fallback therefore creates the advertised
+        # destination itself exclusively.  A failed fallback write can leave
+        # only that documented destination, which the caller can reclaim; it
+        # never accumulates hidden staging names.
+        anonymous_staging = False
         temporary_flag = getattr(os, "O_TMPFILE", 0)
         if temporary_flag:
             try:
@@ -612,6 +614,7 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                     0o600,
                     dir_fd=parent_descriptor,
                 )
+                anonymous_staging = True
             except OSError as error:
                 if error.errno not in {
                     errno.EINVAL,
@@ -621,41 +624,35 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                 }:
                     raise
         if publication_descriptor is None:
-            for _attempt in range(10):
-                # Keep staging names independent of the caller's basename: a
-                # valid destination may already occupy the filesystem's full
-                # per-component name allowance.
-                candidate_name = f".afk-metrics-{secrets.token_hex(8)}.tmp"
-                try:
-                    publication_descriptor = os.open(
-                        candidate_name,
-                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                        0o600,
-                        dir_fd=parent_descriptor,
-                    )
-                    break
-                except FileExistsError:
-                    continue
-            else:
-                raise OSError("cannot allocate publication staging file")
+            current_parent = os.stat(destination.parent)
+            if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+                raise OSError("destination parent changed")
+            publication_descriptor = os.open(
+                resolved.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600,
+                dir_fd=parent_descriptor,
+            )
+
         with os.fdopen(publication_descriptor, "wb", closefd=False) as stream:
             stream.write(raw)
             stream.flush()
             os.fsync(stream.fileno())
             os.fchmod(stream.fileno(), 0o644)
 
-        # Check the caller-visible alias immediately on both sides of the
-        # descriptor-relative admission. The second check prevents reporting
-        # success when an ancestor was swapped during link admission.
-        current_parent = os.stat(destination.parent)
-        if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
-            raise OSError("destination parent changed")
-        os.link(
-            f"/proc/self/fd/{publication_descriptor}",
-            resolved.name,
-            dst_dir_fd=parent_descriptor,
-            follow_symlinks=True,
-        )
+        if anonymous_staging:
+            # Check the caller-visible alias immediately on both sides of the
+            # descriptor-relative admission. The second check prevents
+            # reporting success when an ancestor was swapped during linking.
+            current_parent = os.stat(destination.parent)
+            if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
+                raise OSError("destination parent changed")
+            os.link(
+                f"/proc/self/fd/{publication_descriptor}",
+                resolved.name,
+                dst_dir_fd=parent_descriptor,
+                follow_symlinks=True,
+            )
         current_parent = os.stat(destination.parent)
         if (current_parent.st_dev, current_parent.st_ino) != parent_identity:
             raise OSError("destination parent changed")
@@ -663,15 +660,6 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
         raise PublicationError("publication destination cannot be created") from error
     finally:
         if parent_descriptor is not None:
-            # POSIX has no inode-conditional unlink operation.  In particular,
-            # checking a directory entry and then unlinking its name would let
-            # another directory writer substitute a foreign file between the
-            # two operations.  Do not remove either a failed admission or the
-            # named fallback here.  Anonymous staging leaves no name, while a
-            # fallback name is intentionally retained as a hard link to the
-            # immutable publication (or as the foreign replacement that won a
-            # race).  Leaking our own link is preferable to deleting a file we
-            # do not own.
             if publication_descriptor is not None:
                 os.close(publication_descriptor)
             os.close(parent_descriptor)

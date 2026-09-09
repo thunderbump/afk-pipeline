@@ -658,42 +658,35 @@ class MetricsPublicationTests(unittest.TestCase):
                     publication = publish(input_path, destination)
 
                 self.assertEqual(json.loads(destination.read_text()), publication)
-                staging = [
-                    path for path in root.iterdir() if path.name.endswith(".tmp")
-                ]
-                self.assertEqual(len(staging), 1)
-                self.assertTrue(staging[0].samefile(destination))
+                self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
 
-    def test_fallback_preserves_colliding_staging_file(self):
+    def test_fallback_exclusive_destination_admission_preserves_race_winner(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
             input_path = root / "input.json"
             input_path.write_text(json.dumps(request))
             destination = root / "publication.json"
-            collision = root / ".afk-metrics-0000000000000000.tmp"
-            collision.write_text("not ours")
             real_open = os.open
             temporary_flag = getattr(os, "O_TMPFILE", 0)
 
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
+            def race_destination(path, flags, *args, **kwargs):
                 if temporary_flag and flags & temporary_flag == temporary_flag:
                     raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
+                if path == destination.name and kwargs.get("dir_fd") is not None:
+                    destination.write_text("race winner")
                 return real_open(path, flags, *args, **kwargs)
 
             with (
-                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
-                mock.patch(
-                    "afk_metrics.publication.secrets.token_hex", return_value="0" * 16
-                ),
+                mock.patch("afk_metrics.publication.os.open", race_destination),
                 self.assertRaisesRegex(PublicationError, "cannot be created"),
             ):
                 publish(input_path, destination)
 
-            self.assertEqual(collision.read_text(), "not ours")
-            self.assertFalse(destination.exists())
+            self.assertEqual(destination.read_text(), "race winner")
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
 
-    def test_fallback_does_not_remove_replaced_staging_file(self):
+    def test_failed_fallback_write_leaves_only_advertised_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
@@ -708,64 +701,19 @@ class MetricsPublicationTests(unittest.TestCase):
                     raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
                 return real_open(path, flags, *args, **kwargs)
 
-            def replace_staging_then_fail(*args, **kwargs):
-                staging = next(root.glob(".afk-metrics-*.tmp"))
-                staging.unlink()
-                staging.write_text("replacement")
-                raise OSError(errno.EIO, "admission failed")
-
             with (
                 mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
                 mock.patch(
-                    "afk_metrics.publication.os.link", replace_staging_then_fail
+                    "afk_metrics.publication.os.fsync",
+                    side_effect=OSError(errno.EIO, "write failed"),
                 ),
                 self.assertRaisesRegex(PublicationError, "cannot be created"),
             ):
                 publish(input_path, destination)
 
-            replacement = next(root.glob(".afk-metrics-*.tmp"))
-            self.assertEqual(replacement.read_text(), "replacement")
-            self.assertFalse(destination.exists())
-
-    def test_cleanup_does_not_unlink_a_replacement_after_identity_check(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary)
-            _source, _bundle, request = self.fixture(root)
-            input_path = root / "input.json"
-            input_path.write_text(json.dumps(request))
-            destination = root / "publication.json"
-            real_open = os.open
-            real_stat = os.stat
-            temporary_flag = getattr(os, "O_TMPFILE", 0)
-
-            def reject_anonymous_staging(path, flags, *args, **kwargs):
-                if temporary_flag and flags & temporary_flag == temporary_flag:
-                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
-                return real_open(path, flags, *args, **kwargs)
-
-            def replace_after_stat(path, *args, **kwargs):
-                result = real_stat(path, *args, **kwargs)
-                if kwargs.get("dir_fd") is not None and str(path).endswith(".tmp"):
-                    staging = next(root.glob(".afk-metrics-*.tmp"))
-                    staging.unlink()
-                    staging.write_text("replacement-after-stat")
-                return result
-
-            with (
-                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
-                mock.patch("afk_metrics.publication.os.stat", replace_after_stat),
-                mock.patch(
-                    "afk_metrics.publication.os.link",
-                    side_effect=OSError(errno.EIO, "admission failed"),
-                ),
-                self.assertRaisesRegex(PublicationError, "cannot be created"),
-            ):
-                publish(input_path, destination)
-
-            # Safe cleanup performs no check-then-unlink sequence, so the hook
-            # is never reached and the producer-owned staging inode remains.
-            staging = next(root.glob(".afk-metrics-*.tmp"))
-            self.assertNotEqual(staging.read_text(), "replacement-after-stat")
+            self.assertTrue(destination.exists())
+            self.assertEqual(list(root.glob(".afk-metrics-*.tmp")), [])
+            destination.unlink()
             self.assertFalse(destination.exists())
 
     def test_fallback_accepts_maximum_length_destination_basename(self):
