@@ -56,8 +56,8 @@ def generate(destination):
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         requests = []
-        for schema in (2, 3):
-            case = root / str(schema)
+        for scenario in ("partial", "unavailable"):
+            case = root / scenario
             source = test_export_cli.ExportCliTests().sealed_preparer(case)
             # Frozen synthetic paths make source identities independent of the
             # temporary directory. No files at these paths are accessed.
@@ -68,7 +68,9 @@ def generate(destination):
                 file.write_text(file.read_text().replace(str(case), "/synthetic"))
             preparation = source / "preparation.json"
             value = json.loads(preparation.read_text())
-            value["run"]["id"] = "populated-partial" if schema == 2 else "populated-v3"
+            value["run"]["id"] = (
+                "populated-partial" if scenario == "partial" else "populated-v3"
+            )
             write_json(preparation, value)
             full = {
                 "input": 10,
@@ -102,17 +104,19 @@ def generate(destination):
                     message("partial", {"input": 4}),
                     {"type": "compaction_end", "id": "missing", "result": {}},
                 ]
-                if schema == 2
+                if scenario == "partial"
                 else [{"type": "agent_end"}],
             )
             validation = source / "coordinator/02-validation/output.json"
             value = json.loads(validation.read_text())
-            if schema == 3:
+            if scenario == "unavailable":
                 value["duration_seconds"] = 0
             write_json(validation, value)
-            bundle = destination / ("bundle-partial" if schema == 2 else "bundle-v3")
+            bundle = destination / (
+                "bundle-partial" if scenario == "partial" else "bundle-v3"
+            )
             afk_export.export_run(source, bundle, schema_version=3)
-            if schema == 2:
+            if scenario == "partial":
                 legacy = destination / "producer-only-v2"
                 afk_export.export_run(source, legacy, schema_version=2)
                 with mock.patch(
