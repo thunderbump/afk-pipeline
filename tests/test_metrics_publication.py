@@ -15,12 +15,12 @@ from afk_metrics.publication import (
     load_publication_request,
     publish,
 )
-from tests.test_export_cli import ExportCliTests
+from tests import test_export_cli
 
 
 class MetricsPublicationTests(unittest.TestCase):
     def fixture(self, root: Path, schema=3):
-        source = ExportCliTests().sealed_preparer(root)
+        source = test_export_cli.ExportCliTests().sealed_preparer(root)
         bundle = root / "bundle"
         afk_export.export_run(source, bundle, schema_version=schema)
         request = {
@@ -92,6 +92,79 @@ class MetricsPublicationTests(unittest.TestCase):
                 serialized = output.read_text()
                 self.assertNotIn(str(source), serialized)
                 self.assertNotIn(str(bundle), serialized)
+
+    def test_stage_projection_preserves_measured_zero_and_unavailable_metrics(self):
+        for duration in (None, 0, 1.5):
+            with (
+                self.subTest(duration=duration),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                source = test_export_cli.ExportCliTests().sealed_preparer(root)
+                validation_path = source / "coordinator/02-validation/output.json"
+                validation = json.loads(validation_path.read_text())
+                if duration is not None:
+                    validation["duration_seconds"] = duration
+                validation_path.write_text(json.dumps(validation))
+                inference = source / "coordinator/04-review/inference"
+                test_export_cli.ExportCliTests().add_inference_receipt(inference)
+                # This authenticated Pi stream has only agent_end, without a
+                # supported usage/cost event. Its elapsed time is still known.
+                bundle = root / "bundle"
+                afk_export.export_run(source, bundle)
+                publication = build_publication(
+                    {
+                        "schema_version": 1,
+                        "project": "operations-webui",
+                        "runs": [
+                            {
+                                "source": str(source),
+                                "bundle": str(bundle),
+                                "selection": "original",
+                            }
+                        ],
+                    }
+                )
+                rows = {
+                    row["ownership"]["sequence"]: row
+                    for row in publication["runs"][0]["stages"]
+                    if row["ownership"]["kind"] == "component"
+                }
+                self.assertEqual(rows[2]["repository_validation_seconds"], duration)
+                self.assertEqual(
+                    rows[2]["repository_validation_coverage"],
+                    "unavailable" if duration is None else "complete",
+                )
+                self.assertIsNone(rows[1]["elapsed_seconds"])
+                self.assertEqual(rows[4]["elapsed_seconds"], 1)
+                self.assertEqual(rows[4]["usage"], {})
+                self.assertEqual(rows[4]["usage_coverage"], "unavailable")
+                self.assertIsNone(rows[4]["cost"]["amount"])
+                self.assertEqual(rows[4]["cost"]["status"], "unavailable")
+
+    def test_run_and_aggregate_stage_limits_reject_before_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            path = root / "input.json"
+            destination = root / "publication.json"
+            path.write_text(json.dumps({**request, "runs": request["runs"] * 26}))
+            with self.assertRaises(PublicationError):
+                publish(path, destination)
+            self.assertFalse(destination.exists())
+            path.write_text(json.dumps(request))
+            # Ten real fixture rows fit the reduced boundary exactly.
+            with mock.patch("afk_metrics.publication.MAX_STAGES", 10):
+                self.assertEqual(
+                    len(build_publication(request)["runs"][0]["stages"]), 10
+                )
+            with (
+                mock.patch("afk_metrics.publication.MAX_STAGES", 9),
+                self.assertRaisesRegex(PublicationError, "stage count exceeds"),
+            ):
+                publish(path, destination)
+            self.assertFalse(destination.exists())
+            self.assertEqual(list(root.glob(".afk-metrics-*")), [])
 
     def test_schema_version_requires_an_integer(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -307,7 +380,7 @@ class MetricsPublicationTests(unittest.TestCase):
     def test_abandoned_inference_change_during_projection_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fixtures = ExportCliTests()
+            fixtures = test_export_cli.ExportCliTests()
             source = fixtures.sealed_preparer(root)
             history = [
                 fixtures.history()[0],
@@ -490,7 +563,7 @@ class MetricsPublicationTests(unittest.TestCase):
                     **kwargs,
                 ):
                     _inference.parent.mkdir(parents=True, exist_ok=True)
-                    ExportCliTests().add_inference_receipt(_inference)
+                    test_export_cli.ExportCliTests().add_inference_receipt(_inference)
                     invocation_path = _inference / "invocation.json"
                     invocation = json.loads(invocation_path.read_text())
                     invocation["purpose"] = _purpose
@@ -527,7 +600,7 @@ class MetricsPublicationTests(unittest.TestCase):
             root = Path(temporary)
             source, _bundle, request = self.fixture(root)
             target = source / "coordinator/04-review/transient-inference"
-            ExportCliTests().add_inference_receipt(target)
+            test_export_cli.ExportCliTests().add_inference_receipt(target)
             invocation_path = target / "invocation.json"
             invocation = json.loads(invocation_path.read_text())
             invocation["purpose"] = "finding_assessment"

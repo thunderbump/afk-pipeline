@@ -70,11 +70,11 @@ Each invocation has:
 * `source_event_identity`: authenticated invocation hash or an opaque stable fallback for unsealed abandoned evidence.
 * `purpose`: `acceptance_planning | attempt | review | finding_assessment | feedback_response`.
 * Nullable string `adapter`, `adapter_family`, `provider`, and `model`. Pi invocations also have `observed_identities`, an array of objects with nullable `provider` and `model`.
-* `outcome`: `succeeded | failed | interrupted`; nullable `attempt_count`.
+* `outcome`: `succeeded | response_rejected | adapter_failed | validator_failed | timed_out | interrupted`; nullable `attempt_count`.
 * `elapsed`: `kind: invocation_adapter_elapsed_not_pure_inference`, nullable `seconds`, and nullable timestamp strings `started_at` and `ended_at`.
 * `response_validator_seconds`, `response_validator_coverage`, and `metrics`.
 
-Invocation `metrics` always has `coverage`, `usage`, `compaction` with `aggregate_count` and `usage`, `retry_count`, and `cost`. Pi metrics additionally have `finalized_requests`, boolean `request_count_exact`, and `identity_coverage`. Their cost has the totals cost fields plus `provenance` with `calculator: "Pi model rates" | null`, `pi_version: null`, and `price_table_date: null`. Unsupported or unsealed invocations instead include `reason: unsupported_adapter | unsealed_abandoned_invocation` and the minimal unavailable cost object with `status`, `kind`, and `amount: null`. These variants are intentional; consumers must not require Pi-only fields for other adapters.
+Invocation `metrics` always has `coverage`, `usage`, `compaction` with `aggregate_count` and `usage`, `retry_count`, and `cost`. Pi metrics additionally have `finalized_requests`, boolean `request_count_exact`, and `identity_coverage`. Their cost has the totals cost fields plus `provenance` with `calculator: "Pi model rates" | null`, `pi_version: null`, and `price_table_date: null`. Unsupported or unsealed invocations instead include `reason: unsupported_adapter | unsealed_abandoned_invocation` and the minimal unavailable cost object with `status`, `kind`, and `amount: null`. These are local-report variants; publication additionally requires a bundle authenticated by the current Exporter, whose receipt artifact contract currently supports Pi. This feature does not extend adapter export support.
 
 `timing` has:
 
