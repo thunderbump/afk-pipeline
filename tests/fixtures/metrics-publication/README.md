@@ -49,7 +49,7 @@ Each Run object has exactly `binding`, `summary`, and `stages`.
 
 The producer verifies the manifest identity and the workflow file's declared size/hash. It independently normalizes the selected source observation and compares all semantic Run fields. Only bundle `artifacts`, v3 `inference_sessions`, and operational publication delivery fields are excluded. Schema version is normalized to the verified bundle version. Caller-provided digests are not accepted.
 
-`summary` is the complete schema-1 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, and `timing`. The nested contract is listed below. `source_identity` is the key used by comparisons.
+`summary` is the complete schema-v2 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, and `timing`. The nested contract is listed below. `source_identity` is the key used by comparisons.
 
 ## Nested summary contract
 
