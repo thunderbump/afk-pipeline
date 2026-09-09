@@ -246,10 +246,34 @@ class ResponseCliTest(unittest.TestCase):
         self.assertIn("observation_error", repository)
 
     def test_only_actionable_findings_are_required_and_given_to_the_agent(self):
+        overridden = self.finding("Actionable finding")
+        overridden["scope_claim"] = {
+            "kind": "unknown",
+            "rationale": "Review could not establish ownership.",
+        }
         self.set_findings_and_decisions(
-            [self.finding("Actionable finding"), self.finding("Dismissed finding")],
-            [True, False],
+            [
+                overridden,
+                self.finding("Dismissed finding"),
+                self.finding("Unknown owner"),
+            ],
+            [True, False, True],
         )
+        assessment_path = self.assessment / "output.json"
+        assessment = json.loads(assessment_path.read_text())
+        assessment["assessment"]["decisions"][0]["scope"] = {
+            "kind": "current",
+            "rationale": "The frozen objective explicitly owns this repair.",
+        }
+        assessment["assessment"]["decisions"][2]["scope"] = {
+            "kind": "unknown",
+            "rationale": "Ownership remains unsupported.",
+        }
+        self.write_json(assessment_path, assessment)
+        original_evidence = {
+            path: path.read_bytes()
+            for path in (self.review / "output.json", assessment_path)
+        }
         marker = self.root / "prompt.txt"
 
         result, completed = self.run_response(
@@ -270,6 +294,43 @@ class ResponseCliTest(unittest.TestCase):
             [item["finding"]["title"] for item in task["actionable_findings"]],
             ["Actionable finding"],
         )
+        selected = task["actionable_findings"][0]
+        self.assertEqual(selected["finding"]["scope_claim"], overridden["scope_claim"])
+        self.assertEqual(
+            selected["assessment_scope"],
+            {
+                "kind": "current",
+                "rationale": "The frozen objective explicitly owns this repair.",
+            },
+        )
+        self.assertEqual(
+            selected["assessment_rationale"], "Fixture assessment rationale."
+        )
+        self.assertEqual(prompt["task_contract_version"], 2)
+        for clause in (
+            "governing invariant",
+            "shared cause",
+            "directly affected variants",
+            "regression evidence",
+            "unrelated refactoring",
+        ):
+            self.assertIn(clause, prompt["trusted_task_instructions"])
+        for path, original in original_evidence.items():
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_oversized_assessed_scope_is_refused_before_inference(self):
+        before_head = self.git("rev-parse", "HEAD")
+        path = self.assessment / "output.json"
+        assessment = json.loads(path.read_text())
+        assessment["assessment"]["decisions"][0]["scope"]["rationale"] = "x" * (
+            1024 * 1024
+        )
+        self.write_json(path, assessment)
+        result, completed = self.run_response("commit")
+        self.assertEqual(completed.returncode, 2, completed.stderr)
+        self.assertIn("feedback task data exceeds 1 MiB", completed.stderr)
+        self.assertFalse((result / "inference").exists())
+        self.assertEqual(self.git("rev-parse", "HEAD"), before_head)
 
     def test_validation_repair_identifies_failure_artifacts_and_is_not_review_feedback(
         self,
@@ -362,6 +423,9 @@ class ResponseCliTest(unittest.TestCase):
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["response"]["finding_responses"], [])
         prompt = json.loads((result / "inference/prompt.json").read_text())
+        self.assertEqual(prompt["task_contract_version"], 1)
+        self.assertEqual(prompt["untrusted_task_data"]["actionable_findings"], [])
+        self.assertNotIn("assessment_scope", prompt["trusted_task_instructions"])
         failure = prompt["untrusted_task_data"]["failed_validation"]
         self.assertEqual(failure["directory"], str(validation))
         self.assertEqual(failure["stdout"], "failing test output\n")

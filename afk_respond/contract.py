@@ -47,11 +47,13 @@ def validate_input(value: object) -> dict[str, object]:
 
 
 def actionable_findings(review, assessment):
+    """Select confirmed/current work while retaining both roles' scope judgments."""
     return [
         {
             "finding_index": decision["finding_index"],
             "finding": review["findings"][decision["finding_index"]],
             "assessment_rationale": decision["rationale"],
+            "assessment_scope": decision["scope"],
         }
         for decision in assessment["decisions"]
         if decision["defect_decision"] == "confirmed"

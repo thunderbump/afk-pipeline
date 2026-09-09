@@ -32,9 +32,9 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             [
                 "0bc2c611c5ad00a462bb682eed013fc79ffb5dc40e261384bb73a461aab0fee3",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
-                "6930d4456f742302722b12aa2c766bbac691c24c66e48f0b407670ee30407fbe",
-                "595490c492f5c13c0d85fa9875f067d9ff0467e6a24b8cc45e78db0acd6baa9b",
-                "1bb5670cf37f6bf319e199db9a63e549efc8a566e16d9146bf386a8cc8c18c94",
+                "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
+                "1ceb32e12ae3cdc3b27962f5ca021ae06f528cdd306253588e4fa11bd22580ba",
+                "5e973effff4860f2d1f704fb2a4dca24bc8f8cf11c084103ed7515c6f6b4bf68",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],
         )
@@ -122,6 +122,22 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             )
             response_task = build_response_task({}, [], "objective")
 
+            for task in (review_task, assessment_task):
+                with self.subTest(purpose=task.purpose):
+                    for clause in (
+                        "an explicitly required test or documentation deliverable",
+                        "demonstrated maintenance or change cost",
+                        "an applicable adopted standard",
+                        "A runtime failure is not required",
+                        "unsupported operating assumptions",
+                        "Do not use a rejection quota",
+                    ):
+                        self.assertIn(clause, task.trusted_instructions)
+                    self.assertNotIn(
+                        'confirmed" only for a concrete, reachable defect',
+                        task.trusted_instructions,
+                    )
+
         expected = (
             (review_task, Capability.READ_ONLY),
             (assessment_task, Capability.READ_ONLY),
@@ -129,9 +145,11 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         )
         for task, capability in expected:
             with self.subTest(purpose=task.purpose):
-                expected_version = (
-                    3 if task.purpose in {"review", "finding_assessment"} else 1
-                )
+                expected_version = {
+                    "review": 5,
+                    "finding_assessment": 4,
+                    "feedback_response": 2,
+                }[task.purpose]
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)
                 self.assertEqual(task.untrusted_data["objective"], "objective")

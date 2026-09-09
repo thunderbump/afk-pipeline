@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import shlex
@@ -678,7 +679,9 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertEqual(state_path.read_bytes(), before)
 
     def test_each_exhausted_continuation_adds_a_fresh_response_allowance(self):
-        _assignment_path, request_path = self.prepare_run(max_responses=0)
+        _assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
         run = self.root / "multiple-continuations"
         exhausted = self.invoke(
             request_path,
@@ -740,6 +743,26 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertEqual(snapshot.selected_terminal.continuation_id, "01")
         self.assertEqual(snapshot.latest_sealed_terminal.continuation_id, "02")
         self.assertIsNone(snapshot.active_tail)
+
+        base = json.loads((run / "assignment.json").read_text())["work_base"]
+        reviews = [row for row in output["history"] if row["component"] == "review"]
+        for index, row in enumerate(reviews):
+            directory = run / row["directory"]
+            value = json.loads((directory / "output.json").read_text())["work_context"]
+            self.assertEqual(value["work_base"], base)
+            expected = {"work_diff", "repair_diff"}
+            if index:
+                expected |= {
+                    "previous_review",
+                    "previous_assessment",
+                    "previous_response",
+                }
+                prior = json.loads((directory / "previous-review.json").read_text())
+                original = json.loads(
+                    (run / reviews[index - 1]["directory"] / "output.json").read_text()
+                )
+                self.assertEqual(prior, original)
+            self.assertEqual(set(value["files"]), expected)
 
         # Publication can select an immutable predecessor while still validating
         # the complete retained lineage.
@@ -1168,6 +1191,191 @@ class CoordinatorCliTest(unittest.TestCase):
         prompt_events = (run / "03-response" / "events.jsonl").read_text()
         self.assertIn("Repaired repository validation", prompt_events)
         self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_review_keeps_work_base_after_validation_repair(self):
+        assignment_path, request_path = self.prepare_run(max_responses=1)
+        base = self.git("rev-parse", "HEAD")
+        assignment = json.loads(assignment_path.read_text())
+        assignment["work_base"] = base
+        self.write_json(assignment_path, assignment)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(0 if 'response applied' in Path('README.md').read_text() else 7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "validation-repair-run"
+
+        completed = self.invoke(
+            request_path, run, response_scenario="validation-repair"
+        )
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["decision"], "stop")
+        self.assertEqual(
+            [record["component"] for record in output["history"]],
+            [
+                "attempt",
+                "validation",
+                "response",
+                "validation",
+                "change",
+                "review",
+                "assessment",
+                "iteration",
+            ],
+        )
+        self.assertEqual(output["history"][1]["outcome"], "failed")
+        response_input = json.loads((run / "03-response" / "input.json").read_text())
+        self.assertEqual(
+            response_input["validation_directory"],
+            str((run / "02-validation").resolve()),
+        )
+        prompt_events = (run / "03-response" / "events.jsonl").read_text()
+        self.assertIn("Repaired repository validation", prompt_events)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+        review = run / "06-review"
+        receipt = json.loads((review / "inference/invocation.json").read_text())
+        task = receipt["prompt"]["untrusted_task_data"]
+        self.assertEqual(task["reviewed_commits"]["before"], base)
+        self.assertNotEqual(
+            task["committed_change"]["change"]["repository"]["before"]["head"], base
+        )
+        self.assertNotIn("reviewed_diff", task)
+        work = Path(task["work_context"]["files"]["work_diff"]["path"])
+        repair = Path(task["work_context"]["files"]["repair_diff"]["path"])
+        self.assertIn("+fixture result", work.read_text())
+        self.assertNotEqual(work.read_bytes(), repair.read_bytes())
+        assessment = json.loads(
+            (run / "07-assessment/inference/invocation.json").read_text()
+        )
+        self.assertEqual(
+            assessment["prompt"]["untrusted_task_data"]["reviewed_diff"],
+            repair.read_text(),
+        )
+        self.assertEqual(receipt["task_contract_version"], 6)
+        self.assertEqual(assessment["task_contract_version"], 4)
+        for invocation in (receipt, assessment):
+            instructions = invocation["prompt"]["trusted_task_instructions"]
+            self.assertIn("A runtime failure is not required", instructions)
+            self.assertIn("Decide validity separately from ownership", instructions)
+        self.assertIn(str(work), receipt["prompt"]["system"])
+        self.assertTrue(work.is_relative_to(review))
+        snapshot = read_run(
+            run,
+            "latest",
+            TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+        )
+        self.assertEqual(snapshot.proof.status, "verified")
+        work.write_bytes(repair.read_bytes())
+        with self.assertRaises(RunValidationError):
+            read_run(
+                run,
+                "latest",
+                TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+            )
+
+        # A self-consistent replacement hash cannot turn the repair delta into
+        # the complete-work diff when the reader has repository authority.
+        review_output = json.loads((review / "output.json").read_text())
+        record = review_output["work_context"]["files"]["work_diff"]
+        record["bytes"] = work.stat().st_size
+        record["sha256"] = hashlib.sha256(work.read_bytes()).hexdigest()
+        self.write_json(review / "output.json", review_output)
+        with self.assertRaisesRegex(RunValidationError, "diff disagrees with Git"):
+            read_run(
+                run,
+                "latest",
+                TrustedContext(repository=self.workspace, evidence_roots=(run,)),
+            )
+
+        # Export retains its controlled error interface for unavailable context.
+        from afk_export import ExportError, export_run
+
+        work.unlink()
+        with self.assertRaises(ExportError):
+            export_run(
+                run,
+                self.root / "missing-context-bundle",
+                project="fixture",
+                run_id="missing-context",
+            )
+
+    def test_large_complete_work_diff_stays_in_readable_evidence_files(self):
+        assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
+        assignment = json.loads(assignment_path.read_text())
+        assignment["command"] = [
+            sys.executable,
+            "-c",
+            (
+                "from pathlib import Path; import subprocess,sys; "
+                "Path('feature.txt').write_text(('unique full work line'+chr(10)) * 20000); "
+                "subprocess.run(['git','add','feature.txt'],check=True); "
+                "subprocess.run(['git','commit','-qm','Feature'],check=True); "
+                f"subprocess.run([sys.executable,{str(ATTEMPT_FIXTURE)!r},'git-commit'],check=True)"
+            ),
+        ]
+        self.write_json(assignment_path, assignment)
+        run = self.root / "large-context"
+        completed = self.invoke(request_path, run)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        invocation = json.loads(
+            (run / "04-review/inference/invocation.json").read_text()
+        )
+        data = invocation["prompt"]["untrusted_task_data"]
+        self.assertEqual(invocation["task_contract_version"], 6)
+        self.assertLess(len(json.dumps(data).encode()), 15000)
+        context = data["work_context"]
+        full = Path(context["files"]["work_diff"]["path"])
+        self.assertGreater(full.stat().st_size, 400000)
+        self.assertEqual(full.read_text().count("+unique full work line"), 20000)
+        self.assertEqual(context["files"]["work_diff"], context["files"]["repair_diff"])
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_review_refuses_a_forged_work_base_before_starting_inference(self):
+        _assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
+        run = self.root / "forged-context"
+        completed = self.invoke(request_path, run)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        review_input = json.loads((run / "04-review/input.json").read_text())
+        review_input["work_context"]["work_base"] = self.git("rev-parse", "HEAD")
+        forged = self.root / "forged-review.json"
+        self.write_json(forged, review_input)
+        environment = self.environment()
+        environment["AFK_STAGE_EVIDENCE_ROOTS"] = json.dumps([str(run)])
+        result = self.root / "rejected-review"
+        rejected = subprocess.run(
+            [sys.executable, "-m", "afk_review", str(forged), str(result)],
+            cwd=ROOT,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(rejected.returncode, 2, rejected.stderr)
+        self.assertIn("not bound", rejected.stderr)
+        self.assertFalse(result.exists())
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_assignment_refuses_a_stale_ancestor_as_initial_work_base(self):
+        _assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
+        (self.workspace / "extra.txt").write_text("pre-existing work")
+        self.git("add", "extra.txt")
+        self.git("commit", "-qm", "Pre-existing work")
+        run = self.root / "stale-base"
+        rejected = self.invoke(request_path, run)
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertIn("work_base must match", rejected.stderr)
+        self.assertFalse((run / "01-attempt").exists())
 
     def test_resumed_validation_repair_rechecks_repository_drift(self):
         assignment_path, request_path = self.prepare_run(max_responses=1)
@@ -1657,7 +1865,7 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertEqual((run / "state.json").read_text(), before)
         self.assertFalse((run / "output.json").exists())
 
-    def prepare_run(self, max_responses):
+    def prepare_run(self, max_responses, full_review=False):
         assignment = {
             "schema_version": 1,
             "objective": "Implement the fixture change.",
@@ -1665,6 +1873,8 @@ class CoordinatorCliTest(unittest.TestCase):
             "command": [sys.executable, str(ATTEMPT_FIXTURE), "git-commit"],
             "timeout_seconds": 5,
         }
+        if full_review:
+            assignment["work_base"] = self.git("rev-parse", "HEAD")
         assignment_path = self.root / f"assignment-{max_responses}.json"
         self.write_json(assignment_path, assignment)
         request = {

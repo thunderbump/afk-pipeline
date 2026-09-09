@@ -105,6 +105,8 @@ def _committed_attempt(source_directory, lineage):
     assignment = validate_assignment(lineage.read(source_directory / "input.json"))
     attempt = lineage.read(source_directory / "output.json")
     before, after = validate_attempt(attempt)
+    if assignment.get("work_base", before["head"]) != before["head"]:
+        raise ValueError("Assignment work_base disagrees with initial Attempt")
     validate_transition(
         Path(assignment["workspace"]), before, after, attempt["repository"], lineage
     )

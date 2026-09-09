@@ -19,6 +19,7 @@ class TaskContract:
     untrusted_data: Any
     capability: Capability
     validator: Callable[[object], Any]
+    read_only_evidence: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if (

@@ -2665,6 +2665,14 @@ def inference_view_contains_host_reference(value, redactions):
 
 def normalize_run(observed, include_evidence=True):
     state = observed["state"]
+    preparation = observed.get("preparation")
+    if (
+        preparation is not None
+        and "work_base" in observed["assignment"]
+        and preparation["repository"]["base_commit"]
+        != observed["assignment"]["work_base"]
+    ):
+        raise ExportError("Assignment work base disagrees with preparation")
     directories = {entry["directory"]: entry["sequence"] for entry in state["history"]}
     history = []
     evidence = []
@@ -2679,6 +2687,40 @@ def normalize_run(observed, include_evidence=True):
             output = read_json(directory / "output.json")
             if validate_component_output(component, output) != entry["outcome"]:
                 raise ExportError("Component output disagrees with Coordinator history")
+            if (
+                component == "attempt"
+                and "work_base" in observed["assignment"]
+                and output.get("repository", {}).get("before", {}).get("head")
+                != observed["assignment"]["work_base"]
+            ):
+                raise ExportError("Assignment work base disagrees with initial Attempt")
+            if component == "review" and (
+                "work_base" in observed["assignment"] or "work_context" in output
+            ):
+                from afk_evidence.access import EvidenceReader, EvidenceUnavailable
+                from afk_review.context import validate_retained_context
+                from afk_review.contract import validate_input as validate_review_input
+
+                reader = EvidenceReader((observed["coordinator"],))
+                try:
+                    review_input = validate_review_input(
+                        reader.json(directory / "input.json")
+                    )
+                    change = reader.json(
+                        Path(review_input["change_directory"]) / "output.json"
+                    )["change"]
+                    validate_retained_context(
+                        directory,
+                        review_input,
+                        output,
+                        observed["assignment"],
+                        change,
+                        reader,
+                    )
+                except (ValueError, EvidenceUnavailable) as error:
+                    raise ExportError(str(error)) from error
+                finally:
+                    reader.close()
             normalized = normalize_component_output(
                 component, output, observed["redactions"]
             )

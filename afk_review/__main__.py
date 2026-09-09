@@ -6,8 +6,15 @@ import time
 from pathlib import Path
 
 from afk_change.contract import validate_change_output, validate_git_transition
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_inference import invoke
 from afk_related_work import SELECTION_GUIDANCE, validate_reference, validate_snapshot
+from afk_review.context import (
+    context_reader,
+    load_context,
+    validate_artifacts,
+    write_context,
+)
 from afk_review.contract import validate_input as validate_input_contract
 from afk_review.task import build_task
 from afk_runtime import (
@@ -55,11 +62,28 @@ def main() -> int:
     before = repository_state(workspace)
     verify_subject(before, evidence)
 
+    previous = None
+    if "work_context" in review_input:
+        reader = context_reader(input_path, review_input["change_directory"])
+        try:
+            previous = load_context(review_input, evidence, reader)
+        finally:
+            reader.close()
+
+    if result_directory.resolve().is_relative_to(workspace.resolve()):
+        raise ValueError(
+            "Review result directory must be outside the candidate workspace"
+        )
     progress("preparing review result directory")
     result_directory.mkdir()
     write_json(result_directory / "input.json", review_input)
     diff_path = result_directory / "diff.patch"
-    write_diff(diff_path, workspace, evidence)
+    if previous is None:
+        write_diff(diff_path, workspace, evidence)
+    else:
+        evidence["work_context"] = write_context(
+            result_directory, review_input, evidence, previous
+        )
     events_path = result_directory / "events.jsonl"
     stderr_path = result_directory / "stderr.log"
     started_at = timestamp()
@@ -84,6 +108,7 @@ def main() -> int:
         timeout_seconds=review_input["timeout_seconds"],
         evidence_directory=result_directory / "inference",
         validator=task.validator,
+        read_only_evidence=task.read_only_evidence,
     )
     publish_runtime_logs(result_directory, inference_result.receipt)
     progress("review agent completed")
@@ -122,6 +147,18 @@ def main() -> int:
         and observation_error is None
         else "failed"
     )
+    if previous is not None:
+        reader = EvidenceReader((result_directory,))
+        try:
+            validate_artifacts(
+                result_directory,
+                review_input["work_context"],
+                evidence["work_context"],
+                reader,
+                evidence["change"],
+            )
+        finally:
+            reader.close()
     output = {
         "schema_version": 1,
         "outcome": outcome,
@@ -139,6 +176,7 @@ def main() -> int:
             **({"observation_error": observation_error} if observation_error else {}),
         },
         "validation_evidence": evidence["validation_identity"],
+        **({"work_context": evidence["work_context"]} if previous is not None else {}),
         "artifacts": {
             "diff": "diff.patch",
             "events": "events.jsonl",
@@ -282,6 +320,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (
+        EvidenceUnavailable,
         OSError,
         TypeError,
         ValueError,

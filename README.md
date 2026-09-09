@@ -58,7 +58,12 @@ and Python entry points.
 `afk_inference` exposes a semantic invocation API: callers provide a purpose,
 separate trusted instructions and untrusted data, one of `NO_TOOLS`,
 `READ_ONLY`, or `WRITE`, an execution root, timeout, evidence directory, and a
-trusted in-process response validator. The runtime supplies the fixed system
+trusted in-process response validator. READ_ONLY callers may additionally supply
+`read_only_evidence`, at most eight absolute regular-file paths. The runtime
+derives and records an explicit file allowlist in its system instructions; paths
+in untrusted task data cannot enlarge it. Other capabilities cannot request these
+additional reads. This is adapter/tool policy, not an operating-system sandbox.
+The runtime supplies the system
 instructions for the requested capability; callers do not provide executable
 paths, argument arrays, or system prompts.
 
@@ -597,8 +602,8 @@ digest, counts toward its byte budget, and creates no additional record ID.
 Legacy snapshots without metadata remain valid; continuations reuse their
 original snapshot bytes. Metadata is not ownership evidence, and absence from
 a bounded snapshot never proves that other work does not exist. Only included
-record IDs may support related ownership. Review and Assessment task contract
-version 3 and new Assignment guidance state that limitation; their semantic
+record IDs may support related ownership. Review and Assessment task instructions
+and new Assignment guidance state that limitation; their semantic
 result schemas are unchanged. Publication retains the exact validated JSONL.
 The count, byte size, digest and media type remain bound into Preparation,
 Assignment and Coordinator evidence. Implementer can query the frozen path;
@@ -809,6 +814,12 @@ never place secrets in the Assignment because `input.json` is durable.
 `objective` is the durable human-readable work description; the runner command
 decides how to present that structured Assignment to its agent.
 
+New prepared Assignments also freeze `work_base`, the canonical initial commit
+ID. Attempt requires its initial HEAD to match it, and committed-source proof
+checks that binding. Coordinator carries it into Review through repairs and
+continuations. Assignments without this optional field retain their historical
+behavior; continuing an old Run does not invent or rewrite its work base.
+
 The caller prepares and selects the workspace branch. The executor only
 observes before/after HEAD, branch, porcelain status, dirty state, and commits
 reachable between the observed HEADs. A detached HEAD is recorded with a
@@ -916,20 +927,71 @@ implicit and may be detached. Before creating the result directory, Review
 rejects failed, dirty, stale, malformed, or mismatched evidence. The old
 `attempt_directory` input is not supported.
 
-The wrapper records the complete commit diff as `diff.patch`. The default
-adapter invokes Pi with `gpt-5.6-sol`, gives it only read-oriented tools, and
-points it at that artifact and the prepared workspace. Authentication is
-inherited from the environment. A deployment or deterministic test may replace
-the adapter outside the durable input by setting
-`AFK_REVIEW_AGENT_COMMAND` to a JSON argv array; Review appends its generated
-prompt as the final argument. Do not put credentials in this configuration or
-the Review input.
+For a new prepared Assignment, Coordinator adds:
+
+```json
+{"work_context": {"schema_version": 1, "work_base": "<exact initial commit ID>"}}
+```
+
+Review verifies that base against the Assignment carried by the existing
+Committed Change source proof, rather than inferring it from a branch. Task
+contract version 6 supplies a bounded Git change summary and hash/size-bound
+file references. `diff.patch` covers work base through current candidate;
+`repair.patch` covers the true latest Committed Change. When both ranges match,
+the two references share `diff.patch` without duplicating it. Each patch is
+limited to 16 MiB and oversized patches are rejected, never truncated.
+
+The nearest preceding assessed Response contributes at most three additional
+files: `previous-review.json`, `previous-assessment.json`, and
+`previous-response.json`. They retain the complete stage output records, with
+subjects and outcomes, and are each bounded by the existing 1 MiB evidence
+limit. Intervening validation repairs do not erase that cycle. The instructions
+require the full-objective audit first and treat prior judgments as fallible
+evidence. The complete history is not copied into the prompt.
+
+These files belong to the Review result directory outside the candidate.
+The Inference Runtime grants explicit read-only access to those files; Review
+never writes context into the candidate workspace. The prompt contains file
+references rather than inline patch bodies. The existing Validation/related-work
+packet remains unchanged. Context schema 1 is retained in `output.json`, checked
+again after inference, and validated by the Run reader and exporter. A Run reader
+with repository access also compares patch bytes with Git. The existing public
+`diff` artifact now represents the full work range; repair and previous-cycle
+files remain private local evidence, without new public artifact kinds.
+Finding Assessment retains its existing latest-change inline payload, derived
+from the actual Committed Change range, instead of inheriting Review's larger
+full-work patch. Its diff scope is unchanged.
+
+Standalone and retained legacy input without `work_context` continues to use
+task contract version 5 and the latest-change inline diff. The default runtime
+adapter uses Pi with the frozen Review model/thinking policy. Deployment uses
+the shared inference configuration; durable Review input cannot replace an
+adapter or command. Authentication stays in the execution environment.
+
+Review and Finding Assessment use one shared finding validity standard in
+`afk_finding_standard.py`. Concrete behavior failures, unmet required behavior,
+explicit test/documentation omissions, demonstrated design maintenance/change
+cost, and applicable adopted-standard violations can be valid findings. Evidence
+must establish the requirement/gap or feasible mechanism and impact. A runtime
+failure is not required for a missing deliverable. Arbitrary coverage requests,
+unsupported operating assumptions, speculative hardening and preferences alone
+remain insufficient. Validity and ownership are separate judgments; only the
+existing confirmed/current route makes a finding actionable.
+
+The clarified instructions use Review task versions 5 (legacy diff delivery)
+and 6 (complete-work delivery), and Assessment version 4. Existing result schemas,
+context schema 1, model policy, and routing are unchanged. Retained receipts keep
+their original instructions; newly executed stages use the current standard,
+including stages in a continued legacy Run. There is no new inference stage or
+completion-acceptance decision. `tests/fixtures/finding-standard.md` records
+positive and negative evaluation cases. Prompt transport and contract checks
+verify what is supplied and accepted structurally, not model judgment quality.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
 the single read-only inference invocation receipt, and an atomically sealed
 `output.json`. The output also records SHA-256 content identities for the
 Validation input, output, stdout, and stderr evidence supplied to Review, so a
-later role can reject replaced evidence. Review task contract version 3 composes five fixed,
+later role can reject replaced evidence. Review composes five fixed,
 language-neutral instruction packets in this order: common, Behavior, Design,
 Standards, and output contract. The packet constants, declared tuple, pure
 composition function, and exact composed instructions are directly inspectable
@@ -950,7 +1012,7 @@ downstream use. Every concrete finding has a `lens` (`behavior`, `design`, or
 positive 1-based line number that exists in a text file under the reviewed
 `HEAD`. It also has a `scope_claim` with `kind` (`current`, `related`, or
 `unknown`) and a rationale. Only `related` includes `related_work_id`, which
-must identify a record in the frozen related-work snapshot. Review v2 has no
+must identify a record in the frozen related-work snapshot. Review has no
 severity policy, language detection, language-specific packets, or internal
 fan-out. Findings do not make execution fail or authorize repair.
 
@@ -1028,6 +1090,31 @@ Feedback Response input is structured JSON:
   "timeout_seconds": 900
 }
 ```
+
+Assessed-feedback task version 2 includes each selected finding's original
+`finding.scope_claim`, Assessment's `assessment_rationale`, and final
+`assessment_scope` object with its kind and rationale. This preserves provenance
+when Assessment overrides Review. Only confirmed/current findings are selected;
+no dismissed, related or unknown-owner finding is added to the worker packet.
+The JSON task data is limited to 1 MiB; oversize packets are refused before
+inference, never truncated. The packet adds one scope object per selected
+finding, not historical cycles or another evidence copy. Supplied evidence is read-only reference data; write authority remains the
+prepared workspace.
+
+Response identifies the governing invariant, groups findings sharing a cause,
+and repairs the smallest owned mechanism covering directly affected variants.
+It considers removing unnecessary machinery, without authorizing unrelated
+refactoring or speculative hardening. The existing summary/response text explains
+the cause, change and meaningful regression evidence, or why a useful check was
+unavailable. One response per supplied finding remains mandatory even when a
+single repair addresses several findings. No new reporting fields, planning
+stage, issue mutation or completion authority is introduced. Validation repair
+keeps task version 1 and its distinct failed-Validation input. Both paths still
+pass through the existing deterministic Validation gate.
+
+`tests/fixtures/feedback-response.md` records the retained evidence-binding repair
+sequence and a proposed evaluation. Fixture checks establish transport and
+routing compatibility, not better model convergence or lower cost.
 
 Before creating the result directory, Feedback Response verifies the complete
 Assessment-to-Review-to-Committed-Change evidence chain and requires the prepared
