@@ -624,14 +624,20 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                     raise
         if publication_descriptor is None:
             for _attempt in range(10):
-                temporary_name = f".{resolved.name}.{secrets.token_hex(8)}.tmp"
+                # Keep staging names independent of the caller's basename: a
+                # valid destination may already occupy the filesystem's full
+                # per-component name allowance.
+                candidate_name = f".afk-metrics-{secrets.token_hex(8)}.tmp"
                 try:
                     publication_descriptor = os.open(
-                        temporary_name,
+                        candidate_name,
                         os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                         0o600,
                         dir_fd=parent_descriptor,
                     )
+                    # A colliding candidate was never ours. Record a pathname
+                    # for cleanup only after exclusive creation succeeds.
+                    temporary_name = candidate_name
                     break
                 except FileExistsError:
                     continue
@@ -679,12 +685,22 @@ def publish(input_path: Path, destination: Path) -> dict[str, Any]:
                         os.unlink(resolved.name, dir_fd=parent_descriptor)
                 except OSError:
                     pass
-            if publication_descriptor is not None:
-                os.close(publication_descriptor)
-            if temporary_name is not None:
+            if temporary_name is not None and publication_descriptor is not None:
                 try:
-                    os.unlink(temporary_name, dir_fd=parent_descriptor)
+                    temporary_stat = os.stat(
+                        temporary_name,
+                        dir_fd=parent_descriptor,
+                        follow_symlinks=False,
+                    )
+                    written_stat = os.fstat(publication_descriptor)
+                    if (temporary_stat.st_dev, temporary_stat.st_ino) == (
+                        written_stat.st_dev,
+                        written_stat.st_ino,
+                    ):
+                        os.unlink(temporary_name, dir_fd=parent_descriptor)
                 except OSError:
                     pass
+            if publication_descriptor is not None:
+                os.close(publication_descriptor)
             os.close(parent_descriptor)
     return publication

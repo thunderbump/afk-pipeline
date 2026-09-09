@@ -656,6 +656,91 @@ class MetricsPublicationTests(unittest.TestCase):
                     [],
                 )
 
+    def test_fallback_preserves_colliding_staging_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            destination = root / "publication.json"
+            collision = root / ".afk-metrics-0000000000000000.tmp"
+            collision.write_text("not ours")
+            real_open = os.open
+            temporary_flag = getattr(os, "O_TMPFILE", 0)
+
+            def reject_anonymous_staging(path, flags, *args, **kwargs):
+                if temporary_flag and flags & temporary_flag == temporary_flag:
+                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
+                return real_open(path, flags, *args, **kwargs)
+
+            with (
+                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
+                mock.patch(
+                    "afk_metrics.publication.secrets.token_hex", return_value="0" * 16
+                ),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            self.assertEqual(collision.read_text(), "not ours")
+            self.assertFalse(destination.exists())
+
+    def test_fallback_does_not_remove_replaced_staging_file(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            destination = root / "publication.json"
+            real_open = os.open
+            temporary_flag = getattr(os, "O_TMPFILE", 0)
+
+            def reject_anonymous_staging(path, flags, *args, **kwargs):
+                if temporary_flag and flags & temporary_flag == temporary_flag:
+                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
+                return real_open(path, flags, *args, **kwargs)
+
+            def replace_staging_then_fail(*args, **kwargs):
+                staging = next(root.glob(".afk-metrics-*.tmp"))
+                staging.unlink()
+                staging.write_text("replacement")
+                raise OSError(errno.EIO, "admission failed")
+
+            with (
+                mock.patch("afk_metrics.publication.os.open", reject_anonymous_staging),
+                mock.patch(
+                    "afk_metrics.publication.os.link", replace_staging_then_fail
+                ),
+                self.assertRaisesRegex(PublicationError, "cannot be created"),
+            ):
+                publish(input_path, destination)
+
+            replacement = next(root.glob(".afk-metrics-*.tmp"))
+            self.assertEqual(replacement.read_text(), "replacement")
+            self.assertFalse(destination.exists())
+
+    def test_fallback_accepts_maximum_length_destination_basename(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _source, _bundle, request = self.fixture(root)
+            input_path = root / "input.json"
+            input_path.write_text(json.dumps(request))
+            destination = root / ("p" * 255)
+            real_open = os.open
+            temporary_flag = getattr(os, "O_TMPFILE", 0)
+
+            def reject_anonymous_staging(path, flags, *args, **kwargs):
+                if temporary_flag and flags & temporary_flag == temporary_flag:
+                    raise OSError(errno.EOPNOTSUPP, "anonymous staging unsupported")
+                return real_open(path, flags, *args, **kwargs)
+
+            with mock.patch(
+                "afk_metrics.publication.os.open", reject_anonymous_staging
+            ):
+                publication = publish(input_path, destination)
+
+            self.assertEqual(json.loads(destination.read_text()), publication)
+
     def test_publication_admits_the_written_anonymous_inode(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
