@@ -1,9 +1,9 @@
 {
   "files": [
     {
-      "bytes": 282,
+      "bytes": 235,
       "path": "artifacts/assignment.json",
-      "sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4"
+      "sha256": "9d5ea46338485df0f668cab318dbc761ca923949613a8cc5bb28457de2a36456"
     },
     {
       "bytes": 208,
@@ -11,9 +11,9 @@
       "sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27"
     },
     {
-      "bytes": 249,
+      "bytes": 259,
       "path": "artifacts/coordinator-request.json",
-      "sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb"
+      "sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d"
     },
     {
       "bytes": 21,
@@ -66,9 +66,9 @@
       "sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8"
     },
     {
-      "bytes": 303,
+      "bytes": 323,
       "path": "artifacts/coordinator/03-change/output.json",
-      "sha256": "9dd163b21d96da7e01f0ca80b1fe92ef6872ef21816907d7a804d72f69341eb7"
+      "sha256": "ac90edfc96735a433f27de413038e6099c77063806a591a66ed8bea9c2d39ecc"
     },
     {
       "bytes": 44,
@@ -156,14 +156,14 @@
       "sha256": "c14416aba787f3e40cb4e567687ed84cef2893da21e70a963627c20b1c362727"
     },
     {
-      "bytes": 282,
+      "bytes": 235,
       "path": "artifacts/coordinator/assignment.json",
-      "sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4"
+      "sha256": "9d5ea46338485df0f668cab318dbc761ca923949613a8cc5bb28457de2a36456"
     },
     {
-      "bytes": 249,
+      "bytes": 259,
       "path": "artifacts/coordinator/input.json",
-      "sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb"
+      "sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d"
     },
     {
       "bytes": 1323,
@@ -176,14 +176,14 @@
       "sha256": "92505c307466add1599e1df69ae01e4c569670cddc580f8b86743eddb5dc5ef8"
     },
     {
-      "bytes": 1056,
+      "bytes": 1106,
       "path": "artifacts/preparation.json",
-      "sha256": "011af02e74751c9ee113587ea49c0c9f5446a199ef953ad5ce9ebe376e2b5737"
+      "sha256": "2d21b30e15e5dd33c5f2afd863b78a1b68373079c6f7d4ef386c58565760b455"
     },
     {
       "bytes": 27679,
       "path": "workflow-run.json",
-      "sha256": "c73d06159e5e9b7ea478112f049846e1566516aea642044e0479c7b2a152e7b3"
+      "sha256": "1bf30d330524c09f1ea5e12c3da47f7de9a65dcc9a75d1ef67a1bc1368d97de5"
     }
   ],
   "identity": {

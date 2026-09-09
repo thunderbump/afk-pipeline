@@ -26,6 +26,10 @@ def _human(report):
         if run["integrity"]["status"] == "verified":
             outcome = run["outcome"]
             totals = run["inference"]["totals"]
+            evidence_coverage = run["inference"].get(
+                "evidence_coverage",
+                {"status": "unavailable", "expected": 0, "measured": 0},
+            )
             identity = run.get("run_identity") or {}
             identity_parts = [
                 f"{name}={identity[name]}"
@@ -71,6 +75,7 @@ def _human(report):
                     f"  validation: {', '.join(str(x) for x in outcome['validation_results']) or 'unavailable'}",
                     f"  repairs / retries: {outcome['repair_count']} / {outcome['retry_count']}",
                     f"  Run wall span: {_available(timing['run_wall_span_seconds'])} s",
+                    f"  inference evidence: {evidence_coverage['status']} ({evidence_coverage['measured']}/{evidence_coverage['expected']} expected stages measured)",
                     f"  inference invocation elapsed: {_available(totals['elapsed_seconds'])} s (includes adapter/runtime/tool work; not pure inference latency)",
                     f"  response validation: {_available(timing.get('response_validator_seconds'))} s (coverage: {response_validator_coverage}; inference response validator, not repository testing)",
                     f"  repository Validation: {_available(timing.get('repository_validation_seconds'))} s (coverage: {repository_validation_coverage})",

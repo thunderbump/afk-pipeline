@@ -93,6 +93,53 @@ class MetricsPublicationTests(unittest.TestCase):
                 self.assertNotIn(str(source), serialized)
                 self.assertNotIn(str(bundle), serialized)
 
+    def test_v2_coverage_counts_expected_stages_not_discovered_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            # This is a command-worker Attempt. Its started history row is still
+            # expected inference evidence, but no receipt may be fabricated.
+            inference = source / "coordinator/04-review/inference"
+            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            bundle = root / "bundle-with-review"
+            afk_export.export_run(source, bundle)
+            request["runs"][0]["bundle"] = str(bundle)
+            publication = build_publication(request)
+            self.assertEqual(publication["schema_version"], 2)
+            self.assertEqual(publication["producer"]["report_schema_version"], 2)
+            coverage = publication["runs"][0]["summary"]["inference"][
+                "evidence_coverage"
+            ]
+            self.assertEqual(
+                coverage,
+                {
+                    "status": "partial",
+                    "expected": 3,
+                    "measured": 1,
+                    "missing": [
+                        {
+                            "ownership": {
+                                "kind": "component",
+                                "sequence": 1,
+                                "component": "attempt",
+                            },
+                            "reason": "missing_receipt",
+                        },
+                        {
+                            "ownership": {
+                                "kind": "component",
+                                "sequence": 5,
+                                "component": "assessment",
+                            },
+                            "reason": "missing_receipt",
+                        },
+                    ],
+                },
+            )
+            totals = publication["runs"][0]["summary"]["inference"]["totals"]
+            self.assertEqual(totals["usage_coverage"], "unavailable")
+            self.assertEqual(totals["cost"]["status"], "unavailable")
+
     def test_stage_projection_preserves_measured_zero_and_unavailable_metrics(self):
         for duration in (None, 0, 1.5):
             with (

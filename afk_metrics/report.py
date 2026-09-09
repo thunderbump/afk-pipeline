@@ -1359,7 +1359,10 @@ def summarize_source(
         return path.resolve().relative_to(root).as_posix()
 
     candidates: list[tuple[str, str, dict[str, Any]]] = []
+    expected_inference: list[tuple[str, str, dict[str, Any]]] = []
+    all_inference_relatives: set[str] = {"planner/inference"}
     abandoned_candidates: set[str] = set()
+    command_attempt_relatives: set[str] = set()
     checkpoint_states = observed.get("_metrics_inference_states")
     checkpoint_evidence = observed.get("_metrics_evidence_sha256")
     if not isinstance(checkpoint_evidence, dict):
@@ -1378,15 +1381,67 @@ def summarize_source(
     def checkpointed_exists(relative: str, path: Path) -> bool:
         return checkpointed_state(relative, path) != "absent"
 
+    def records_acceptance_planning() -> bool:
+        preparation = observed.get("preparation")
+        routing = preparation.get("routing") if isinstance(preparation, dict) else None
+        planner = routing.get("planner") if isinstance(routing, dict) else None
+        return isinstance(planner, dict) and planner.get("status") != "not_started"
+
+    def verified_no_action_response(entry: dict[str, Any]) -> bool:
+        """Recognize only the component's explicit, authenticated no-agent result."""
+        if entry.get("component") != "response" or entry.get("outcome") == "abandoned":
+            return False
+        try:
+            output_path = locate_invocation_file(
+                coordinator, continuation_roots, entry, "output.json"
+            )
+            component_relative = output_path.parent.relative_to(root).as_posix()
+            output_relative = f"{component_relative}/output.json"
+            if (
+                checkpoint_evidence is not None
+                and output_relative not in checkpoint_evidence
+            ):
+                return False
+            output = _safe_evidence_json(
+                root,
+                component_relative,
+                "output.json",
+                checkpoint_evidence.get(output_relative)
+                if checkpoint_evidence is not None
+                else None,
+            )
+            response = output.get("response")
+            repository = output.get("repository")
+            return (
+                output.get("outcome") == "completed"
+                and output.get("process") is None
+                and output.get("agent") is None
+                and isinstance(response, dict)
+                and response.get("finding_responses") == []
+                and isinstance(repository, dict)
+                and repository.get("unchanged") is True
+            )
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            json.JSONDecodeError,
+            ExportError,
+        ):
+            # Absence or malformed evidence can never establish no-action.
+            return False
+
     planner_relative = "planner/inference"
-    if checkpointed_exists(planner_relative, root / planner_relative):
-        candidates.append(
+    if records_acceptance_planning():
+        expected_inference.append(
             (
                 planner_relative,
                 "acceptance_planning",
                 {"kind": "run", "purpose": "acceptance_planning"},
             )
         )
+    inference_components = {"attempt", "review", "assessment", "response"}
     for entry in state["history"]:
         # Abandoned denotes coordinator progression, not absence of evidence.
         # An interrupted component may already have sealed an invocation before
@@ -1402,25 +1457,84 @@ def summarize_source(
         # it would let an in-tree symlink evade an absent-path checkpoint by
         # changing the key to its target.
         relative = inference_path.relative_to(root).as_posix()
-        if checkpointed_exists(relative, inference_path):
+        all_inference_relatives.add(relative)
+        component = entry["component"]
+        if component in inference_components and not verified_no_action_response(entry):
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
-            }.get(entry["component"], entry["component"])
-            candidates.append(
+            }.get(component, component)
+            expected_inference.append(
                 (
                     relative,
                     purpose,
                     {
                         "kind": "component",
                         "sequence": entry.get("sequence"),
-                        "component": entry["component"],
+                        "component": component,
                     },
                 )
             )
+            if component == "attempt" and "command" in assignment:
+                command_attempt_relatives.add(relative)
             if entry.get("outcome") == "abandoned":
                 abandoned_candidates.add(relative)
+
+    # Cumulative continuation histories repeat prior entries. Count the selected
+    # lineage's stage identity once, rather than treating each reference as a new
+    # inference. A single evidence path cannot own two different stages.
+    expected_by_relative: dict[str, tuple[str, str, dict[str, Any]]] = {}
+    relative_by_owner: dict[str, str] = {}
+    for expected in expected_inference:
+        relative, _purpose, owner = expected
+        owner_key = json.dumps(owner, sort_keys=True, separators=(",", ":"))
+        previous_relative = relative_by_owner.setdefault(owner_key, relative)
+        previous = expected_by_relative.setdefault(relative, expected)
+        if previous[2] != owner or previous_relative != relative:
+            return _invalid_source(
+                source,
+                ValueError("inference evidence has duplicate ownership"),
+                identity,
+                assignment,
+            )
+    expected_inference = list(expected_by_relative.values())
+    candidates = [
+        expected
+        for expected in expected_inference
+        if expected[0] not in command_attempt_relatives
+        and (
+            checkpointed_state(expected[0], root / expected[0]) == "sealed"
+            or (
+                expected[0] in abandoned_candidates
+                and checkpointed_state(expected[0], root / expected[0]) == "unsealed"
+            )
+        )
+    ]
+    expected_relatives = set(expected_by_relative)
+    observed_states = (
+        checkpoint_states
+        if isinstance(checkpoint_states, dict)
+        else {
+            relative: checkpointed_state(relative, root / relative)
+            for relative in all_inference_relatives
+        }
+    )
+    if any(
+        state_value == "sealed"
+        and (
+            relative not in expected_relatives or relative in command_attempt_relatives
+        )
+        for relative, state_value in observed_states.items()
+    ):
+        return _invalid_source(
+            source,
+            ValueError("authenticated receipt has no expected inference stage"),
+            identity,
+            assignment,
+        )
+
     invocations = []
+    sealed_receipt_metrics = []
     seen = set()
     try:
         for relative, purpose, stage_owner in candidates:
@@ -1437,6 +1551,8 @@ def summarize_source(
                 item = _invocation(
                     root, relative, purpose, expected_evidence=checkpoint_evidence
                 )
+            if state_at_checkpoint == "sealed":
+                sealed_receipt_metrics.append(item["metrics"])
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
@@ -1519,6 +1635,37 @@ def summarize_source(
         ExportError,
     ) as error:
         return _invalid_source(source, error, identity, assignment)
+    measured_relatives = {
+        relative
+        for relative, _purpose, _owner in expected_inference
+        if relative not in command_attempt_relatives
+        and checkpointed_state(relative, root / relative) == "sealed"
+    }
+    missing_evidence = [
+        {
+            "ownership": owner,
+            "reason": (
+                "unsealed_receipt"
+                if relative not in command_attempt_relatives
+                and checkpointed_state(relative, root / relative) == "unsealed"
+                else "missing_receipt"
+            ),
+        }
+        for relative, _purpose, owner in expected_inference
+        if relative not in measured_relatives
+    ]
+    evidence_coverage = {
+        "status": (
+            "complete"
+            if len(measured_relatives) == len(expected_inference)
+            else "partial"
+            if measured_relatives
+            else "unavailable"
+        ),
+        "expected": len(expected_inference),
+        "measured": len(measured_relatives),
+        "missing": missing_evidence,
+    }
     receipt_metrics = [item["metrics"] for item in invocations]
     elapsed_values = [item["elapsed"]["seconds"] for item in invocations]
     invocation_seconds = (
@@ -1683,12 +1830,28 @@ def summarize_source(
     ]
     if any(value == "partial" for value in usage_coverages):
         usage_coverage = "partial"
-    elif not total_usage and not total_compaction_usage:
+    elif (
+        not total_usage
+        and not total_compaction_usage
+        and not any(value == "complete" for value in usage_coverages)
+    ):
         usage_coverage = "unavailable"
     elif usage_coverages and all(value == "complete" for value in usage_coverages):
         usage_coverage = "complete"
     else:
         usage_coverage = "partial"
+    if missing_evidence:
+        measured_usage_coverages = [
+            metrics.get("coverage", "unavailable") for metrics in sealed_receipt_metrics
+        ]
+        usage_coverage = (
+            "partial"
+            if any(
+                value in {"complete", "partial"} for value in measured_usage_coverages
+            )
+            else "unavailable"
+        )
+        total_cost_status = "partial" if available_costs else "unavailable"
     result = {
         "source_identity": source_identity,
         "integrity": {"status": "verified"},
@@ -1720,6 +1883,7 @@ def summarize_source(
         },
         "inference": {
             "invocations": invocations,
+            "evidence_coverage": evidence_coverage,
             "totals": {
                 "elapsed_seconds": invocation_seconds,
                 "usage": total_usage,
@@ -1857,7 +2021,7 @@ def build_report(sources: list[Path]) -> dict[str, Any]:
         )
     comparisons = build_comparisons(runs)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "report_kind": "afk_retained_run_metrics",
         "runs": runs,
         "comparisons": comparisons,

@@ -1,4 +1,4 @@
-# AFK metrics publication schema v1
+# AFK metrics publication schema v2
 
 These fixtures are synthetic and were generated from `ExportCliTests.sealed_preparer`; they contain no host Run evidence. `bundle-v2/` and `bundle-v3/` are the matching export bundles. `valid-publication.json` is a complete two-Run consumer fixture. `invalid-publication.json` has a deliberately incorrect first `workflow_run_sha256` and must be rejected by a consumer that is given the bundle.
 
@@ -22,14 +22,14 @@ The producer serializes and bounds the complete object before allocating a priva
 
 The existing local report command remains `python3 -m afk_metrics SOURCES... --destination DIRECTORY`. Its `--destination` option selects legacy report mode, including when a source directory is named `publish`.
 
-## Envelope (frozen v1)
+## Envelope (current v2)
 
 A publication object has **exactly** these fields:
 
-* `schema_version`: integer `1`.
+* `schema_version`: integer `2`. The publication request remains schema version 1.
 * `kind`: string `afk-metrics-publication`.
 * `project`: the common Project slug.
-* `producer`: object with exactly `calculator` (`afk_metrics.report`), `report_schema_version` (`1`), and `source_revision` (the exact 40–64 lowercase-hex Git object revision when known, otherwise `null`).
+* `producer`: object with exactly `calculator` (`afk_metrics.report`), `report_schema_version` (`2`), and `source_revision` (the exact 40–64 lowercase-hex Git object revision when known, otherwise `null`).
 * `runs`: 1–25 Run objects, in input order.
 * `comparisons`: every unordered Run pair once, in Run order (at most 300). This is the unchanged report comparison shape: `left` and `right` source identities, boolean `equivalent_frozen_conditions`, string-array `warnings`, and `ranking` enum `observational_only | not_provided`.
 * `limitations`: string array of producer limitations.
@@ -58,12 +58,16 @@ A published summary always has `integrity: {"status":"verified"}`. Invalid evide
 * `run_identity`: `project`, selected `run_id`, and `bead_id`, which can be `null` where unavailable.
 * `work`: `objective_sha256`, nullable `base_commit`, and `validation_conditions_sha256`. The hashes describe frozen conditions, not measured quality.
 * `outcome`: `terminal` is `completed | failed`; `coordinator_status` is `completed | failed`; `coordinator_decision` is `stop | exhausted | null`. `validation_results` lists retained Validation outcomes, `passed | failed | timed_out | interrupted`. `repair_count` counts Response components and `retry_count` counts observed inference retries. `completion_acceptance` and `integration_status` are currently the literal `unavailable`.
-* `inference`: `invocations` and `totals`, described below.
+* `inference`: `invocations`, `evidence_coverage`, and `totals`, described below.
 * `timing`: the fields described below.
 
 All coverage fields use `complete | partial | unavailable`. All token objects contain only measured non-negative numeric fields from `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, and `reasoning`. Missing keys do not mean zero. Counts are non-negative integers. Seconds are non-negative numbers or `null` unless a legacy sentinel is explicitly stated below.
 
-`inference.totals` has `elapsed_seconds`, `usage`, `compaction_usage`, `usage_coverage`, and `cost`. Cost has `status: reported_estimate | partial | unavailable`, `kind: pi_reported_estimate | unavailable`, nullable numeric `amount`, `currency: null`, and `billed_charge: false | null`. A partial amount is the measured subtotal. No currency or invoice charge is inferred.
+`inference.evidence_coverage` is `{status, expected, measured, missing}`. Expected and measured are non-negative integer counts of unique inference stages in the selected lineage. Measured means a receipt was authenticated, even when usage and cost are unavailable. Status is `complete` when the counts agree (including zero), `partial` when some but not all expected stages are measured, and `unavailable` when expected evidence exists but none is measured. Every missing row is `{ownership, reason}` using the stage ownership shape without project/run fields; reason is `missing_receipt | unsealed_receipt`. The invariant is `expected == measured + len(missing)`.
+
+Expected stages come from authenticated preparation and Coordinator history, never receipt discovery: recorded Acceptance Planning; every started Attempt, Review, Finding Assessment, and actionable or repair Feedback Response, including abandoned entries. Deterministic stages and verified no-action Responses are excluded. A command-worker Attempt is expected but has a missing receipt. Unstarted future stages and repeated continuation references are not counted. An unsealed abandoned invocation remains missing even if a receipt appears after the export checkpoint. A sealed receipt outside the expected set invalidates publication.
+
+`inference.totals` has `elapsed_seconds`, `usage`, `compaction_usage`, `usage_coverage`, and `cost`. Cost has `status: reported_estimate | partial | unavailable`, `kind: pi_reported_estimate | unavailable`, nullable numeric `amount`, `currency: null`, and `billed_charge: false | null`. A partial amount is the measured subtotal. No currency or invoice charge is inferred. Missing expected evidence makes usage/cost partial when a relevant measurement exists and unavailable otherwise; evidence completeness alone never claims usage or cost completeness.
 
 Each invocation has:
 

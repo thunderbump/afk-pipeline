@@ -1,9 +1,0 @@
-{
-  "attempt_number": 1,
-  "available": true,
-  "kind": "inference_terminal_response_view",
-  "response": {
-    "answer": "ok"
-  },
-  "schema_version": 1
-}

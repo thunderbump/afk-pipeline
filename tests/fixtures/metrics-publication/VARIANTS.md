@@ -1,6 +1,6 @@
 # Metrics publication variant matrix
 
-The original `valid-publication.json`, `invalid-publication.json`, and bundles remain frozen at their original delivery. `populated/` adds synthetic publications produced by the real exporter and metrics publisher. No host Run evidence is copied. The schema remains v1.
+The original bundles remain frozen at their original delivery; their portable publication examples are advanced to the same current schema. `populated/` adds synthetic publications produced by the real exporter and metrics publisher. No host Run evidence is copied. All publication fixtures use the single current metrics publication schema v2.
 
 | Case | Allowed fields and meaning | Proof |
 | --- | --- | --- |
@@ -14,6 +14,9 @@ The original `valid-publication.json`, `invalid-publication.json`, and bundles r
 | Original and continuations | A source invocation identity can occur in several selected Runs. Uniqueness is within each Run. Stage ownership always uses the exact selected Run ID. | `test_each_exhausted_continuation_adds_a_fresh_response_allowance` builds one combined publication over real synthetic Coordinator lineage |
 | Totals | Cost has currency and billed-charge fields but no invocation provenance; usage and compaction usage remain separate. | Populated totals and `invalid-mutations.json` |
 | Empty stage | Minimal unavailable cost is permitted; no inferred model or fabricated timing. | Original baseline stages |
+| Evidence coverage complete | All three expected Attempt/Review/Assessment stages have authenticated receipts, independent of usage/cost availability. | `populated-partial` and `populated-v3` |
+| Command Attempt omitted | A started command-worker Attempt remains expected and is listed with `missing_receipt`; Review measurements make coverage partial. | `producer-only-v2.json` |
+| Unsealed abandoned | The abandoned Response is listed with `unsealed_receipt`; a later failed Response without evidence remains `missing_receipt`. | `bundle-abandoned` |
 
 `populated/invalid-mutations.json` describes independent changes to a fresh copy of the populated valid publication. Each must fail consumer intake. Paths use JSON object keys and array indices; `-1` means the last array row. Mutations cover Pi discriminator/field disagreement, minimal Pi cost, invocation provenance on totals, unknown token categories, invalid Run purpose, and Pi fields on abandoned evidence. They are test inputs, not a second validator or a schema change.
 

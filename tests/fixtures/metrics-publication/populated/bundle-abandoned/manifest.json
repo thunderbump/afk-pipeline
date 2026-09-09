@@ -3,7 +3,7 @@
     {
       "bytes": 298,
       "path": "artifacts/assignment.json",
-      "sha256": "af9ca1577efbd2b29085054a1da28634abb1539f335d69bc42ed898ab4c500d3"
+      "sha256": "3fa625cc78aef2023326a25f0d95f5d45191240fc2c7468820cfcb4830089d85"
     },
     {
       "bytes": 208,
@@ -13,7 +13,7 @@
     {
       "bytes": 257,
       "path": "artifacts/coordinator-request.json",
-      "sha256": "1e8f2b6d01f5bd0d744b3e2d4fd22a8f7e916fbfa69e51bdaf1df4f701aa32fb"
+      "sha256": "317ed26a06d5c419d8d041bdd8fec9830aaed81afa605fb4fee1cc690f997f68"
     },
     {
       "bytes": 53,
@@ -48,7 +48,7 @@
     {
       "bytes": 319,
       "path": "artifacts/coordinator/03-change/output.json",
-      "sha256": "8c25d1a8d050436c1e4b33fe057cd832eab51fc264fdff75e893af183f96ddab"
+      "sha256": "6b0ea49243ed303b854e9fca3471b792d83e07c51adf38269397d23653e2f944"
     },
     {
       "bytes": 44,
@@ -108,12 +108,12 @@
     {
       "bytes": 298,
       "path": "artifacts/coordinator/assignment.json",
-      "sha256": "af9ca1577efbd2b29085054a1da28634abb1539f335d69bc42ed898ab4c500d3"
+      "sha256": "3fa625cc78aef2023326a25f0d95f5d45191240fc2c7468820cfcb4830089d85"
     },
     {
       "bytes": 257,
       "path": "artifacts/coordinator/input.json",
-      "sha256": "1e8f2b6d01f5bd0d744b3e2d4fd22a8f7e916fbfa69e51bdaf1df4f701aa32fb"
+      "sha256": "317ed26a06d5c419d8d041bdd8fec9830aaed81afa605fb4fee1cc690f997f68"
     },
     {
       "bytes": 1774,
@@ -128,12 +128,12 @@
     {
       "bytes": 1095,
       "path": "artifacts/preparation.json",
-      "sha256": "de51528f3f9e1058f99ac58d4d28fc3e63aac5f2b60f389c1613a16f013873c0"
+      "sha256": "49f918ef96af754f52ee6d4fa67a31737f9ffb42d824ba638f5dcb790bb91462"
     },
     {
       "bytes": 18275,
       "path": "workflow-run.json",
-      "sha256": "35e11967c7c0f57d49cae44386b5e234d587597f86cdb67c764b82d5340f3ffc"
+      "sha256": "3e14135c0450fcc9bd3b55a489978accf55e2c0bf61cb2063880940254dbe959"
     }
   ],
   "identity": {

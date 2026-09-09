@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -59,6 +60,14 @@ def generate(destination):
         for scenario in ("partial", "unavailable"):
             case = root / scenario
             source = test_export_cli.ExportCliTests().sealed_preparer(case)
+            for assignment_path in (
+                source / "assignment.json",
+                source / "coordinator/assignment.json",
+            ):
+                assignment = json.loads(assignment_path.read_text())
+                assignment.pop("command")
+                assignment["worker"] = "inference"
+                write_json(assignment_path, assignment)
             # Frozen synthetic paths make source identities independent of the
             # temporary directory. No files at these paths are accessed.
             for file in (
@@ -117,6 +126,19 @@ def generate(destination):
             )
             afk_export.export_run(source, bundle, schema_version=3)
             if scenario == "partial":
+                # Reproduce a command-worker Attempt: history proves that the
+                # stage started, while no inference receipt exists. Restore the
+                # measured synthetic Attempt before building the main v3 case.
+                attempt_inference = source / "coordinator/01-attempt/inference"
+                shutil.rmtree(attempt_inference)
+                for assignment_path in (
+                    source / "assignment.json",
+                    source / "coordinator/assignment.json",
+                ):
+                    assignment = json.loads(assignment_path.read_text())
+                    assignment.pop("worker")
+                    assignment["command"] = ["agent", "--token", "[redacted-secret]"]
+                    write_json(assignment_path, assignment)
                 legacy = destination / "producer-only-v2"
                 afk_export.export_run(source, legacy, schema_version=2)
                 with mock.patch(
@@ -136,6 +158,22 @@ def generate(destination):
                         }
                     )
                 write_json(destination / "producer-only-v2.json", legacy_publication)
+                for assignment_path in (
+                    source / "assignment.json",
+                    source / "coordinator/assignment.json",
+                ):
+                    assignment = json.loads(assignment_path.read_text())
+                    assignment.pop("command")
+                    assignment["worker"] = "inference"
+                    write_json(assignment_path, assignment)
+                add_pi(
+                    attempt_inference,
+                    "attempt",
+                    [
+                        message("partial", {"input": 4}),
+                        {"type": "compaction_end", "id": "missing", "result": {}},
+                    ],
+                )
             requests.append(
                 {"source": str(source), "bundle": str(bundle), "selection": "original"}
             )

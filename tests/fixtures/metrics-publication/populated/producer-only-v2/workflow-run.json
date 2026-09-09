@@ -43,172 +43,16 @@
       "unavailable_reason": null
     },
     {
-      "kind": "inference_contract",
+      "kind": "inference_evidence_checkpoint",
       "media_type": "application/json",
       "public_bytes": 0,
       "public_sha256": null,
       "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
+      "scope": "component:1:attempt",
       "source": {
-        "bytes": 170,
-        "path": "coordinator/01-attempt/inference/adapter-contract.json",
-        "sha256": "18a5aa8d2f8d7600368e04e2af0200391ef4e524e3fd327ac7123dea52375182"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_response",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 17,
-        "path": "coordinator/01-attempt/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_response_view",
-      "media_type": "application/json",
-      "path": "artifacts/coordinator/01-attempt/inference/views/responses/1.json",
-      "public_bytes": 213,
-      "public_sha256": "f76836275b31b9d0eb402be3b2e9e661b7612b70f7b2ad4665a5786ab661b8a4",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 17,
-        "path": "coordinator/01-attempt/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_terminal_response_view",
-      "media_type": "application/json",
-      "path": "artifacts/coordinator/01-attempt/inference/views/terminal-response.json",
-      "public_bytes": 156,
-      "public_sha256": "3cdf8e52685135972712ce9ab5afc4344fbf141eb6859766c7c5a2168d1cc83c",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 17,
-        "path": "coordinator/01-attempt/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_invocation",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 564,
-        "path": "coordinator/01-attempt/inference/invocation.json",
-        "sha256": "dc7a61aa1efaf7c92aff24200e44382a99020d7ca43b3a4f70777fd09433070b"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_prompt",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 43,
-        "path": "coordinator/01-attempt/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_system_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/coordinator/01-attempt/inference/views/system-instructions.txt",
-      "public_bytes": 9,
-      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 43,
-        "path": "coordinator/01-attempt/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/coordinator/01-attempt/inference/views/task-instructions.txt",
-      "public_bytes": 7,
-      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 43,
-        "path": "coordinator/01-attempt/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_data",
-      "media_type": "application/json",
-      "path": "artifacts/coordinator/01-attempt/inference/views/task-data.json",
-      "public_bytes": 5,
-      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 43,
-        "path": "coordinator/01-attempt/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_receipt_view",
-      "media_type": "application/json",
-      "path": "artifacts/coordinator/01-attempt/inference/views/receipt.json",
-      "public_bytes": 511,
-      "public_sha256": "7a0fa8181a9b4835bec65fd700df25022c554c3d278124788347a21e417f5f37",
-      "sanitization_status": "unchanged",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 1797,
-        "path": "coordinator/01-attempt/inference/receipt.json",
-        "sha256": "ec44405a8cc79e77653397e8f5f5c4463e3ef23d52b65fac405964f0981c66be"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_receipt",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 1797,
-        "path": "coordinator/01-attempt/inference/receipt.json",
-        "sha256": "ec44405a8cc79e77653397e8f5f5c4463e3ef23d52b65fac405964f0981c66be"
+        "bytes": 18,
+        "path": "coordinator/01-attempt/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -397,9 +241,9 @@
       "sanitization_status": "not_applicable",
       "scope": "inference:review",
       "source": {
-        "bytes": 562,
+        "bytes": 574,
         "path": "coordinator/04-review/inference/invocation.json",
-        "sha256": "4b58a6f889613874b6c59b103def306254790c0544748f1eafb9aaf7646013da"
+        "sha256": "2614d6df9b52623c042ef4fb47a72791d9233f36910501cc3f0259d0a2fa110c"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -478,7 +322,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/04-review/inference/receipt.json",
-        "sha256": "9439eb0dc5d0ab30d8508e38c11cd40d6559615ac0842f68915aaf5f65e39cb5"
+        "sha256": "c7caffaba45f07c51648716665664d2eb8a236c480ee0a948c01c8a25f44150e"
       },
       "state": "downloadable",
       "unavailable_reason": null
@@ -493,7 +337,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/04-review/inference/receipt.json",
-        "sha256": "9439eb0dc5d0ab30d8508e38c11cd40d6559615ac0842f68915aaf5f65e39cb5"
+        "sha256": "c7caffaba45f07c51648716665664d2eb8a236c480ee0a948c01c8a25f44150e"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -596,9 +440,9 @@
       "sanitization_status": "not_applicable",
       "scope": "inference:finding_assessment",
       "source": {
-        "bytes": 578,
+        "bytes": 590,
         "path": "coordinator/05-assessment/inference/invocation.json",
-        "sha256": "675f38675c51a7d41c9b7744de0879acde80ea44d9915ff53befa8b3da053720"
+        "sha256": "ac95047264c5076b289eef58539fc463b4c75f6726030353a273f549400bc383"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -677,7 +521,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/05-assessment/inference/receipt.json",
-        "sha256": "52eb0ad0220d38c9fdc6b07efa98d16cf29c835dd6c34313f6d70d51ea3f86db"
+        "sha256": "b657577fe0fd9ca36d9370ea4025025945740c86354c333401503e5bf36ea4c5"
       },
       "state": "downloadable",
       "unavailable_reason": null
@@ -692,7 +536,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/05-assessment/inference/receipt.json",
-        "sha256": "52eb0ad0220d38c9fdc6b07efa98d16cf29c835dd6c34313f6d70d51ea3f86db"
+        "sha256": "b657577fe0fd9ca36d9370ea4025025945740c86354c333401503e5bf36ea4c5"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -854,21 +698,6 @@
       "unavailable_reason": null
     },
     {
-      "kind": "inference_log",
-      "media_type": "text/plain; charset=utf-8",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 8,
-        "path": "coordinator/01-attempt/inference/attempts/1/stderr.log",
-        "sha256": "86a10149acbe95519ea3283d26d57491ede09bd3010cdb756358f66352236b79"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
       "kind": "log",
       "media_type": "text/plain; charset=utf-8",
       "public_bytes": 0,
@@ -991,21 +820,6 @@
       },
       "state": "downloadable",
       "unavailable_reason": null
-    },
-    {
-      "kind": "inference_events",
-      "media_type": "application/x-ndjson",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:attempt",
-      "source": {
-        "bytes": 221,
-        "path": "coordinator/01-attempt/inference/attempts/1/events.jsonl",
-        "sha256": "10883d39e35c9e8390ebb39ce5b3a9df28c8c0ce7724e793e993075e2b62c8e4"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
     },
     {
       "kind": "events",

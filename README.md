@@ -110,7 +110,7 @@ jq . /new/report-directory/summary.json
 
 This command is explicitly opt-in. The destination must not already exist and
 must not equal or be nested beneath any source Run. It writes `summary.json`
-(schema version 1) and `comparison.txt`; it does not mutate, seal, publish, or change the status
+(schema version 2) and `comparison.txt`; it does not mutate, seal, publish, or change the status
 of source evidence. Replaying the same sealed inputs produces the same summary
 (the report deliberately has no generation timestamp). Repeated source inputs
 and shared continuation evidence are deduplicated by stable Run and invocation
@@ -133,7 +133,12 @@ cache-read, cache-write, total-token, and optional reasoning categories are
 preserved; reasoning is not added to `totalTokens`. Retries, failed responses,
 or compactions that prevent exact request accounting mark coverage partial.
 Unsupported adapters and absent usage are unavailable and do not impose a new
-adapter capability.
+adapter capability. Schema v2 also reports `inference.evidence_coverage`, deriving
+expected inference stages from authenticated preparation and selected Coordinator
+history rather than discovered receipts. It counts sealed receipts even when they
+lack usage/cost, identifies missing or unsealed receipts by exact stage ownership,
+and treats zero expected stages as complete. Missing expected evidence downgrades
+Run usage and cost independently without estimating absent values.
 
 `usage.cost` is labeled a **Pi-reported estimate from model rates**, not a billed
 charge. Currency, Pi version, and historical price-table date remain unknown

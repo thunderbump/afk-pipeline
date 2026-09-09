@@ -962,6 +962,89 @@ class MetricsReportTests(unittest.TestCase):
         self.assertEqual(report["integrity"]["status"], "invalid")
         self.assertIsNone(report["timing"])
 
+    def test_preparation_records_expected_acceptance_planning(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {"history": [], "status": "completed"},
+                "coordinator": root,
+                "preparation": {
+                    "routing": {"planner": {"status": "completed"}},
+                    "timestamps": {},
+                    "repository": {},
+                },
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(
+            report["inference"]["evidence_coverage"],
+            {
+                "status": "unavailable",
+                "expected": 1,
+                "measured": 0,
+                "missing": [
+                    {
+                        "ownership": {
+                            "kind": "run",
+                            "purpose": "acceptance_planning",
+                        },
+                        "reason": "missing_receipt",
+                    }
+                ],
+            },
+        )
+
+    def test_verified_no_action_response_is_not_expected_inference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            response = root / "01-response"
+            response.mkdir()
+            (response / "output.json").write_text(
+                json.dumps(
+                    {
+                        "outcome": "completed",
+                        "process": None,
+                        "agent": None,
+                        "response": {"finding_responses": [], "summary": "No action."},
+                        "repository": {"unchanged": True},
+                    }
+                )
+            )
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {
+                    "history": [
+                        {
+                            "sequence": 1,
+                            "component": "response",
+                            "directory": "01-response",
+                            "outcome": "completed",
+                        }
+                    ],
+                    "status": "completed",
+                },
+                "coordinator": root,
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": root,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(
+            report["inference"]["evidence_coverage"],
+            {"status": "complete", "expected": 0, "measured": 0, "missing": []},
+        )
+        self.assertEqual(report["inference"]["invocations"], [])
+
     def test_continuation_invocation_extends_original_run_wall_span(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -977,6 +1060,7 @@ class MetricsReportTests(unittest.TestCase):
                         "finished_at": "2026-01-01T00:00:05Z",
                     },
                     "repository": {},
+                    "routing": {"planner": {"status": "completed"}},
                 },
                 "terminal_directory": root,
                 "output": {"outcome": "completed"},
@@ -984,6 +1068,7 @@ class MetricsReportTests(unittest.TestCase):
                 "bead_id": None,
             }
             (root / "planner/inference").mkdir(parents=True)
+            (root / "planner/inference/receipt.json").write_text("{}")
             invocation = {
                 "source_event_identity": "continued-event",
                 "elapsed": {

@@ -2,23 +2,23 @@
   "comparisons": [
     {
       "equivalent_frozen_conditions": true,
-      "left": "b97c37a696b49b9b4f09cef38d60ae48eb64338cfee0bf763ffeb18eca4331c6",
+      "left": "77eafa68ea05efc93328121cf835f4c841b63c3ce4fda3ec050ae3204d31a207",
       "ranking": "observational_only",
-      "right": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+      "right": "8739f50a79256e54d9f9bfe38c766507441b57595caa8a0ef1df61c1550e03a5",
       "warnings": []
     },
     {
       "equivalent_frozen_conditions": true,
-      "left": "b97c37a696b49b9b4f09cef38d60ae48eb64338cfee0bf763ffeb18eca4331c6",
+      "left": "77eafa68ea05efc93328121cf835f4c841b63c3ce4fda3ec050ae3204d31a207",
       "ranking": "observational_only",
-      "right": "b4f01e6701a3ab68143a469d9b9064ad63538bfa57d7e775d823f17018e17969",
+      "right": "f411859d10e718cb70f6d2e25eac1d9f874c0c56276fbae7e3cf679c5cc054aa",
       "warnings": []
     },
     {
       "equivalent_frozen_conditions": true,
-      "left": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+      "left": "8739f50a79256e54d9f9bfe38c766507441b57595caa8a0ef1df61c1550e03a5",
       "ranking": "observational_only",
-      "right": "b4f01e6701a3ab68143a469d9b9064ad63538bfa57d7e775d823f17018e17969",
+      "right": "f411859d10e718cb70f6d2e25eac1d9f874c0c56276fbae7e3cf679c5cc054aa",
       "warnings": []
     }
   ],
@@ -30,7 +30,7 @@
   ],
   "producer": {
     "calculator": "afk_metrics.report",
-    "report_schema_version": 1,
+    "report_schema_version": 2,
     "source_revision": null
   },
   "project": "operations-webui",
@@ -40,7 +40,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-partial",
-        "workflow_run_sha256": "171044f80433c5b4069b4802a75b5da74b2df422812b9665d482a3635f2d7e1d"
+        "workflow_run_sha256": "1cce389ee25903d8ca18ab23870d7ccc19967fb9229f72cd26b087b033b467fa"
       },
       "stages": [
         {
@@ -336,6 +336,12 @@
       ],
       "summary": {
         "inference": {
+          "evidence_coverage": {
+            "expected": 3,
+            "measured": 3,
+            "missing": [],
+            "status": "complete"
+          },
           "invocations": [
             {
               "adapter": "pi-v1",
@@ -385,7 +391,7 @@
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "dc7a61aa1efaf7c92aff24200e44382a99020d7ca43b3a4f70777fd09433070b"
+              "source_event_identity": "fd1729828292497a4ec1da0f4d7071737f3723a42c402fa891e378b4077cda6d"
             },
             {
               "adapter": "pi-v1",
@@ -447,7 +453,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "4b58a6f889613874b6c59b103def306254790c0544748f1eafb9aaf7646013da"
+              "source_event_identity": "2614d6df9b52623c042ef4fb47a72791d9233f36910501cc3f0259d0a2fa110c"
             },
             {
               "adapter": "pi-v1",
@@ -502,7 +508,7 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "675f38675c51a7d41c9b7744de0879acde80ea44d9915ff53befa8b3da053720"
+              "source_event_identity": "ac95047264c5076b289eef58539fc463b4c75f6726030353a273f549400bc383"
             }
           ],
           "totals": {
@@ -553,7 +559,7 @@
           "project": "operations-webui",
           "run_id": "populated-partial"
         },
-        "source_identity": "b97c37a696b49b9b4f09cef38d60ae48eb64338cfee0bf763ffeb18eca4331c6",
+        "source_identity": "77eafa68ea05efc93328121cf835f4c841b63c3ce4fda3ec050ae3204d31a207",
         "timing": {
           "active_execution_intervals": [
             {
@@ -602,7 +608,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-v3",
-        "workflow_run_sha256": "c73d06159e5e9b7ea478112f049846e1566516aea642044e0479c7b2a152e7b3"
+        "workflow_run_sha256": "1bf30d330524c09f1ea5e12c3da47f7de9a65dcc9a75d1ef67a1bc1368d97de5"
       },
       "stages": [
         {
@@ -896,6 +902,12 @@
       ],
       "summary": {
         "inference": {
+          "evidence_coverage": {
+            "expected": 3,
+            "measured": 3,
+            "missing": [],
+            "status": "complete"
+          },
           "invocations": [
             {
               "adapter": "pi-v1",
@@ -938,7 +950,7 @@
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "8c07c5529573443bf36424662e12f732afec12b5b554c9259078e76ff381aea7"
+              "source_event_identity": "76fff50a6278088981d8be4550f2dc748acbd97abf4ba40f171e826032d13392"
             },
             {
               "adapter": "pi-v1",
@@ -1000,7 +1012,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "afed1996b12024ea9e26a5c5b9b92181566e6bc01cbdba0239ff0619077bcf9a"
+              "source_event_identity": "7467d7155d3f413a5645b8e1121e25be6bd5dd48d42703e272ec30e73a377487"
             },
             {
               "adapter": "pi-v1",
@@ -1055,7 +1067,7 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "54f419dfd395ed9be1d45f41bc4d1cca50ec698f6ba4434d3c1fc06b0caa159a"
+              "source_event_identity": "d8ce36c2d96ffbd41bdd2045314143871732bc2a4e8abd0de3e8966040ac0a9b"
             }
           ],
           "totals": {
@@ -1106,7 +1118,7 @@
           "project": "operations-webui",
           "run_id": "populated-v3"
         },
-        "source_identity": "e96f2a4bf29f5f2103ac6afa5492e07a42ec38f88b76d1ee8f9c1e7d4ee45a5b",
+        "source_identity": "8739f50a79256e54d9f9bfe38c766507441b57595caa8a0ef1df61c1550e03a5",
         "timing": {
           "active_execution_intervals": [
             {
@@ -1159,7 +1171,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-abandoned",
-        "workflow_run_sha256": "35e11967c7c0f57d49cae44386b5e234d587597f86cdb67c764b82d5340f3ffc"
+        "workflow_run_sha256": "3e14135c0450fcc9bd3b55a489978accf55e2c0bf61cb2063880940254dbe959"
       },
       "stages": [
         {
@@ -1461,6 +1473,53 @@
       ],
       "summary": {
         "inference": {
+          "evidence_coverage": {
+            "expected": 5,
+            "measured": 0,
+            "missing": [
+              {
+                "ownership": {
+                  "component": "attempt",
+                  "kind": "component",
+                  "sequence": 1
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "review",
+                  "kind": "component",
+                  "sequence": 4
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "assessment",
+                  "kind": "component",
+                  "sequence": 5
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "response",
+                  "kind": "component",
+                  "sequence": 7
+                },
+                "reason": "unsealed_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "response",
+                  "kind": "component",
+                  "sequence": 8
+                },
+                "reason": "missing_receipt"
+              }
+            ],
+            "status": "unavailable"
+          },
           "invocations": [
             {
               "adapter": null,
@@ -1507,7 +1566,7 @@
             },
             "elapsed_seconds": null,
             "usage": {},
-            "usage_coverage": "partial"
+            "usage_coverage": "unavailable"
           }
         },
         "integrity": {
@@ -1530,7 +1589,7 @@
           "project": "operations-webui",
           "run_id": "populated-abandoned"
         },
-        "source_identity": "b4f01e6701a3ab68143a469d9b9064ad63538bfa57d7e775d823f17018e17969",
+        "source_identity": "f411859d10e718cb70f6d2e25eac1d9f874c0c56276fbae7e3cf679c5cc054aa",
         "timing": {
           "active_execution_intervals": [
             {
@@ -1563,5 +1622,5 @@
       }
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

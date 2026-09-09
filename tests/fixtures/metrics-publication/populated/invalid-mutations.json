@@ -105,5 +105,66 @@
     ],
     "operation": "set",
     "value": []
+  },
+  {
+    "name": "coverage-inconsistent-counts",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "evidence_coverage",
+      "measured"
+    ],
+    "operation": "set",
+    "value": 2
+  },
+  {
+    "name": "coverage-inconsistent-status",
+    "path": [
+      "runs",
+      0,
+      "summary",
+      "inference",
+      "evidence_coverage",
+      "status"
+    ],
+    "operation": "set",
+    "value": "partial"
+  },
+  {
+    "name": "coverage-malformed-ownership",
+    "path": [
+      "runs",
+      2,
+      "summary",
+      "inference",
+      "evidence_coverage",
+      "missing",
+      0,
+      "ownership",
+      "kind"
+    ],
+    "operation": "set",
+    "value": "invented"
+  },
+  {
+    "name": "coverage-duplicate-ownership",
+    "path": [
+      "runs",
+      2,
+      "summary",
+      "inference",
+      "evidence_coverage",
+      "missing",
+      1,
+      "ownership"
+    ],
+    "operation": "set",
+    "value": {
+      "kind": "component",
+      "sequence": 1,
+      "component": "attempt"
+    }
   }
 ]

@@ -9,8 +9,29 @@ from tests.metrics_publication_fixtures import FIXTURES, generate
 
 class PopulatedPublicationTests(unittest.TestCase):
     def assert_cases(self, directory, publication):
+        self.assertEqual(publication["schema_version"], 2)
+        self.assertEqual(publication["producer"]["report_schema_version"], 2)
         self.assertEqual(len(publication["runs"]), 3)
         legacy = json.loads((directory / "producer-only-v2.json").read_text())
+        self.assertEqual(legacy["schema_version"], 2)
+        self.assertEqual(
+            legacy["runs"][0]["summary"]["inference"]["evidence_coverage"],
+            {
+                "status": "partial",
+                "expected": 3,
+                "measured": 2,
+                "missing": [
+                    {
+                        "ownership": {
+                            "kind": "component",
+                            "sequence": 1,
+                            "component": "attempt",
+                        },
+                        "reason": "missing_receipt",
+                    }
+                ],
+            },
+        )
         self.assertEqual(legacy["runs"][0]["binding"]["bundle_schema_version"], 2)
         self.assertEqual(
             legacy["runs"][0]["binding"]["workflow_run_sha256"],
@@ -40,6 +61,10 @@ class PopulatedPublicationTests(unittest.TestCase):
                 )
             )
         for run in publication["runs"][:2]:
+            self.assertEqual(
+                run["summary"]["inference"]["evidence_coverage"],
+                {"status": "complete", "expected": 3, "measured": 3, "missing": []},
+            )
             invocations = {
                 row["purpose"]: row
                 for row in run["summary"]["inference"]["invocations"]
@@ -87,7 +112,18 @@ class PopulatedPublicationTests(unittest.TestCase):
             self.assertEqual(rows[1]["usage"], attempt["usage"])
             duration = None if run["binding"]["run_id"] == "populated-partial" else 0
             self.assertEqual(rows[2]["repository_validation_seconds"], duration)
-        abandoned = publication["runs"][2]["summary"]["inference"]["invocations"][0]
+        abandoned_summary = publication["runs"][2]["summary"]["inference"]
+        self.assertEqual(abandoned_summary["evidence_coverage"]["expected"], 5)
+        self.assertEqual(abandoned_summary["evidence_coverage"]["measured"], 0)
+        self.assertEqual(abandoned_summary["totals"]["usage_coverage"], "unavailable")
+        self.assertEqual(
+            [
+                item["reason"]
+                for item in abandoned_summary["evidence_coverage"]["missing"][-2:]
+            ],
+            ["unsealed_receipt", "missing_receipt"],
+        )
+        abandoned = abandoned_summary["invocations"][0]
         self.assertEqual(
             abandoned["metrics"]["reason"], "unsealed_abandoned_invocation"
         )
@@ -115,4 +151,8 @@ class PopulatedPublicationTests(unittest.TestCase):
                 self.assertEqual(
                     actual["summary"]["inference"]["totals"],
                     expected["summary"]["inference"]["totals"],
+                )
+                self.assertEqual(
+                    actual["summary"]["inference"]["evidence_coverage"],
+                    expected["summary"]["inference"]["evidence_coverage"],
                 )

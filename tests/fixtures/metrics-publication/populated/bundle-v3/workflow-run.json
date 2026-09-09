@@ -4,9 +4,9 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/assignment.json",
-      "public_bytes": 282,
-      "public_sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4",
-      "sanitization_status": "sanitized",
+      "public_bytes": 235,
+      "public_sha256": "9d5ea46338485df0f668cab318dbc761ca923949613a8cc5bb28457de2a36456",
+      "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
         "path": "assignment.json"
@@ -32,8 +32,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
-      "public_bytes": 249,
-      "public_sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb",
+      "public_bytes": 259,
+      "public_sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -206,8 +206,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/output.json",
-      "public_bytes": 303,
-      "public_sha256": "9dd163b21d96da7e01f0ca80b1fe92ef6872ef21816907d7a804d72f69341eb7",
+      "public_bytes": 323,
+      "public_sha256": "ac90edfc96735a433f27de413038e6099c77063806a591a66ed8bea9c2d39ecc",
       "sanitization_status": "sanitized",
       "scope": "component:3:change",
       "source": {
@@ -458,9 +458,9 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/assignment.json",
-      "public_bytes": 282,
-      "public_sha256": "317152ca6a44b61cc9a0f6c5631608bb893e1bfa9dbddd4e207da90c33a70ef4",
-      "sanitization_status": "sanitized",
+      "public_bytes": 235,
+      "public_sha256": "9d5ea46338485df0f668cab318dbc761ca923949613a8cc5bb28457de2a36456",
+      "sanitization_status": "unchanged",
       "scope": "coordinator",
       "source": {
         "path": "coordinator/assignment.json"
@@ -472,8 +472,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
-      "public_bytes": 249,
-      "public_sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb",
+      "public_bytes": 259,
+      "public_sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -514,8 +514,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
-      "public_bytes": 1056,
-      "public_sha256": "011af02e74751c9ee113587ea49c0c9f5446a199ef953ad5ce9ebe376e2b5737",
+      "public_bytes": 1106,
+      "public_sha256": "2d21b30e15e5dd33c5f2afd863b78a1b68373079c6f7d4ef386c58565760b455",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {

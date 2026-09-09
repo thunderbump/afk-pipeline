@@ -16,7 +16,7 @@
   ],
   "producer": {
     "calculator": "afk_metrics.report",
-    "report_schema_version": 1,
+    "report_schema_version": 2,
     "source_revision": null
   },
   "project": "operations-webui",
@@ -278,6 +278,37 @@
       ],
       "summary": {
         "inference": {
+          "evidence_coverage": {
+            "expected": 3,
+            "measured": 0,
+            "missing": [
+              {
+                "ownership": {
+                  "component": "attempt",
+                  "kind": "component",
+                  "sequence": 1
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "review",
+                  "kind": "component",
+                  "sequence": 4
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "assessment",
+                  "kind": "component",
+                  "sequence": 5
+                },
+                "reason": "missing_receipt"
+              }
+            ],
+            "status": "unavailable"
+          },
           "invocations": [],
           "totals": {
             "compaction_usage": {},
@@ -602,6 +633,37 @@
       ],
       "summary": {
         "inference": {
+          "evidence_coverage": {
+            "expected": 3,
+            "measured": 0,
+            "missing": [
+              {
+                "ownership": {
+                  "component": "attempt",
+                  "kind": "component",
+                  "sequence": 1
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "review",
+                  "kind": "component",
+                  "sequence": 4
+                },
+                "reason": "missing_receipt"
+              },
+              {
+                "ownership": {
+                  "component": "assessment",
+                  "kind": "component",
+                  "sequence": 5
+                },
+                "reason": "missing_receipt"
+              }
+            ],
+            "status": "unavailable"
+          },
           "invocations": [],
           "totals": {
             "compaction_usage": {},
@@ -670,5 +732,5 @@
       }
     }
   ],
-  "schema_version": 1
+  "schema_version": 2
 }

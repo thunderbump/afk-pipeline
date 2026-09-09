@@ -540,12 +540,12 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
     if len(comparisons) > MAX_COMPARISONS:
         raise PublicationError("publication comparison count exceeds limit")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "afk-metrics-publication",
         "project": project,
         "producer": {
             "calculator": "afk_metrics.report",
-            "report_schema_version": 1,
+            "report_schema_version": 2,
             "source_revision": _source_revision(),
         },
         "runs": published,

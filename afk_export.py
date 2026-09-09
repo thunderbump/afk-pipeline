@@ -2843,13 +2843,20 @@ def normalize_component_output(component, value, redactions):
         result["duration_seconds"] = duration
     if "process" in value:
         process = value["process"]
-        if not isinstance(process, dict):
+        if process is None and component_contract_allows_null_agent(component, value):
+            result["process"] = None
+        elif isinstance(process, dict):
+            result["process"] = {
+                "exit_code": integer_or_none(process.get("exit_code")),
+                "signal": integer_or_none(process.get("signal")),
+                **(
+                    {"error_category": "execution_error"}
+                    if process.get("error")
+                    else {}
+                ),
+            }
+        else:
             raise ExportError("invalid process facts")
-        result["process"] = {
-            "exit_code": integer_or_none(process.get("exit_code")),
-            "signal": integer_or_none(process.get("signal")),
-            **({"error_category": "execution_error"} if process.get("error") else {}),
-        }
     if "agent" in value:
         # A permitted null agent is an observed fact: no response was accepted
         # (or required for the no-action Response path). Preserve that absence
