@@ -1256,7 +1256,12 @@ def artifact_candidates(observed):
     # metrics. Retain every inference path's lexical availability at this
     # checkpoint so the report never discovers a path created during projection.
     inference_states = {}
+    metrics_evidence_sha256 = {}
     observed["_metrics_inference_states"] = inference_states
+    # Keep the private identities of the exact artifact pass used to authenticate
+    # publication metrics.  The report receives only this digest catalog (never
+    # private bytes) and rejects a later, self-consistent replacement snapshot.
+    observed["_metrics_evidence_sha256"] = metrics_evidence_sha256
 
     def add(
         relative,
@@ -1296,9 +1301,14 @@ def artifact_candidates(observed):
         if identity in seen:
             return
         seen.add(identity)
+        if expected_sha256 is not None:
+            previous = metrics_evidence_sha256.setdefault(relative, expected_sha256)
+            if previous != expected_sha256:
+                raise ExportError("metrics evidence identities collide")
         result.append(
             {
                 "root": root,
+                "_metrics_evidence_sha256": metrics_evidence_sha256,
                 "source": relative,
                 "scope": scope,
                 "kind": kind,
@@ -2394,6 +2404,13 @@ def derive_public_artifact(candidate, redactions):
             # Optional evidence remains describable, but required frozen context
             # cannot degrade into a nondownloadable artifact after source loading.
             return unavailable("unavailable", "unavailable")
+    if generated is None and not candidate.get("unsafe_path"):
+        evidence = candidate.get("_metrics_evidence_sha256")
+        if isinstance(evidence, dict):
+            source_digest = digest(raw)
+            previous = evidence.setdefault(source, source_digest)
+            if previous != source_digest:
+                raise ExportError("metrics evidence identities collide")
     json_sanitizer = (
         sanitize_secret_json_value
         if candidate.get("secrets_only")

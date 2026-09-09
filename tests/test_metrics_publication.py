@@ -215,6 +215,35 @@ class MetricsPublicationTests(unittest.TestCase):
             ):
                 build_publication(request)
 
+    def test_transient_replacement_restored_before_confirmation_is_rejected(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, _bundle, request = self.fixture(root)
+            output_path = source / "coordinator/02-validation/output.json"
+            original = output_path.read_bytes()
+            replacement = json.loads(original)
+            replacement["duration_seconds"] = 99
+            replacement_raw = (json.dumps(replacement) + "\n").encode()
+            actual_summarize = __import__(
+                "afk_metrics.publication", fromlist=["summarize_source"]
+            ).summarize_source
+
+            def summarize_replacement_then_restore(*args, **kwargs):
+                output_path.write_bytes(replacement_raw)
+                try:
+                    return actual_summarize(*args, **kwargs)
+                finally:
+                    output_path.write_bytes(original)
+
+            with (
+                mock.patch(
+                    "afk_metrics.publication.summarize_source",
+                    side_effect=summarize_replacement_then_restore,
+                ),
+                self.assertRaisesRegex(PublicationError, "metrics verification"),
+            ):
+                build_publication(request)
+
     def test_abandoned_inference_change_during_projection_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

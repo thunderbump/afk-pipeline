@@ -20,6 +20,7 @@ from typing import Any
 
 from afk_coordinate.contract import validate_component_output
 from afk_export import (
+    MAX_JSON_BYTES,
     ExportError,
     ExportUsageError,
     hash_file_beneath,
@@ -28,7 +29,7 @@ from afk_export import (
     normalize_component_output,
     open_directory_beneath,
     open_file_beneath,
-    read_json_at,
+    read_bytes_at,
     receipt_bound_inference_artifacts,
 )
 
@@ -427,22 +428,36 @@ def _safe_json(path: Path) -> dict[str, Any]:
     return value
 
 
-def _safe_evidence_json(root: Path, relative: str, name: str) -> dict[str, Any]:
-    """Read JSON through Export's no-follow, real-directory evidence boundary."""
+def _safe_evidence_json(
+    root: Path,
+    relative: str,
+    name: str,
+    expected_sha256: str | None = None,
+) -> dict[str, Any]:
+    """Read one stable JSON inode and optionally bind it to a prior snapshot."""
     descriptor = open_directory_beneath(root, relative)
     try:
-        value = read_json_at(descriptor, name)
+        raw = read_bytes_at(descriptor, name, MAX_JSON_BYTES)
     finally:
         os.close(descriptor)
+    if (
+        expected_sha256 is not None
+        and hashlib.sha256(raw).hexdigest() != expected_sha256
+    ):
+        raise ValueError("metrics evidence changed after authentication")
+    value = json.loads(raw)
     if not isinstance(value, dict):
         raise TypeError("expected JSON object")
     return value
 
 
 def _safe_optional_evidence_json(
-    root: Path, relative: str, name: str
+    root: Path,
+    relative: str,
+    name: str,
+    expected_sha256: str | None = None,
 ) -> dict[str, Any] | None:
-    """Atomically open optional JSON without following mutable path entries."""
+    """Atomically open optional JSON and bind present bytes to a prior snapshot."""
     descriptor = (
         open_directory_beneath(root, relative)
         if relative
@@ -450,11 +465,19 @@ def _safe_optional_evidence_json(
     )
     try:
         try:
-            value = read_json_at(descriptor, name)
+            raw = read_bytes_at(descriptor, name, MAX_JSON_BYTES)
         except FileNotFoundError:
+            if expected_sha256 is not None:
+                raise ValueError("metrics evidence changed after authentication")
             return None
     finally:
         os.close(descriptor)
+    if (
+        expected_sha256 is not None
+        and hashlib.sha256(raw).hexdigest() != expected_sha256
+    ):
+        raise ValueError("metrics evidence changed after authentication")
+    value = json.loads(raw)
     if not isinstance(value, dict):
         raise TypeError("expected JSON object")
     return value
@@ -895,8 +918,45 @@ def _validate_pi_metric_receipt(
         raise ValueError("Pi receipt terminal contract is invalid")
 
 
-def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
-    receipt = _safe_evidence_json(root, relative, "receipt.json")
+def _check_inference_checkpoint(
+    catalog: list[dict[str, Any]],
+    relative: str,
+    expected_evidence: dict[str, str] | None,
+) -> None:
+    """Require this authenticated receipt catalog to match Export's first pass."""
+    if expected_evidence is None:
+        return
+    prefix = relative + "/"
+    expected = {
+        path: digest
+        for path, digest in expected_evidence.items()
+        if path.startswith(prefix)
+    }
+    actual = {}
+    for item in catalog:
+        path, digest = item.get("relative"), item.get("expected_sha256")
+        if isinstance(path, str) and isinstance(digest, str):
+            previous = actual.setdefault(path, digest)
+            if previous != digest:
+                raise ValueError("metrics evidence identities collide")
+    if not expected or actual != expected:
+        raise ValueError("metrics evidence changed after authentication")
+
+
+def _invocation(
+    root: Path,
+    relative: str,
+    purpose: str,
+    expected_evidence: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    receipt = _safe_evidence_json(
+        root,
+        relative,
+        "receipt.json",
+        expected_evidence.get(f"{relative}/receipt.json")
+        if expected_evidence is not None
+        else None,
+    )
     identity = (
         receipt.get("identity") if isinstance(receipt.get("identity"), dict) else {}
     )
@@ -936,11 +996,27 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
         receipt.get("attempts") if isinstance(receipt.get("attempts"), list) else []
     )
     if family != "pi":
+        # Compare the complete receipt-authenticated catalog with the first
+        # normalization pass before interpreting any metric. This catches a
+        # valid replacement receipt and event set even if the original is put
+        # back before publication's final source check.
+        if expected_evidence is not None:
+            checkpoint_catalog = receipt_bound_inference_artifacts(
+                root, relative, purpose
+            )
+            _check_inference_checkpoint(checkpoint_catalog, relative, expected_evidence)
         # Fixture receipts have a repository-known contract and can be fully
         # authenticated. Other retained adapter families are deliberately an
         # observational reporting boundary: preserve the invocation, but do not
         # interpret adapter-specific event streams as usage or cost evidence.
-        invocation = _safe_evidence_json(root, relative, "invocation.json")
+        invocation = _safe_evidence_json(
+            root,
+            relative,
+            "invocation.json",
+            expected_evidence.get(f"{relative}/invocation.json")
+            if expected_evidence is not None
+            else None,
+        )
         adapter = invocation.get("adapter")
         if isinstance(adapter, dict) and adapter.get("kind") == "fixture":
             _verify_generic_receipt(root / relative, receipt)
@@ -1004,12 +1080,13 @@ def _invocation(root: Path, relative: str, purpose: str) -> dict[str, Any]:
                 os.close(descriptor)
         return authenticated, values
 
-    _catalog, consumed = receipt_bound_inference_artifacts(
+    catalog, consumed = receipt_bound_inference_artifacts(
         root,
         relative,
         purpose,
         authenticated_context_consumer=consume_events,
     )
+    _check_inference_checkpoint(catalog, relative, expected_evidence)
     receipt, parsed = consumed
     attempts = receipt.get("attempts", [])
     identity = receipt["identity"]
@@ -1284,6 +1361,9 @@ def summarize_source(
     candidates: list[tuple[str, str, dict[str, Any]]] = []
     abandoned_candidates: set[str] = set()
     checkpoint_states = observed.get("_metrics_inference_states")
+    checkpoint_evidence = observed.get("_metrics_evidence_sha256")
+    if not isinstance(checkpoint_evidence, dict):
+        checkpoint_evidence = None
 
     def checkpointed_state(relative: str, path: Path) -> str:
         if isinstance(checkpoint_states, dict):
@@ -1351,8 +1431,12 @@ def summarize_source(
                 # this projection. Never upgrade it from a receipt that appears
                 # after Export captured the source observation.
                 item = _unavailable_invocation(relative, purpose)
-            else:
+            elif checkpoint_evidence is None:
                 item = _invocation(root, relative, purpose)
+            else:
+                item = _invocation(
+                    root, relative, purpose, expected_evidence=checkpoint_evidence
+                )
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
@@ -1384,7 +1468,20 @@ def summarize_source(
                     coordinator, continuation_roots, entry, "output.json"
                 )
                 component_relative = relative_evidence(output_path.parent)
-                output = _safe_evidence_json(root, component_relative, "output.json")
+                validation_relative = f"{component_relative}/output.json"
+                output = _safe_evidence_json(
+                    root,
+                    component_relative,
+                    "output.json",
+                    checkpoint_evidence.get(validation_relative)
+                    if checkpoint_evidence is not None
+                    else None,
+                )
+                if (
+                    checkpoint_evidence is not None
+                    and validation_relative not in checkpoint_evidence
+                ):
+                    raise ValueError("metrics evidence was not authenticated")
                 if validate_component_output("validation", output) != entry.get(
                     "outcome"
                 ):
@@ -1444,9 +1541,18 @@ def summarize_source(
         terminal_relative = (
             terminal_relative_path.as_posix() if terminal_relative_path.parts else ""
         )
+        publication_checkpointed = "_metrics_publication_sha256" in observed
+        publication_expected = observed.get("_metrics_publication_sha256")
         publication_value = _safe_optional_evidence_json(
-            root, terminal_relative, "publication.json"
+            root,
+            terminal_relative,
+            "publication.json",
+            publication_expected,
         )
+        if publication_checkpointed and (
+            (publication_expected is None) != (publication_value is None)
+        ):
+            raise ValueError("metrics evidence changed after authentication")
         if publication_value is not None:
             publication = _validated_publication(publication_value)
             publication_seconds = _seconds(

@@ -457,6 +457,10 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             expected, _ = normalize_run_v2(observed, include_artifacts=False)
             evidence_checkpoint, _ = normalize_run_v2(observed, include_artifacts=True)
             publication_digest = _publication_evidence_digest(source, observed)
+            # The report must consume the identities captured by this exact
+            # normalization pass, rather than merely agreeing with another pass
+            # after a transient replacement has been restored.
+            observed["_metrics_publication_sha256"] = publication_digest
         except (
             OSError,
             ValueError,
