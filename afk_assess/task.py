@@ -30,11 +30,22 @@ def build_task(
     related = assessment_input.get("related_work")
     related_records = snapshot_records(related) if related is not None else []
     related_work_ids = {record["id"] for record in related_records}
+    if "work_context" in evidence.get("input", {}):
+        # Review's diff.patch now covers the whole work item. Preserve the
+        # assessor's existing latest-change payload without inlining that larger file.
+        from afk_review.context import diff_bytes
+
+        repository = evidence["change_output"]["change"]["repository"]
+        reviewed_diff = diff_bytes(
+            workspace, repository["before"]["head"], repository["after"]["head"]
+        ).decode()
+    else:
+        reviewed_diff = (review_directory / "diff.patch").read_text()
     data = {
         "objective": objective,
         "findings": review["findings"],
         "review": review,
-        "reviewed_diff": (review_directory / "diff.patch").read_text(),
+        "reviewed_diff": reviewed_diff,
         "committed_change": evidence["change_output"],
         "validation": {
             "input": evidence["validation_input"],

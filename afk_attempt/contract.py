@@ -1,5 +1,6 @@
 """Validate the durable Assignment input shared by AFK components."""
 
+import re
 from pathlib import Path
 
 from afk_related_work import validate_reference
@@ -26,6 +27,11 @@ def validate_assignment(assignment: object) -> dict[str, object]:
     timeout = assignment.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("assignment timeout_seconds must be a positive integer")
+    if "work_base" in assignment and (
+        not isinstance(assignment["work_base"], str)
+        or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", assignment["work_base"]) is None
+    ):
+        raise ValueError("Assignment work_base must be a canonical commit ID")
     if "related_work" in assignment:
         validate_reference(assignment["related_work"])
         instructions = assignment.get("related_work_instructions")

@@ -520,6 +520,16 @@ def review_input(request, assignment, state, run_directory):
         assignment["workspace"],
         request["agent_timeout_seconds"],
         related_work=request.get("related_work"),
+        **(
+            {
+                "work_context": {
+                    "schema_version": 1,
+                    "work_base": assignment["work_base"],
+                }
+            }
+            if "work_base" in assignment
+            else {}
+        ),
         change_directory=str((run_directory / change).resolve()),
         validation_directory=str((run_directory / validation).resolve()),
     )

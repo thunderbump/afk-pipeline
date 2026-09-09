@@ -1,5 +1,6 @@
 """Validate structured Review results against the exact reviewed Git object."""
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -14,6 +15,19 @@ REVIEW_AUDIT = {
 }
 
 
+def validate_context(value):
+    if (
+        not isinstance(value, dict)
+        or set(value) != {"schema_version", "work_base"}
+        or type(value.get("schema_version")) is not int
+        or value["schema_version"] != 1
+        or not isinstance(value.get("work_base"), str)
+        or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["work_base"]) is None
+    ):
+        raise ValueError("invalid Review work context")
+    return value
+
+
 def validate_input(value: object) -> dict[str, object]:
     """Validate the complete persisted Review input contract without I/O."""
     required = {
@@ -23,7 +37,7 @@ def validate_input(value: object) -> dict[str, object]:
         "validation_directory",
         "timeout_seconds",
     }
-    allowed = required | {"related_work"}
+    allowed = required | {"related_work", "work_context"}
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("review must use schema_version 1")
     if "inference" in value:
@@ -34,6 +48,8 @@ def validate_input(value: object) -> dict[str, object]:
             raise ValueError(f"review {field} must be an absolute path")
     if not set(value) <= allowed:
         raise ValueError("review input fields are malformed")
+    if "work_context" in value:
+        validate_context(value["work_context"])
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("review timeout_seconds must be a positive integer")

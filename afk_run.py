@@ -315,6 +315,7 @@ def run(bead_id, config_path):
             "objective": objective(bead),
             "workspace": str(worktree),
             **assignment_defaults,
+            "work_base": base_commit,
             "source": {"kind": "bead", "id": bead_id},
             "related_work": related_work,
             "related_work_instructions": (

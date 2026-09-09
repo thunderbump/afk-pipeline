@@ -407,6 +407,9 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertIsNone(preparation["coordinator"]["decision"])
         self.assertTrue(Path(assignment["workspace"]).is_dir())
         self.assertEqual(
+            assignment["work_base"], preparation["repository"]["base_commit"]
+        )
+        self.assertEqual(
             json.loads(
                 (Path(assignment["workspace"]) / "worker-environment.json").read_text()
             ),
@@ -1221,6 +1224,10 @@ class RunPreparerCliTest(unittest.TestCase):
     def write_completed_coordinator(self, coordinator, output):
         source = coordinator.parent
         assignment = json.loads((source / "assignment.json").read_text())
+        # This sparse publication-only fixture models legacy evidence; the real
+        # Coordinator tests cover the new Review packet and its export binding.
+        assignment.pop("work_base", None)
+        (source / "assignment.json").write_text(json.dumps(assignment))
         request = json.loads((source / "coordinator-request.json").read_text())
         state = {
             "schema_version": 1,

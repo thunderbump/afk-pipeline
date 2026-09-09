@@ -46,6 +46,8 @@ def main() -> int:
 
     progress("observing repository before attempt")
     before = repository_state(workspace)
+    if assignment.get("work_base", before["head"]) != before["head"]:
+        raise ValueError("Assignment work_base must match the initial repository HEAD")
     progress("preparing attempt directory")
     attempt_directory.mkdir()
     write_json(attempt_directory / "input.json", assignment)

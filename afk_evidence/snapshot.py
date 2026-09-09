@@ -371,6 +371,8 @@ def _validate_preparation(value, root, assignment, request, context):
         or not isinstance(timestamps.get("prepared_at"), str)
         or timestamps.get("finished_at") is not None
         and not isinstance(timestamps.get("finished_at"), str)
+        or "work_base" in assignment
+        and assignment["work_base"] != repository["base_commit"]
         or value.get("related_work") != assignment.get("related_work")
         or value.get("related_work") != request.get("related_work")
         or not isinstance(value.get("errors"), list)
@@ -546,7 +548,13 @@ def _verify_stage_provenance(reader, history, roots, context, assignment):
                         "Review lacks Change or Validation provenance"
                     )
                 reviews[row["sequence"]] = _verify_review(
-                    reader, roots, row, change_row, validation_row, assignment
+                    reader,
+                    roots,
+                    row,
+                    change_row,
+                    validation_row,
+                    assignment,
+                    context.repository,
                 )
             elif row["component"] == "assessment":
                 review_row = next(
@@ -605,7 +613,7 @@ def _related_ids(reader, reference):
 
 
 def _review_local_facts(
-    reader, roots, review_row, change_row, validation_row, assignment
+    reader, roots, review_row, change_row, validation_row, assignment, repository=None
 ):
     """Validate Review facts that do not depend on Validation log access."""
     review_dir = _invocation_path(roots, review_row, "output.json").parent
@@ -624,18 +632,20 @@ def _review_local_facts(
         if Path(value).absolute() != expected.absolute():
             raise RunValidationError(f"Review {field} does not match history")
     change = validate_change_output(reader.json(change_dir / "output.json"))
-    repository = review_output.get("repository")
-    if not isinstance(repository, dict):
+    repository_evidence = review_output.get("repository")
+    if not isinstance(repository_evidence, dict):
         raise RunValidationError("invalid Review repository evidence")
     subject = _subject(change["repository"]["after"])
-    review_states = [_subject(repository.get(key)) for key in ("before", "after")]
+    review_states = [
+        _subject(repository_evidence.get(key)) for key in ("before", "after")
+    ]
     workspace = review_input.get("workspace")
     # Check facts local to Change and Review before reading transitive
     # Validation proof. Missing Validation logs must not hide a contradictory
     # later Review subject or workspace.
     if (
         review_output.get("outcome") != "completed"
-        or repository.get("unchanged") is not True
+        or repository_evidence.get("unchanged") is not True
         or any(state != subject for state in review_states)
     ):
         raise RunValidationError("Change and Review subjects disagree")
@@ -644,6 +654,11 @@ def _review_local_facts(
         or Path(workspace).absolute() != Path(change["workspace"]).absolute()
     ):
         raise RunValidationError("stage workspaces disagree")
+    from afk_review.context import validate_retained_context
+
+    validate_retained_context(
+        review_dir, review_input, review_output, assignment, change, reader, repository
+    )
     related = review_input.get("related_work")
     if assignment.get("related_work") != related:
         raise RunValidationError("stage related-work evidence must match Assignment")
@@ -656,9 +671,11 @@ def _review_local_facts(
     return review_dir, review_input, review_output, review, subject
 
 
-def _verify_review(reader, roots, review_row, change_row, validation_row, assignment):
+def _verify_review(
+    reader, roots, review_row, change_row, validation_row, assignment, repository=None
+):
     facts = _review_local_facts(
-        reader, roots, review_row, change_row, validation_row, assignment
+        reader, roots, review_row, change_row, validation_row, assignment, repository
     )
     _review_dir, review_input, review_output, _review, subject = facts
     validation_dir = _invocation_path(roots, validation_row, "output.json").parent
