@@ -602,8 +602,8 @@ digest, counts toward its byte budget, and creates no additional record ID.
 Legacy snapshots without metadata remain valid; continuations reuse their
 original snapshot bytes. Metadata is not ownership evidence, and absence from
 a bounded snapshot never proves that other work does not exist. Only included
-record IDs may support related ownership. Review and Assessment task contract
-version 3 and new Assignment guidance state that limitation; their semantic
+record IDs may support related ownership. Review and Assessment task instructions
+and new Assignment guidance state that limitation; their semantic
 result schemas are unchanged. Publication retains the exact validated JSONL.
 The count, byte size, digest and media type remain bound into Preparation,
 Assignment and Coordinator evidence. Implementer can query the frozen path;
@@ -935,7 +935,7 @@ For a new prepared Assignment, Coordinator adds:
 
 Review verifies that base against the Assignment carried by the existing
 Committed Change source proof, rather than inferring it from a branch. Task
-contract version 4 supplies a bounded Git change summary and hash/size-bound
+contract version 6 supplies a bounded Git change summary and hash/size-bound
 file references. `diff.patch` covers work base through current candidate;
 `repair.patch` covers the true latest Committed Change. When both ranges match,
 the two references share `diff.patch` without duplicating it. Each patch is
@@ -960,13 +960,32 @@ with repository access also compares patch bytes with Git. The existing public
 files remain private local evidence, without new public artifact kinds.
 Finding Assessment retains its existing latest-change inline payload, derived
 from the actual Committed Change range, instead of inheriting Review's larger
-full-work patch. Its adjudication policy is unchanged.
+full-work patch. Its diff scope is unchanged.
 
 Standalone and retained legacy input without `work_context` continues to use
-task contract version 3 and the latest-change inline diff. The default runtime
+task contract version 5 and the latest-change inline diff. The default runtime
 adapter uses Pi with the frozen Review model/thinking policy. Deployment uses
 the shared inference configuration; durable Review input cannot replace an
 adapter or command. Authentication stays in the execution environment.
+
+Review and Finding Assessment use one shared finding validity standard in
+`afk_finding_standard.py`. Concrete behavior failures, unmet required behavior,
+explicit test/documentation omissions, demonstrated design maintenance/change
+cost, and applicable adopted-standard violations can be valid findings. Evidence
+must establish the requirement/gap or feasible mechanism and impact. A runtime
+failure is not required for a missing deliverable. Arbitrary coverage requests,
+unsupported operating assumptions, speculative hardening and preferences alone
+remain insufficient. Validity and ownership are separate judgments; only the
+existing confirmed/current route makes a finding actionable.
+
+The clarified instructions use Review task versions 5 (legacy diff delivery)
+and 6 (complete-work delivery), and Assessment version 4. Existing result schemas,
+context schema 1, model policy, and routing are unchanged. Retained receipts keep
+their original instructions; newly executed stages use the current standard,
+including stages in a continued legacy Run. There is no new inference stage or
+completion-acceptance decision. `tests/fixtures/finding-standard.md` records
+positive and negative evaluation cases. Prompt transport and contract checks
+verify what is supplied and accepted structurally, not model judgment quality.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
 the single read-only inference invocation receipt, and an atomically sealed

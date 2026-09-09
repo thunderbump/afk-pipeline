@@ -1256,6 +1256,12 @@ class CoordinatorCliTest(unittest.TestCase):
             assessment["prompt"]["untrusted_task_data"]["reviewed_diff"],
             repair.read_text(),
         )
+        self.assertEqual(receipt["task_contract_version"], 6)
+        self.assertEqual(assessment["task_contract_version"], 4)
+        for invocation in (receipt, assessment):
+            instructions = invocation["prompt"]["trusted_task_instructions"]
+            self.assertIn("A runtime failure is not required", instructions)
+            self.assertIn("Decide validity separately from ownership", instructions)
         self.assertIn(str(work), receipt["prompt"]["system"])
         self.assertTrue(work.is_relative_to(review))
         snapshot = read_run(
@@ -1322,7 +1328,7 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "04-review/inference/invocation.json").read_text()
         )
         data = invocation["prompt"]["untrusted_task_data"]
-        self.assertEqual(invocation["task_contract_version"], 4)
+        self.assertEqual(invocation["task_contract_version"], 6)
         self.assertLess(len(json.dumps(data).encode()), 15000)
         context = data["work_context"]
         full = Path(context["files"]["work_diff"]["path"])
