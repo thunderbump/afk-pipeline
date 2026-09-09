@@ -10,9 +10,17 @@ from tests.metrics_publication_fixtures import FIXTURES, generate
 class PopulatedPublicationTests(unittest.TestCase):
     def assert_cases(self, directory, publication):
         self.assertEqual(len(publication["runs"]), 3)
+        legacy = json.loads((directory / "producer-only-v2.json").read_text())
+        self.assertEqual(legacy["runs"][0]["binding"]["bundle_schema_version"], 2)
+        self.assertEqual(
+            legacy["runs"][0]["binding"]["workflow_run_sha256"],
+            hashlib.sha256(
+                (directory / "producer-only-v2/workflow-run.json").read_bytes()
+            ).hexdigest(),
+        )
         for run, bundle_name in zip(
             publication["runs"],
-            ("bundle-v2", "bundle-v3", "bundle-abandoned"),
+            ("bundle-partial", "bundle-v3", "bundle-abandoned"),
             strict=True,
         ):
             bundle = directory / bundle_name
@@ -38,7 +46,7 @@ class PopulatedPublicationTests(unittest.TestCase):
             }
             self.assertEqual(
                 set(invocations),
-                {"attempt", "review", "finding_assessment", "acceptance_planning"},
+                {"attempt", "review", "finding_assessment"},
             )
             review = invocations["review"]
             self.assertEqual(review["model"], "gpt-test")
@@ -60,12 +68,15 @@ class PopulatedPublicationTests(unittest.TestCase):
             zero = invocations["finding_assessment"]["metrics"]
             self.assertEqual(zero["cost"]["amount"], 0)
             self.assertEqual(set(zero["usage"].values()), {0})
-            absent = invocations["acceptance_planning"]["metrics"]
-            self.assertEqual(absent["coverage"], "unavailable")
-            self.assertEqual(absent["usage"], {})
-            self.assertIsNone(absent["cost"]["amount"])
-            self.assertIn("provenance", absent["cost"])
-            self.assertEqual(invocations["attempt"]["metrics"]["coverage"], "partial")
+            attempt = invocations["attempt"]["metrics"]
+            if run["binding"]["run_id"] == "populated-v3":
+                self.assertEqual(attempt["coverage"], "unavailable")
+                self.assertEqual(attempt["usage"], {})
+                self.assertIsNone(attempt["cost"]["amount"])
+                self.assertIn("provenance", attempt["cost"])
+            else:
+                self.assertEqual(attempt["coverage"], "partial")
+                self.assertEqual(attempt["usage"], {"input": 4})
             rows = {
                 row["ownership"].get("sequence"): row
                 for row in run["stages"]
@@ -73,8 +84,8 @@ class PopulatedPublicationTests(unittest.TestCase):
             }
             self.assertEqual(rows[4]["usage"], metrics["usage"])
             self.assertEqual(rows[5]["usage"], zero["usage"])
-            self.assertEqual(rows[1]["usage"], {"input": 4})
-            duration = None if run["binding"]["bundle_schema_version"] == 2 else 0
+            self.assertEqual(rows[1]["usage"], attempt["usage"])
+            duration = None if run["binding"]["run_id"] == "populated-partial" else 0
             self.assertEqual(rows[2]["repository_validation_seconds"], duration)
         abandoned = publication["runs"][2]["summary"]["inference"]["invocations"][0]
         self.assertEqual(

@@ -33,7 +33,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
       "public_bytes": 249,
-      "public_sha256": "0a68dbf997de9776024460591b5a544f4f5a03d49b92eaed1b56a3141cd60f47",
+      "public_sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -207,7 +207,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/output.json",
       "public_bytes": 303,
-      "public_sha256": "2c5abb15d251cba0f7ab9c612fc8f1fc16a6c0e8c67337f498b68be37541e596",
+      "public_sha256": "9dd163b21d96da7e01f0ca80b1fe92ef6872ef21816907d7a804d72f69341eb7",
       "sanitization_status": "sanitized",
       "scope": "component:3:change",
       "source": {
@@ -473,7 +473,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
       "public_bytes": 249,
-      "public_sha256": "0a68dbf997de9776024460591b5a544f4f5a03d49b92eaed1b56a3141cd60f47",
+      "public_sha256": "b347e0949608229c445c34fd010f1a2a4c069bbe8ee5002413c611b348238adb",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -513,86 +513,9 @@
     {
       "kind": "json",
       "media_type": "application/json",
-      "path": "artifacts/planner/inference/attempts/1/response.json",
-      "public_bytes": 21,
-      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
-      "sanitization_status": "sanitized",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "path": "planner/inference/attempts/1/response.json"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_prompt",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_system_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/planner/inference/views/system-instructions.txt",
-      "public_bytes": 9,
-      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/planner/inference/views/task-instructions.txt",
-      "public_bytes": 7,
-      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_data",
-      "media_type": "application/json",
-      "path": "artifacts/planner/inference/views/task-data.json",
-      "public_bytes": 5,
-      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "json",
-      "media_type": "application/json",
       "path": "artifacts/preparation.json",
       "public_bytes": 1056,
-      "public_sha256": "924e4a64c26c5b998e994507ec4bdd41f5d9f82f07e3fb907f4f9380723cfa32",
+      "public_sha256": "011af02e74751c9ee113587ea49c0c9f5446a199ef953ad5ce9ebe376e2b5737",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
@@ -868,30 +791,6 @@
     "run_id": "populated-v3"
   },
   "inference_sessions": [
-    {
-      "attempt_count": 1,
-      "attempts": [
-        {
-          "attempt_number": 1,
-          "protocol_status": "accepted",
-          "terminal": true,
-          "validation_status": "accepted"
-        }
-      ],
-      "directory": "planner/inference",
-      "duration_seconds": 1,
-      "identity": {
-        "adapter": "pi-v1",
-        "adapter_contract_version": 1,
-        "adapter_family": "pi",
-        "model": "gpt-test",
-        "runtime": "afk-inference-v1",
-        "thinking": "medium"
-      },
-      "requested_capability": "READ_ONLY",
-      "scope": "inference:acceptance_planning",
-      "validation_status": "accepted"
-    },
     {
       "attempt_count": 1,
       "attempts": [

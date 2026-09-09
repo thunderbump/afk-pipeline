@@ -1,7 +1,7 @@
 {
   "component_outcome": "failed",
   "exit_code": 1,
-  "failed_component": "validation",
+  "failed_component": "response",
   "history": [
     {
       "component": "attempt",
@@ -19,17 +19,63 @@
         "change": "01-attempt",
         "workspace": "assignment.json"
       },
-      "outcome": "failed",
+      "outcome": "passed",
       "sequence": 2
     },
     {
-      "component": "response",
-      "directory": "03-response",
+      "component": "change",
+      "directory": "03-change",
       "input_from": {
+        "source": "01-attempt"
+      },
+      "outcome": "completed",
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "directory": "04-review",
+      "input_from": {
+        "change": "03-change",
         "validation": "02-validation"
       },
+      "outcome": "completed",
+      "sequence": 4
+    },
+    {
+      "component": "assessment",
+      "directory": "05-assessment",
+      "input_from": {
+        "review": "04-review"
+      },
+      "outcome": "completed",
+      "sequence": 5
+    },
+    {
+      "component": "iteration",
+      "directory": "06-iteration",
+      "input_from": {
+        "assessment": "05-assessment"
+      },
+      "outcome": "completed",
+      "sequence": 6
+    },
+    {
+      "component": "response",
+      "directory": "07-response",
+      "input_from": {
+        "assessment": "05-assessment"
+      },
       "outcome": "abandoned",
-      "sequence": 3
+      "sequence": 7
+    },
+    {
+      "component": "response",
+      "directory": "08-response",
+      "input_from": {
+        "assessment": "05-assessment"
+      },
+      "outcome": "failed",
+      "sequence": 8
     }
   ],
   "outcome": "failed",

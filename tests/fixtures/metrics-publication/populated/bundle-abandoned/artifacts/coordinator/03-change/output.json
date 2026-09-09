@@ -1,0 +1,13 @@
+{
+  "change": {
+    "objective": "portable",
+    "repository": {},
+    "source": {
+      "directory": "/tmp/tmpg6845wlu/abandoned/source-run/coordinator/01-attempt",
+      "kind": "attempt"
+    },
+    "workspace": "/tmp/tmpg6845wlu/abandoned/source-run/workspace"
+  },
+  "outcome": "completed",
+  "schema_version": 1
+}

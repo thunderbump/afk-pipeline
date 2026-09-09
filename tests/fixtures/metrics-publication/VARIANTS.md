@@ -4,11 +4,11 @@ The original `valid-publication.json`, `invalid-publication.json`, and bundles r
 
 | Case | Allowed fields and meaning | Proof |
 | --- | --- | --- |
-| Pi measured Review, v2 and v3 | `adapter_family: pi`, `observed_identities`, finalized request/identity fields, full cost with provenance. Configured model and observed provider/model can differ. Cache and compaction remain separate usage objects. Cost includes measured compaction cost. | Populated Review, sequence 4; `test_committed_and_regenerated_cases_have_bound_measured_variants` |
+| Pi measured Review, v3 | `adapter_family: pi`, `observed_identities`, finalized request/identity fields, full cost with provenance. Configured model and observed provider/model can differ. Cache and compaction remain separate usage objects. Cost includes measured compaction cost. | Populated Review, sequence 4; `test_committed_and_regenerated_cases_have_bound_measured_variants` |
 | Pi measured zero | Full Pi shape, token categories and estimate amount explicitly zero; currency remains null and billed charge false. | Assessment, sequence 5, same test |
-| Pi unavailable | Full Pi shape still required; usage empty, amount null, provenance fields null. Minimal cost is invalid for Pi. | Run-level acceptance planning, same test |
-| Pi partial | Only observed token categories are present; unmeasured compaction keeps coverage partial. Missing price stays unavailable. | Attempt, sequence 1, same test |
-| Repository Validation unavailable or zero | Legacy missing duration becomes null; measured zero remains zero. Neither is inference response validation. | v2 versus v3 sequence 2, same test |
+| Pi unavailable | Full Pi shape still required; usage empty, amount null, provenance fields null. Minimal cost is invalid for Pi. | `populated-v3` Attempt, sequence 1, same test |
+| Pi partial | Only observed token categories are present; unmeasured compaction keeps coverage partial. Missing price stays unavailable. | `populated-partial` Attempt, sequence 1, same test |
+| Repository Validation unavailable or zero | Legacy missing duration becomes null; measured zero remains zero. Neither is inference response validation. | `populated-partial` versus `populated-v3` sequence 2, same test |
 | Unsealed abandoned invocation | Nullable identity, no observed identities or Pi counters; reason `unsealed_abandoned_invocation`, minimal unavailable cost. Can be published when the observed abandoned directory has no receipt. | `bundle-abandoned`, same test |
 | Unsupported sealed adapter | Local report can use reason `unsupported_adapter` and minimal cost; current Exporter rejects non-Pi receipt contracts. Not a valid publication fixture. | `tests/test_metrics.py` unsupported-adapter tests and Exporter receipt validation |
 | Original and continuations | A source invocation identity can occur in several selected Runs. Uniqueness is within each Run. Stage ownership always uses the exact selected Run ID. | `test_each_exhausted_continuation_adds_a_fresh_response_allowance` builds one combined publication over real synthetic Coordinator lineage |
@@ -16,6 +16,12 @@ The original `valid-publication.json`, `invalid-publication.json`, and bundles r
 | Empty stage | Minimal unavailable cost is permitted; no inferred model or fabricated timing. | Original baseline stages |
 
 `populated/invalid-mutations.json` describes independent changes to a fresh copy of the populated valid publication. Each must fail consumer intake. Paths use JSON object keys and array indices; `-1` means the last array row. Mutations cover Pi discriminator/field disagreement, minimal Pi cost, invocation provenance on totals, unknown token categories, invalid Run purpose, and Pi fields on abandoned evidence. They are test inputs, not a second validator or a schema change.
+
+## Known bundle compatibility gaps
+
+Both populated measured cases use bundle schema v3. `producer-only-v2/` and `producer-only-v2.json` reproduce current exporter output that Operations rejects because its v2 inference artifact vocabulary does not include the current section kinds. This is not a valid consumer baseline. `central-f5ie` owns deciding whether to repair or retire populated v2 export. The original empty-inference v2 baseline remains valid and unchanged.
+
+The abandoned case in the supported set uses an abandoned Response followed by a sealed failed Response. A different case, failed Validation followed by an abandoned Response with Validation remaining the terminal cause, exposed a consumer history mismatch tracked in `central-1ck5`. It is retained in the initial producer delivery at commit `28a9880`, rather than being misrepresented as supported intake. Metrics shape support does not imply that every enclosing bundle history is admitted.
 
 ## Reproduction and adoption
 

@@ -5,7 +5,7 @@
       "media_type": "application/json",
       "path": "artifacts/assignment.json",
       "public_bytes": 298,
-      "public_sha256": "725f0c4bfefc32caca1f3bfaad97e6dab7c59a8039ea0669ed87fe96c07913d5",
+      "public_sha256": "af9ca1577efbd2b29085054a1da28634abb1539f335d69bc42ed898ab4c500d3",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -33,7 +33,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
       "public_bytes": 257,
-      "public_sha256": "9b2896cadcb53eebf0cdfdd77d6924588aca03bf14de2fa4dd9c9b9c0ea9d9e9",
+      "public_sha256": "1e8f2b6d01f5bd0d744b3e2d4fd22a8f7e916fbfa69e51bdaf1df4f701aa32fb",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -102,8 +102,8 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/02-validation/output.json",
       "public_bytes": 126,
-      "public_sha256": "3b226d4ff9bfe4faca7f5051d4371cc080c06363334183a490604745d1351a1d",
-      "sanitization_status": "unchanged",
+      "public_sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b",
+      "sanitization_status": "sanitized",
       "scope": "component:2:validation",
       "source": {
         "path": "coordinator/02-validation/output.json"
@@ -114,9 +114,149 @@
     {
       "kind": "json",
       "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/input.json",
+      "public_bytes": 52,
+      "public_sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8",
+      "sanitization_status": "sanitized",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/output.json",
+      "public_bytes": 319,
+      "public_sha256": "8c25d1a8d050436c1e4b33fe057cd832eab51fc264fdff75e893af183f96ddab",
+      "sanitization_status": "sanitized",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/input.json",
+      "public_bytes": 52,
+      "public_sha256": "a2840276de131dfea3f6e53471c5ac31ded5949c0fdf1c09e89fcbe7e06b4e59",
+      "sanitization_status": "sanitized",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/output.json",
+      "public_bytes": 756,
+      "public_sha256": "c8db55bc21495e9e68096becc0c17a96d6e9a077f0bf3a48bfdf0c1e836ecb6b",
+      "sanitization_status": "sanitized",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/input.json",
+      "public_bytes": 56,
+      "public_sha256": "55d2cb42bd05051e63a27c18b919da912f73fa7b36c1551a70ca834480c6dc97",
+      "sanitization_status": "sanitized",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/05-assessment/output.json",
+      "public_bytes": 452,
+      "public_sha256": "f95b1ddfc984e973a19f4202313cdda29fa886600b7ce807290a5f343af8674e",
+      "sanitization_status": "sanitized",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/06-iteration/input.json",
+      "public_bytes": 55,
+      "public_sha256": "dff60d96e1222bf098afd9c4725d9851e4d281d40df78c96791eaf11d6b5abc2",
+      "sanitization_status": "sanitized",
+      "scope": "component:6:iteration",
+      "source": {
+        "path": "coordinator/06-iteration/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/06-iteration/output.json",
+      "public_bytes": 237,
+      "public_sha256": "82b9f3d954b10d86b8b51f3fd83b838b44afa171d84031e4561d36a0d6096d9d",
+      "sanitization_status": "unchanged",
+      "scope": "component:6:iteration",
+      "source": {
+        "path": "coordinator/06-iteration/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/08-response/input.json",
+      "public_bytes": 26,
+      "public_sha256": "cba2e027925c2a8c9b0ccbe58ab575a62b3651db29d639598ca1aeedd639ad8a",
+      "sanitization_status": "unchanged",
+      "scope": "component:8:response",
+      "source": {
+        "path": "coordinator/08-response/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/08-response/output.json",
+      "public_bytes": 49,
+      "public_sha256": "63cfc698c6403380ab3dcab5dd59bd1d6c44110b953ab63c92419dd7fcd60d1c",
+      "sanitization_status": "unchanged",
+      "scope": "component:8:response",
+      "source": {
+        "path": "coordinator/08-response/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
       "path": "artifacts/coordinator/assignment.json",
       "public_bytes": 298,
-      "public_sha256": "725f0c4bfefc32caca1f3bfaad97e6dab7c59a8039ea0669ed87fe96c07913d5",
+      "public_sha256": "af9ca1577efbd2b29085054a1da28634abb1539f335d69bc42ed898ab4c500d3",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -130,7 +270,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
       "public_bytes": 257,
-      "public_sha256": "9b2896cadcb53eebf0cdfdd77d6924588aca03bf14de2fa4dd9c9b9c0ea9d9e9",
+      "public_sha256": "1e8f2b6d01f5bd0d744b3e2d4fd22a8f7e916fbfa69e51bdaf1df4f701aa32fb",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -143,8 +283,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/output.json",
-      "public_bytes": 780,
-      "public_sha256": "7d7299deb866d35c9fd28e54b5c4ab147223c46958996009b994d2c4dbc286df",
+      "public_bytes": 1774,
+      "public_sha256": "259ccfe2589497a5e5f1c07609174877d9778eef179f49e88ab99c18a639b707",
       "sanitization_status": "unchanged",
       "scope": "coordinator",
       "source": {
@@ -157,8 +297,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/state.json",
-      "public_bytes": 882,
-      "public_sha256": "11f31c017b70fe1088405ffbafdfec4f178c1590ec40d465483f9fb709440e12",
+      "public_bytes": 1876,
+      "public_sha256": "9259150052f0b1336e12b04e62c861b8888f23e93f09625a67db65d2620ee104",
       "sanitization_status": "unchanged",
       "scope": "coordinator",
       "source": {
@@ -172,7 +312,7 @@
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
       "public_bytes": 1095,
-      "public_sha256": "d260e61830ffcf8418f2eade57979853453fa303ad45dba1f5b4a4bcf67cf75c",
+      "public_sha256": "de51528f3f9e1058f99ac58d4d28fc3e63aac5f2b60f389c1613a16f013873c0",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
@@ -222,6 +362,46 @@
       "unavailable_reason": null
     },
     {
+      "kind": "diff",
+      "media_type": "text/x-diff; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "public_bytes": 35,
+      "public_sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/review.diff"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
       "kind": "attempt_events_private",
       "media_type": "application/x-ndjson",
       "public_bytes": 0,
@@ -233,6 +413,34 @@
       },
       "state": "unsafe",
       "unavailable_reason": "private_attempt_events"
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/05-assessment/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:5:assessment",
+      "source": {
+        "path": "coordinator/05-assessment/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
     }
   ],
   "bead": {
@@ -259,26 +467,147 @@
       "inputs": [
         1
       ],
-      "outcome": "failed",
+      "outcome": "passed",
       "output": {
         "details": {
           "kind": "validation"
         },
-        "outcome": "failed"
+        "outcome": "passed"
       },
       "sequence": 2
+    },
+    {
+      "component": "change",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "kind": "change"
+        },
+        "outcome": "completed"
+      },
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "evidence": [],
+      "inputs": [
+        2,
+        3
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "audit": {
+            "completed": true,
+            "scopes": [
+              "objective",
+              "acceptance_criteria",
+              "reviewed_diff",
+              "supplied_evidence"
+            ]
+          },
+          "findings": [
+            {
+              "details": "Fix it.",
+              "lens": "behavior",
+              "locations": [
+                {
+                  "line": 1,
+                  "path": "README.md"
+                }
+              ],
+              "scope_claim": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              },
+              "title": "Example"
+            }
+          ],
+          "kind": "review",
+          "summary": "One finding."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 4
+    },
+    {
+      "component": "assessment",
+      "evidence": [],
+      "inputs": [
+        4
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "decisions": [
+            {
+              "defect_decision": "confirmed",
+              "finding_index": 0,
+              "rationale": "Relevant.",
+              "scope": {
+                "kind": "current",
+                "rationale": "The current objective owns this behavior."
+              }
+            }
+          ],
+          "kind": "assessment",
+          "summary": "Address it."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 5
+    },
+    {
+      "component": "iteration",
+      "evidence": [],
+      "inputs": [
+        5
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "actionable_findings": 1,
+          "completed_responses": 0,
+          "decision": "continue",
+          "kind": "iteration",
+          "max_responses": 1,
+          "next_response_number": 1,
+          "reason": "Ready."
+        },
+        "outcome": "completed"
+      },
+      "sequence": 6
     },
     {
       "component": "response",
       "evidence": [],
       "inputs": [
-        2
+        5
       ],
       "outcome": "abandoned",
       "output": {
         "outcome": "abandoned"
       },
-      "sequence": 3
+      "sequence": 7
+    },
+    {
+      "component": "response",
+      "evidence": [],
+      "inputs": [
+        5
+      ],
+      "outcome": "failed",
+      "output": {
+        "details": {
+          "kind": "response"
+        },
+        "outcome": "failed"
+      },
+      "sequence": 8
     }
   ],
   "identity": {
@@ -292,6 +621,6 @@
   "terminal": {
     "component_outcome": "failed",
     "exit_code": 1,
-    "failed_component": "validation"
+    "failed_component": "response"
   }
 }

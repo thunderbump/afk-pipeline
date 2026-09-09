@@ -7,8 +7,8 @@
       "python3",
       "-m",
       "afk_coordinate",
-      "/tmp/tmpz5ldhlv5/abandoned/source-run/coordinator-request.json",
-      "/tmp/tmpz5ldhlv5/abandoned/source-run/coordinator"
+      "/tmp/tmpg6845wlu/abandoned/source-run/coordinator-request.json",
+      "/tmp/tmpg6845wlu/abandoned/source-run/coordinator"
     ],
     "decision": null,
     "directory": "coordinator",
@@ -26,11 +26,11 @@
     "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "base_ref": "main",
     "branch": "afk-central-example-run-example",
-    "path": "/tmp/tmpz5ldhlv5/abandoned/repository",
-    "worktree": "/tmp/tmpz5ldhlv5/abandoned/workspace"
+    "path": "/tmp/tmpg6845wlu/abandoned/repository",
+    "worktree": "/tmp/tmpg6845wlu/abandoned/workspace"
   },
   "run": {
-    "artifact_root": "/tmp/tmpz5ldhlv5/abandoned/source-run",
+    "artifact_root": "/tmp/tmpg6845wlu/abandoned/source-run",
     "id": "populated-abandoned"
   },
   "schema_version": 1,

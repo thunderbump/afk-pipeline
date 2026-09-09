@@ -7,8 +7,8 @@
       "python3",
       "-m",
       "afk_coordinate",
-      "/tmp/tmpz5ldhlv5/3/source-run/coordinator-request.json",
-      "/tmp/tmpz5ldhlv5/3/source-run/coordinator"
+      "/tmp/tmpg6845wlu/3/source-run/coordinator-request.json",
+      "/tmp/tmpg6845wlu/3/source-run/coordinator"
     ],
     "decision": "stop",
     "directory": "coordinator",
@@ -26,11 +26,11 @@
     "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "base_ref": "main",
     "branch": "afk-central-example-run-example",
-    "path": "/tmp/tmpz5ldhlv5/3/repository",
-    "worktree": "/tmp/tmpz5ldhlv5/3/workspace"
+    "path": "/tmp/tmpg6845wlu/3/repository",
+    "worktree": "/tmp/tmpg6845wlu/3/workspace"
   },
   "run": {
-    "artifact_root": "/tmp/tmpz5ldhlv5/3/source-run",
+    "artifact_root": "/tmp/tmpg6845wlu/3/source-run",
     "id": "populated-v3"
   },
   "schema_version": 1,

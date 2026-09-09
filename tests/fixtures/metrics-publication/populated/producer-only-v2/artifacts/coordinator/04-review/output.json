@@ -1,0 +1,38 @@
+{
+  "artifacts": {
+    "diff": "review.diff",
+    "events": "events.jsonl",
+    "stderr": "stderr.log"
+  },
+  "outcome": "completed",
+  "review": {
+    "audit": {
+      "completed": true,
+      "scopes": [
+        "objective",
+        "acceptance_criteria",
+        "reviewed_diff",
+        "supplied_evidence"
+      ]
+    },
+    "findings": [
+      {
+        "details": "Fix it.",
+        "lens": "behavior",
+        "locations": [
+          {
+            "line": 1,
+            "path": "README.md"
+          }
+        ],
+        "scope_claim": {
+          "kind": "current",
+          "rationale": "The current objective owns this behavior."
+        },
+        "title": "Example"
+      }
+    ],
+    "summary": "One finding."
+  },
+  "schema_version": 1
+}

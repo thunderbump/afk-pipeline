@@ -114,7 +114,7 @@
       "source": {
         "bytes": 564,
         "path": "coordinator/01-attempt/inference/invocation.json",
-        "sha256": "b2e112612529fb7fb39ea7c4777f5bc503375285153795d4380e913fe3b48b24"
+        "sha256": "dc7a61aa1efaf7c92aff24200e44382a99020d7ca43b3a4f70777fd09433070b"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -193,7 +193,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/01-attempt/inference/receipt.json",
-        "sha256": "0b857676cf88b18457e658fdec85f42d813f4b3167d4a71bd5f558dbe2076cd0"
+        "sha256": "ec44405a8cc79e77653397e8f5f5c4463e3ef23d52b65fac405964f0981c66be"
       },
       "state": "downloadable",
       "unavailable_reason": null
@@ -208,7 +208,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/01-attempt/inference/receipt.json",
-        "sha256": "0b857676cf88b18457e658fdec85f42d813f4b3167d4a71bd5f558dbe2076cd0"
+        "sha256": "ec44405a8cc79e77653397e8f5f5c4463e3ef23d52b65fac405964f0981c66be"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -399,7 +399,7 @@
       "source": {
         "bytes": 562,
         "path": "coordinator/04-review/inference/invocation.json",
-        "sha256": "a2de8922285bf7f3b9614fce19c06aadcd3067e736ed241291b16ca8ac98fc47"
+        "sha256": "4b58a6f889613874b6c59b103def306254790c0544748f1eafb9aaf7646013da"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -478,7 +478,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/04-review/inference/receipt.json",
-        "sha256": "a2bb0fbc36fda93f24c299382bdf13ca33b32ea640603efb032b8f15dc674b54"
+        "sha256": "9439eb0dc5d0ab30d8508e38c11cd40d6559615ac0842f68915aaf5f65e39cb5"
       },
       "state": "downloadable",
       "unavailable_reason": null
@@ -493,7 +493,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/04-review/inference/receipt.json",
-        "sha256": "a2bb0fbc36fda93f24c299382bdf13ca33b32ea640603efb032b8f15dc674b54"
+        "sha256": "9439eb0dc5d0ab30d8508e38c11cd40d6559615ac0842f68915aaf5f65e39cb5"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -598,7 +598,7 @@
       "source": {
         "bytes": 578,
         "path": "coordinator/05-assessment/inference/invocation.json",
-        "sha256": "f8f5a7a59e1a5aec6ba90af7348e2ef194da69924df5b2864e36b08aae102dd9"
+        "sha256": "675f38675c51a7d41c9b7744de0879acde80ea44d9915ff53befa8b3da053720"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -677,7 +677,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/05-assessment/inference/receipt.json",
-        "sha256": "ac19c8a299831b7c573cc411e8002bfad286f815957d9a120f4d958a0382101b"
+        "sha256": "52eb0ad0220d38c9fdc6b07efa98d16cf29c835dd6c34313f6d70d51ea3f86db"
       },
       "state": "downloadable",
       "unavailable_reason": null
@@ -692,7 +692,7 @@
       "source": {
         "bytes": 1797,
         "path": "coordinator/05-assessment/inference/receipt.json",
-        "sha256": "ac19c8a299831b7c573cc411e8002bfad286f815957d9a120f4d958a0382101b"
+        "sha256": "52eb0ad0220d38c9fdc6b07efa98d16cf29c835dd6c34313f6d70d51ea3f86db"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -825,172 +825,16 @@
       "unavailable_reason": null
     },
     {
-      "kind": "inference_contract",
+      "kind": "inference_evidence_checkpoint",
       "media_type": "application/json",
       "public_bytes": 0,
       "public_sha256": null,
       "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
+      "scope": "acceptance_planning",
       "source": {
-        "bytes": 170,
-        "path": "planner/inference/adapter-contract.json",
-        "sha256": "18a5aa8d2f8d7600368e04e2af0200391ef4e524e3fd327ac7123dea52375182"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_response",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 17,
-        "path": "planner/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_response_view",
-      "media_type": "application/json",
-      "path": "artifacts/planner/inference/views/responses/1.json",
-      "public_bytes": 213,
-      "public_sha256": "f76836275b31b9d0eb402be3b2e9e661b7612b70f7b2ad4665a5786ab661b8a4",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 17,
-        "path": "planner/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_terminal_response_view",
-      "media_type": "application/json",
-      "path": "artifacts/planner/inference/views/terminal-response.json",
-      "public_bytes": 156,
-      "public_sha256": "3cdf8e52685135972712ce9ab5afc4344fbf141eb6859766c7c5a2168d1cc83c",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 17,
-        "path": "planner/inference/attempts/1/response.json",
-        "sha256": "a5f4fe3acd4cd0a02ac7baee62467e6ee7dcf576b66e502492a3f811ec3e66f9"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_invocation",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 559,
-        "path": "planner/inference/invocation.json",
-        "sha256": "1225eb471deef8f67450f89c72dfd2f47a6ae4f239f3f353ea99291084705bea"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_prompt",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_system_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/planner/inference/views/system-instructions.txt",
-      "public_bytes": 9,
-      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_instructions",
-      "media_type": "text/plain; charset=utf-8",
-      "path": "artifacts/planner/inference/views/task-instructions.txt",
-      "public_bytes": 7,
-      "public_sha256": "14a60637758cb026afd2fe447f3648a07965072eeefaa9ee57734959bce8ae2b",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_task_data",
-      "media_type": "application/json",
-      "path": "artifacts/planner/inference/views/task-data.json",
-      "public_bytes": 5,
-      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 43,
-        "path": "planner/inference/prompt.json",
-        "sha256": "1e588b230fb569563e87ccd98bf3145afc0c97540bd8d164921d86afb718568f"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_receipt_view",
-      "media_type": "application/json",
-      "path": "artifacts/planner/inference/views/receipt.json",
-      "public_bytes": 511,
-      "public_sha256": "7a0fa8181a9b4835bec65fd700df25022c554c3d278124788347a21e417f5f37",
-      "sanitization_status": "unchanged",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 1797,
-        "path": "planner/inference/receipt.json",
-        "sha256": "81e8343cf1123730d595a59f99f68d5b58dbf6ad4e47143bf3b6bf713bf2b270"
-      },
-      "state": "downloadable",
-      "unavailable_reason": null
-    },
-    {
-      "kind": "inference_receipt",
-      "media_type": "application/json",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 1797,
-        "path": "planner/inference/receipt.json",
-        "sha256": "81e8343cf1123730d595a59f99f68d5b58dbf6ad4e47143bf3b6bf713bf2b270"
+        "bytes": 18,
+        "path": "planner/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -999,8 +843,8 @@
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
-      "public_bytes": 980,
-      "public_sha256": "cea94f3e947a0c3c55d21db46368efe0cad126735b3f70dda8fc1003eef83388",
+      "public_bytes": 985,
+      "public_sha256": "69851cc1b41a314ffc22d8ba0b259faf805211f8d741bef6308b904a0dffa83c",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -1135,21 +979,6 @@
       "unavailable_reason": "empty"
     },
     {
-      "kind": "inference_log",
-      "media_type": "text/plain; charset=utf-8",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 8,
-        "path": "planner/inference/attempts/1/stderr.log",
-        "sha256": "86a10149acbe95519ea3283d26d57491ede09bd3010cdb756358f66352236b79"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
       "kind": "events",
       "media_type": "application/x-ndjson",
       "path": "artifacts/coordinator/01-attempt/events.jsonl",
@@ -1232,21 +1061,6 @@
         "bytes": 262,
         "path": "coordinator/05-assessment/inference/attempts/1/events.jsonl",
         "sha256": "4cccf0872698d90c63d71dac0686f75a457a91c2f3c8cae998cc76b7fc9bcf3f"
-      },
-      "state": "unavailable",
-      "unavailable_reason": "private_source"
-    },
-    {
-      "kind": "inference_events",
-      "media_type": "application/x-ndjson",
-      "public_bytes": 0,
-      "public_sha256": null,
-      "sanitization_status": "not_applicable",
-      "scope": "inference:acceptance_planning",
-      "source": {
-        "bytes": 22,
-        "path": "planner/inference/attempts/1/events.jsonl",
-        "sha256": "525abd023817c37f99348d4bfec5f2b9d918e1f82b94bf27b313827b1bfb5f83"
       },
       "state": "unavailable",
       "unavailable_reason": "private_source"
@@ -1393,7 +1207,7 @@
   ],
   "identity": {
     "project": "operations-webui",
-    "run_id": "populated-v2"
+    "run_id": "populated-partial"
   },
   "objective": "Publish one portable Workflow Run.",
   "response_limit": 1,

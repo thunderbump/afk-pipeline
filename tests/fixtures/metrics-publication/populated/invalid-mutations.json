@@ -7,7 +7,7 @@
       "summary",
       "inference",
       "invocations",
-      2,
+      1,
       "observed_identities"
     ],
     "operation": "delete"
@@ -20,7 +20,7 @@
       "summary",
       "inference",
       "invocations",
-      2,
+      1,
       "adapter_family"
     ],
     "operation": "set",
@@ -34,7 +34,7 @@
       "summary",
       "inference",
       "invocations",
-      2,
+      1,
       "metrics",
       "cost"
     ],
@@ -71,7 +71,7 @@
       "summary",
       "inference",
       "invocations",
-      2,
+      1,
       "metrics",
       "usage",
       "promptTokens"
