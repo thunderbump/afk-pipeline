@@ -1,6 +1,6 @@
 # AFK metrics publication schema v2
 
-These fixtures are synthetic and were generated from `ExportCliTests.sealed_preparer`; they contain no host Run evidence. `bundle-v2/` and `bundle-v3/` are the matching export bundles. `valid-publication.json` is a complete two-Run consumer fixture. `invalid-publication.json` has a deliberately incorrect first `workflow_run_sha256` and must be rejected by a consumer that is given the bundle.
+These fixtures are synthetic and were generated from `ExportCliTests.sealed_preparer`; they contain no host Run evidence. `bundle-v2/` and `bundle-v3/` are the matching export bundles. `valid-publication.json` is a complete two-Run consumer fixture. `invalid-publication.json` has a deliberately incorrect first `workflow_run_sha256` and must be rejected by a consumer that is given the bundle. The `populated/evidence-coverage-variants.json` companion records the regenerated verified-no-action and identity-deduplicated shared-continuation coverage cases; see `VARIANTS.md` for their public-seam regression proofs.
 
 ## Producing a snapshot
 

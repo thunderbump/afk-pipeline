@@ -1,0 +1,45 @@
+{
+  "kind": "afk-metrics-evidence-coverage-fixtures",
+  "schema_version": 1,
+  "variants": [
+    {
+      "evidence_coverage": {
+        "expected": 0,
+        "measured": 0,
+        "missing": [],
+        "status": "complete"
+      },
+      "name": "verified-no-action-response",
+      "started_stages": [
+        {
+          "classification": "verified_no_action",
+          "ownership": {
+            "component": "response",
+            "kind": "component",
+            "sequence": 7
+          }
+        }
+      ]
+    },
+    {
+      "evidence_coverage": {
+        "expected": 1,
+        "measured": 1,
+        "missing": [],
+        "status": "complete"
+      },
+      "name": "shared-continuation-stage",
+      "started_stages": [
+        {
+          "authenticated_receipt_paths": 2,
+          "ownership": {
+            "component": "review",
+            "kind": "component",
+            "sequence": 4
+          },
+          "unique_source_event_identities": 1
+        }
+      ]
+    }
+  ]
+}

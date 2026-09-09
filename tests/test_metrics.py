@@ -1000,6 +1000,45 @@ class MetricsReportTests(unittest.TestCase):
             },
         )
 
+    def test_continuation_alias_rejects_a_distinct_authenticated_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coordinator = root / "coordinator"
+            continuation = root / "continuations/01"
+            original = coordinator / "01-review/inference"
+            retained = continuation / "01-review/inference"
+            original.parent.mkdir(parents=True)
+            retained.parent.mkdir(parents=True)
+            helper = test_export_cli.ExportCliTests()
+            helper.add_inference_receipt(original)
+            helper.add_inference_receipt(retained)
+            observed = {
+                "identity": {"run_id": "run-1.continuation.01"},
+                "assignment": {"objective": "objective"},
+                "state": {
+                    "history": [
+                        {
+                            "sequence": 1,
+                            "component": "review",
+                            "directory": "01-review",
+                            "outcome": "completed",
+                        }
+                    ],
+                    "status": "completed",
+                },
+                "coordinator": coordinator,
+                "continuations": [continuation],
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": continuation,
+                "output": {"outcome": "completed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        self.assertEqual(report["integrity"]["status"], "invalid")
+        self.assertIsNone(report["inference"])
+
     def test_verified_no_action_response_is_not_expected_inference(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -1363,7 +1363,8 @@ def summarize_source(
     expected_inference: list[tuple[str, str, dict[str, Any]]] = []
     all_inference_relatives: set[str] = {"planner/inference"}
     abandoned_candidates: set[str] = set()
-    stage_alias_relatives: set[str] = set()
+    stage_aliases_by_relative: dict[str, set[str]] = {}
+    out_of_selection_relatives: set[str] = set()
     command_attempt_relatives: set[str] = set()
     checkpoint_states = observed.get("_metrics_inference_states")
     checkpoint_evidence = observed.get("_metrics_evidence_sha256")
@@ -1378,7 +1379,7 @@ def summarize_source(
             discover_component_inference(root, coordinator, continuation_roots)
         )
         all_inference_relatives.update(retained_inference_relatives)
-        stage_alias_relatives.update(retained_inference_relatives)
+        out_of_selection_relatives.update(retained_inference_relatives)
     except (OSError, ValueError) as error:
         return _invalid_source(source, error, identity, assignment)
 
@@ -1484,7 +1485,7 @@ def summarize_source(
         all_inference_relatives.add(relative)
         component = entry["component"]
         if component in inference_components and not verified_no_action_response(entry):
-            stage_alias_relatives.update(entry_aliases)
+            stage_aliases_by_relative.setdefault(relative, set()).update(entry_aliases)
             purpose = {
                 "assessment": "finding_assessment",
                 "response": "feedback_response",
@@ -1544,25 +1545,8 @@ def summarize_source(
             for relative in all_inference_relatives
         }
     )
-    if any(
-        state_value == "sealed"
-        and (
-            (
-                relative not in expected_relatives
-                and relative not in stage_alias_relatives
-            )
-            or relative in command_attempt_relatives
-        )
-        for relative, state_value in observed_states.items()
-    ):
-        return _invalid_source(
-            source,
-            ValueError("authenticated receipt has no expected inference stage"),
-            identity,
-            assignment,
-        )
-
     invocations = []
+    invocation_identities: dict[str, str | None] = {}
     seen = set()
     try:
         for relative, purpose, stage_owner in candidates:
@@ -1579,12 +1563,73 @@ def summarize_source(
                 item = _invocation(
                     root, relative, purpose, expected_evidence=checkpoint_evidence
                 )
+            invocation_identities[relative] = item["source_event_identity"]
             key = item["source_event_identity"] or _canonical_hash([relative, purpose])
             if key not in seen:
                 seen.add(key)
                 if include_stage_binding:
                     item["_stage_owner"] = stage_owner
                 invocations.append(item)
+
+        # A repeated continuation path is an alias only when its authenticated
+        # invocation identity matches the selected path for that stage. Merely
+        # sharing a history directory name cannot exempt distinct evidence from
+        # complete receipt accounting.
+        authenticated_aliases: set[str] = set()
+        for selected_relative, aliases in stage_aliases_by_relative.items():
+            selected_identity = invocation_identities.get(selected_relative)
+            if selected_identity is None:
+                continue
+            for alias_relative in aliases - {selected_relative}:
+                if (
+                    checkpointed_state(alias_relative, root / alias_relative)
+                    != "sealed"
+                ):
+                    continue
+                receipt_relative = f"{alias_relative}/receipt.json"
+                invocation_relative = f"{alias_relative}/invocation.json"
+                receipt = _safe_evidence_json(
+                    root,
+                    alias_relative,
+                    "receipt.json",
+                    checkpoint_evidence.get(receipt_relative)
+                    if checkpoint_evidence is not None
+                    else None,
+                )
+                hashes = receipt.get("hashes")
+                alias_identity = (
+                    hashes.get("invocation_sha256")
+                    if isinstance(hashes, dict)
+                    else None
+                )
+                if (
+                    not isinstance(alias_identity, str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", alias_identity)
+                    or _safe_evidence_hash(root, alias_relative, "invocation.json")
+                    != alias_identity
+                    or (
+                        checkpoint_evidence is not None
+                        and checkpoint_evidence.get(invocation_relative)
+                        != alias_identity
+                    )
+                ):
+                    raise ValueError("inference alias identity is invalid")
+                if alias_identity == selected_identity:
+                    authenticated_aliases.add(alias_relative)
+
+        if any(
+            state_value == "sealed"
+            and (
+                (
+                    relative not in expected_relatives
+                    and relative not in authenticated_aliases
+                    and relative not in out_of_selection_relatives
+                )
+                or relative in command_attempt_relatives
+            )
+            for relative, state_value in observed_states.items()
+        ):
+            raise ValueError("authenticated receipt has no expected inference stage")
     except (
         OSError,
         ValueError,

@@ -141,6 +141,25 @@ class PopulatedPublicationTests(unittest.TestCase):
             destination = Path(temporary) / "cases"
             publication = generate(destination)
             self.assert_cases(destination, publication)
+            self.assertEqual(
+                json.loads(
+                    (destination / "evidence-coverage-variants.json").read_text()
+                ),
+                json.loads((FIXTURES / "evidence-coverage-variants.json").read_text()),
+            )
+            coverage_variants = json.loads(
+                (destination / "evidence-coverage-variants.json").read_text()
+            )["variants"]
+            self.assertEqual(
+                [case["evidence_coverage"]["expected"] for case in coverage_variants],
+                [0, 1],
+            )
+            self.assertEqual(
+                coverage_variants[1]["started_stages"][0][
+                    "unique_source_event_identities"
+                ],
+                1,
+            )
             # Authenticated hashes include temporary private paths. Measurements
             # and stage projection, unlike those opaque identities, reproduce.
             committed = json.loads((FIXTURES / "valid-publication.json").read_text())

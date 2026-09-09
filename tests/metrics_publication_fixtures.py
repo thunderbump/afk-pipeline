@@ -237,6 +237,54 @@ def generate(destination):
                 {"schema_version": 1, "project": "operations-webui", "runs": requests}
             )
         write_json(destination / "valid-publication.json", publication)
+        write_json(
+            destination / "evidence-coverage-variants.json",
+            {
+                "schema_version": 1,
+                "kind": "afk-metrics-evidence-coverage-fixtures",
+                "variants": [
+                    {
+                        "name": "verified-no-action-response",
+                        "started_stages": [
+                            {
+                                "ownership": {
+                                    "kind": "component",
+                                    "sequence": 7,
+                                    "component": "response",
+                                },
+                                "classification": "verified_no_action",
+                            }
+                        ],
+                        "evidence_coverage": {
+                            "status": "complete",
+                            "expected": 0,
+                            "measured": 0,
+                            "missing": [],
+                        },
+                    },
+                    {
+                        "name": "shared-continuation-stage",
+                        "started_stages": [
+                            {
+                                "ownership": {
+                                    "kind": "component",
+                                    "sequence": 4,
+                                    "component": "review",
+                                },
+                                "authenticated_receipt_paths": 2,
+                                "unique_source_event_identities": 1,
+                            }
+                        ],
+                        "evidence_coverage": {
+                            "status": "complete",
+                            "expected": 1,
+                            "measured": 1,
+                            "missing": [],
+                        },
+                    },
+                ],
+            },
+        )
     return publication
 
 
