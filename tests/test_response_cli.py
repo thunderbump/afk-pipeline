@@ -179,6 +179,24 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual((result / "stderr.log").read_text(), "")
         self.assertFalse((result / "output.json.tmp").exists())
 
+    def test_contract_conflict_stops_without_a_commit_and_cannot_hide_mutation(self):
+        for scenario in ("contract-conflict", "conflict-after-commit"):
+            with self.subTest(scenario=scenario):
+                before = self.state()
+                result, completed = self.run_response(scenario, result_name=scenario)
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(completed.returncode, 1, completed.stderr)
+                self.assertEqual(output["outcome"], "failed")
+                self.assertIn("contract_conflict", output["response"])
+                self.assertIn("contract conflict", output["response_error"])
+                if scenario == "contract-conflict":
+                    self.assertEqual(self.state(), before)
+                    self.assertIn("caller clarification", output["response_error"])
+                else:
+                    self.assertIn("repository mutation", output["response_error"])
+                receipt = json.loads((result / "inference/receipt.json").read_text())
+                self.assertEqual(receipt["outcome"], "succeeded")
+
     def test_no_action_completes_without_launching_an_agent(self):
         self.make_no_action()
         before = self.state()
@@ -306,7 +324,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(
             selected["assessment_rationale"], "Fixture assessment rationale."
         )
-        self.assertEqual(prompt["task_contract_version"], 3)
+        self.assertEqual(prompt["task_contract_version"], 4)
         for clause in (
             "governing invariant",
             "shared cause",

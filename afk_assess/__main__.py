@@ -8,6 +8,7 @@ from afk_assess.contract import subject_state
 from afk_assess.contract import validate_input as validate_input_contract
 from afk_assess.task import build_task
 from afk_change.contract import validate_change_output
+from afk_evidence.access import EvidenceUnavailable
 from afk_inference import invoke
 from afk_inference.component import publish_runtime_logs, runtime_process
 from afk_related_work import (
@@ -84,6 +85,7 @@ def main() -> int:
         timeout_seconds=assessment_input["timeout_seconds"],
         evidence_directory=result_directory / "inference",
         validator=task.validator,
+        read_only_evidence=task.read_only_evidence,
     )
     publish_runtime_logs(result_directory, inference_result.receipt)
     progress("finding-assessment agent completed")
@@ -289,6 +291,7 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except (
+        EvidenceUnavailable,
         OSError,
         TypeError,
         ValueError,

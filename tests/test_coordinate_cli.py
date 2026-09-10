@@ -59,6 +59,100 @@ class CoordinatorCliTest(unittest.TestCase):
         self.git("add", "README.md")
         self.git("commit", "--quiet", "-m", "Initial state")
 
+    def test_contract_conflict_is_a_failed_terminal_not_another_repair(self):
+        from afk_export import export_run
+
+        _assignment, request = self.prepare_run(6, full_review=True)
+        run = self.root / "conflict-run"
+        completed = self.invoke(
+            request,
+            run,
+            review_scenario="findings",
+            assessment_scenario="address",
+            response_scenario="contract-conflict",
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["outcome"], "failed")
+        self.assertEqual(output["history"][-1]["component"], "response")
+        self.assertEqual(len(output["history"]), 7)
+        response = json.loads((run / "07-response/output.json").read_text())
+        self.assertEqual(
+            response["repository"]["before"], response["repository"]["after"]
+        )
+        self.assertIn("caller clarification", response["response_error"])
+        bundle = self.root / "conflict-bundle"
+        export_run(run, bundle, project="fixture", run_id="conflict", schema_version=3)
+        published = json.loads((bundle / "workflow-run.json").read_text())
+        self.assertEqual(published["status"], "failed")
+        artifact = next(
+            path
+            for path in bundle.rglob("output.json")
+            if path.parent.name == "07-response"
+        )
+        retained = json.loads(artifact.read_text())
+        self.assertIn("clarification", retained["response"]["summary"])
+        self.assertIn("contract_conflict", retained["response"])
+
+    def test_assessment_receives_verified_previous_cycle_files(self):
+        from afk_assess.__main__ import load_evidence
+        from afk_assess.task import build_task
+        from afk_evidence.access import EvidenceUnavailable
+
+        _assignment, request = self.prepare_run(1, full_review=True)
+        run = self.root / "assessment-history"
+        completed = self.invoke(
+            request, run, review_scenario="findings", assessment_scenario="address"
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        first = json.loads(
+            (run / "05-assessment/inference/invocation.json").read_text()
+        )
+        self.assertNotIn("previous_cycle", first["prompt"]["untrusted_task_data"])
+        current = json.loads(
+            (run / "11-assessment/inference/invocation.json").read_text()
+        )
+        refs = current["prompt"]["untrusted_task_data"]["previous_cycle"]
+        self.assertEqual(
+            set(refs), {"previous_review", "previous_assessment", "previous_response"}
+        )
+        prior = Path(refs["previous_assessment"]["path"])
+        self.assertEqual(
+            json.loads(prior.read_text()),
+            json.loads((run / "05-assessment/output.json").read_text()),
+        )
+        assessment_input = json.loads((run / "11-assessment/input.json").read_text())
+        evidence = load_evidence(assessment_input)
+        task = build_task(
+            assessment_input,
+            evidence["output"]["review"],
+            "objective",
+            self.workspace,
+            evidence,
+        )
+        self.assertEqual(
+            set(task.read_only_evidence), {item["path"] for item in refs.values()}
+        )
+        original = prior.read_bytes()
+        prior.write_bytes(original + b" ")
+        with self.assertRaisesRegex(ValueError, "hash disagrees"):
+            build_task(
+                assessment_input,
+                evidence["output"]["review"],
+                "objective",
+                self.workspace,
+                evidence,
+            )
+        prior.unlink()
+        with self.assertRaises(EvidenceUnavailable):
+            build_task(
+                assessment_input,
+                evidence["output"]["review"],
+                "objective",
+                self.workspace,
+                evidence,
+            )
+
     def test_no_finding_run_completes_through_existing_components(self):
         assignment = {
             "schema_version": 1,
@@ -1420,8 +1514,8 @@ class CoordinatorCliTest(unittest.TestCase):
             assessment["prompt"]["untrusted_task_data"]["reviewed_diff"],
             repair.read_text(),
         )
-        self.assertEqual(receipt["task_contract_version"], 6)
-        self.assertEqual(assessment["task_contract_version"], 4)
+        self.assertEqual(receipt["task_contract_version"], 7)
+        self.assertEqual(assessment["task_contract_version"], 5)
         for invocation in (receipt, assessment):
             instructions = invocation["prompt"]["trusted_task_instructions"]
             self.assertIn("A runtime failure is not required", instructions)
@@ -1492,7 +1586,7 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "04-review/inference/invocation.json").read_text()
         )
         data = invocation["prompt"]["untrusted_task_data"]
-        self.assertEqual(invocation["task_contract_version"], 6)
+        self.assertEqual(invocation["task_contract_version"], 7)
         self.assertLess(len(json.dumps(data).encode()), 15000)
         context = data["work_context"]
         full = Path(context["files"]["work_diff"]["path"])

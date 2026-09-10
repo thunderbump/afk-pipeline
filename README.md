@@ -992,14 +992,24 @@ unsupported operating assumptions, speculative hardening and preferences alone
 remain insufficient. Validity and ownership are separate judgments; only the
 existing confirmed/current route makes a finding actionable.
 
-The clarified instructions use Review task versions 5 (legacy diff delivery)
-and 6 (complete-work delivery), and Assessment version 4. Existing result schemas,
+The clarified instructions use Review task versions 6 (legacy diff delivery)
+and 7 (complete-work delivery), and Assessment version 5. Existing result schemas,
 context schema 1, model policy, and routing are unchanged. Retained receipts keep
 their original instructions; newly executed stages use the current standard,
 including stages in a continued legacy Run. There is no new inference stage or
 completion-acceptance decision. `tests/fixtures/finding-standard.md` records
 positive and negative evaluation cases. Prompt transport and contract checks
 verify what is supplied and accepted structurally, not model judgment quality.
+
+Assessment receives exact read-only references to the nearest prior Review,
+Assessment and Response files when complete-work context supplies them. Their
+inventory, subject and hashes are checked using the existing Review context
+validator before inference. The files are not inlined into task data. A missing
+or altered context file is an evidence error; a first Review legitimately has
+no prior-cycle packet. Assessment independently explains what changed when it
+reverses a previous judgment. New rejection rules must cite a governing contract
+invariant and preserve supported positive examples; recurrence alone does not
+expand the objective or justify another module's calculation responsibilities.
 
 Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
 the single read-only inference invocation receipt, and an atomically sealed
@@ -1105,7 +1115,7 @@ Feedback Response input is structured JSON:
 }
 ```
 
-Assessed-feedback task version 2 includes each selected finding's original
+Assessed-feedback task version 4 includes each selected finding's original
 `finding.scope_claim`, Assessment's `assessment_rationale`, and final
 `assessment_scope` object with its kind and rationale. This preserves provenance
 when Assessment overrides Review. Only confirmed/current findings are selected;
@@ -1121,10 +1131,24 @@ It considers removing unnecessary machinery, without authorizing unrelated
 refactoring or speculative hardening. The existing summary/response text explains
 the cause, change and meaningful regression evidence, or why a useful check was
 unavailable. One response per supplied finding remains mandatory even when a
-single repair addresses several findings. No new reporting fields, planning
-stage, issue mutation or completion authority is introduced. Validation repair
-keeps task version 1 and its distinct failed-Validation input. Both paths still
-pass through the existing deterministic Validation gate.
+single repair addresses several findings. Successful repairs pass through the
+existing deterministic Validation gate. Validation repair keeps task version 1
+and its distinct failed-Validation input.
+
+A demonstrated conflict with the frozen objective or adopted contract may instead
+return `contract_conflict: {"requirement": "the conflicting rule", "evidence":
+"why satisfying it requires a caller decision"}` alongside the ordinary summary
+and all selected finding responses. Both conflict fields must contain 1–4000
+characters. State the need for clarification in the summary and account for the
+unaddressed findings. Leave the repository unchanged and make no commit.
+
+This result seals `outcome: "failed"` with a `response_error` explaining that caller
+clarification is required. Coordinator stops on that existing failure path; it
+does not run another repair, grant acceptance, or provide an exhausted-Run resume.
+The caller resolves the contract and prepares subsequent work. A conflict reported
+after repository mutation also fails and explicitly requests workspace inspection.
+The normal failed-Response projection and downloadable result retain the evidence;
+no new Web UI state or output schema version is required.
 
 `tests/fixtures/feedback-response.md` records the retained evidence-binding repair
 sequence and a proposed evaluation. Fixture checks establish transport and

@@ -84,4 +84,23 @@ def validate_response(selected, value):
         seen.add(index)
     if seen != expected:
         raise ValueError("each actionable finding must have one response")
+    if "contract_conflict" in value:
+        conflict = value["contract_conflict"]
+        if (
+            not selected
+            or not isinstance(conflict, dict)
+            or set(conflict) != {"requirement", "evidence"}
+        ):
+            raise ValueError(
+                "contract_conflict requires selected feedback and requirement/evidence"
+            )
+        for field in ("requirement", "evidence"):
+            if (
+                not isinstance(conflict[field], str)
+                or not conflict[field].strip()
+                or len(conflict[field]) > 4000
+            ):
+                raise ValueError(
+                    "contract_conflict fields must be nonempty text of at most 4000 characters"
+                )
     return value

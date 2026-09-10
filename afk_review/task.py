@@ -126,7 +126,7 @@ def build_task(
 
     return TaskContract(
         purpose="review",
-        contract_version=6 if read_only_evidence else 5,
+        contract_version=7 if read_only_evidence else 6,
         trusted_instructions=instructions,
         untrusted_data=data,
         capability=Capability.READ_ONLY,

@@ -23,6 +23,36 @@ from tests.test_plan_contract import planner_input
 
 
 class RoleLocalInferenceTaskContractTest(unittest.TestCase):
+    def test_conflict_requires_evidence_and_cannot_waive_selected_findings(self):
+        selected = [{"finding_index": 0}]
+        task = build_response_task({}, selected, "Consume the fixed producer contract.")
+        value = {
+            "summary": "Clarification required.",
+            "finding_responses": [{"finding_index": 0, "response": "Not repaired."}],
+            "contract_conflict": {
+                "requirement": "No new calculator.",
+                "evidence": "The required raw input is unavailable.",
+            },
+        }
+        self.assertEqual(task.validator(json.dumps(value)), value)
+        for conflict in (
+            None,
+            {},
+            {"requirement": "x", "evidence": ""},
+            {"requirement": "x", "evidence": "x" * 4001},
+        ):
+            with (
+                self.subTest(conflict=str(conflict)[:50]),
+                self.assertRaises(ResponseRejected),
+            ):
+                task.validator(json.dumps({**value, "contract_conflict": conflict}))
+        with self.assertRaises(ResponseRejected):
+            task.validator(json.dumps({**value, "finding_responses": []}))
+        with self.assertRaises(ResponseRejected):
+            build_response_task({}, [], "Validation repair").validator(
+                json.dumps({**value, "finding_responses": []})
+            )
+
     def test_trusted_task_renderers_have_explicit_snapshots(self):
         prompts = (
             ATTEMPT_INSTRUCTIONS,
@@ -39,9 +69,9 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 "6231accc3f36a73e9d9dd99cfb1d6fed69eec5cfcce7d88230c1abe3e12984fb",
                 "4a0366addfb3771fa4017b285de4ee0375248fa0dc789d9d9aa88cb6f85ed5a9",
                 "e159e8dd84cab2bc4c45d208927d5e708f926e8dca4f76fbc18f525365614dd2",
-                "89da3ffc57450d6fbf4f63eb218bf0884bd0043644bca4c816638e844880315f",
-                "1ceb32e12ae3cdc3b27962f5ca021ae06f528cdd306253588e4fa11bd22580ba",
-                "5db6cc1d54fd0a630ae997ecd2bc10be3016a093cc482b7200eba131a1d0d4c2",
+                "aa9e281b25ed9da597a9f750b9f83a2db4aa8101cf08a38f14c88ca4d8912a77",
+                "a9f4a3e0e3cbee2920101e5e783e4f448babb488f5eb9638508775da30666893",
+                "acd8bafd14ba52b7fc6a8dc9d46858dd50328fcadd669608a34aca0924b795c7",
                 "83ab33bf80cf6a60c2e55b6ce6b2c560c46bc04289c293455a32b7e357e1ee6b",
             ],
         )
@@ -144,7 +174,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         }
         selected = actionable_findings(review, validate_assessment(review, assessment))
         task = build_response_task({}, selected, "Repair existing metrics cost intake.")
-        self.assertEqual(task.contract_version, 3)
+        self.assertEqual(task.contract_version, 4)
         self.assertEqual(
             [
                 item["finding_index"]
@@ -278,9 +308,9 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         for task, capability in expected:
             with self.subTest(purpose=task.purpose):
                 expected_version = {
-                    "review": 5,
-                    "finding_assessment": 4,
-                    "feedback_response": 3,
+                    "review": 6,
+                    "finding_assessment": 5,
+                    "feedback_response": 4,
                 }[task.purpose]
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)

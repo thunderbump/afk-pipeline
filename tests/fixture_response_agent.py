@@ -67,6 +67,22 @@ elif scenario == "capture-validation-prompt":
         "summary": "Repaired repository validation.",
         "finding_responses": [],
     }
+elif scenario in {"contract-conflict", "conflict-after-commit"}:
+    if scenario == "conflict-after-commit":
+        commit_response()
+    response = {
+        "summary": "Caller clarification required: independent calculation is outside this contract.",
+        "finding_responses": [
+            {
+                "finding_index": 0,
+                "response": "Unaddressed pending contract clarification.",
+            }
+        ],
+        "contract_conflict": {
+            "requirement": "Consume the fixed producer measurements without another calculator.",
+            "evidence": "The assessed finding requires raw measurements that this interface does not expose.",
+        },
+    }
 elif scenario == "dirty":
     Path("README.md").write_text("uncommitted response\n")
     response = valid_response()

@@ -160,6 +160,14 @@ def main() -> int:
         and inference_result.receipt["protocol"].get("status") == "accepted"
         else None
     )
+    contract_conflict = response is not None and "contract_conflict" in response
+    if contract_conflict:
+        response_error = (
+            "contract conflict: caller clarification required"
+            if after == before and observation_error is None
+            else "contract conflict reported after repository mutation; inspect workspace"
+        )
+        progress(response_error)
     valid_repository = (
         after is not None
         and after["dirty"] is False
@@ -175,7 +183,9 @@ def main() -> int:
         else "timed_out"
         if inference_result.outcome == "timed_out"
         else "completed"
-        if inference_result.outcome == "succeeded" and valid_repository
+        if inference_result.outcome == "succeeded"
+        and valid_repository
+        and not contract_conflict
         else "failed"
     )
     output = {
