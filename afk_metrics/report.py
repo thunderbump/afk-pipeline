@@ -43,10 +43,10 @@ TOKEN_FIELDS = (
     "reasoning",
 )
 
-# A stream is bounded both across records and within one record. Pi events are
-# metadata-rich but should never approach this limit; rejecting an oversized
-# record prevents a corrupt artifact from materializing an unbounded line.
-MAX_JSONL_RECORD_BYTES = 1024 * 1024
+# Pi records include message/tool content and cumulative snapshots. Metrics
+# permits 8 MiB per encoded record, including its newline, independently of
+# execution and export artifact limits. Never skip an oversized usage record.
+MAX_JSONL_RECORD_BYTES = 8 * 1024 * 1024
 MAX_REPORTED_IDENTITIES = 128
 
 # Identity labels are the only event strings emitted by this projection. Keep
@@ -56,6 +56,16 @@ SAFE_IDENTITY_LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+@-]{0,127}\Z")
 SENSITIVE_IDENTITY_PREFIX = re.compile(
     r"(?:sk-|api[_-]?key|bearer|token|secret|password)", re.IGNORECASE
 )
+
+
+class PiEventRecordTooLarge(ValueError):
+    """A metrics resource limit with a payload-free, safe diagnostic."""
+
+    def __init__(self, line_number: int):
+        super().__init__(
+            f"oversized JSONL event at line {line_number}: "
+            f"record exceeds {MAX_JSONL_RECORD_BYTES} bytes"
+        )
 
 
 def _identity_label(value: Any) -> str | None:
@@ -182,7 +192,7 @@ def parse_pi_events(
             digest.update(line)
             line_number += 1
             if len(line) > MAX_JSONL_RECORD_BYTES:
-                raise ValueError(f"oversized JSONL event at line {line_number}")
+                raise PiEventRecordTooLarge(line_number)
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, UnicodeError) as error:
@@ -1216,7 +1226,16 @@ def _invalid_source(
     )
     return {
         "source_identity": stable,
-        "integrity": {"status": "invalid", "error": type(error).__name__},
+        "integrity": {
+            "status": "invalid",
+            "error": type(error).__name__,
+            # Arbitrary exception text can contain host paths or event content.
+            **(
+                {"detail": str(error)}
+                if isinstance(error, PiEventRecordTooLarge)
+                else {}
+            ),
+        },
         "run_identity": identity,
         "work": None,
         "outcome": None,

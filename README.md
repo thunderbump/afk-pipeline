@@ -123,8 +123,14 @@ The projection uses the exporter's existing verified prepared-Run and
 continuation traversal, including sealed invocation evidence retained by a
 component later marked abandoned. Pi Inference Receipts and their hash-bound
 event streams are authenticated at the existing export boundary. JSONL is
-streamed in bounded memory with a 1 MiB per-record limit (oversized records fail
-source integrity), and reports contain no prompts, message text, tool payloads,
+streamed one record at a time with an 8 MiB encoded per-record limit, including
+the newline. Pi records can contain large message/tool content and cumulative
+snapshots; the limit bounds parser allocation independently of execution and
+export artifact limits. Oversized records fail source integrity without trusted
+totals; no events are skipped to claim complete coverage. Local report JSON,
+human output and publication errors expose the offending line and byte limit
+without event content or host paths. This optional metrics limit does not
+constrain worker execution. Digest authentication still covers the whole stream, and reports contain no prompts, message text, tool payloads,
 logs, credentials, or raw events. Finalized assistant `message_end` usage is counted
 once by its stable message identity. Cumulative `message_update`, `turn_end`, and
 `agent_end` copies are not summed. `compaction_end.result.usage` is shown as a

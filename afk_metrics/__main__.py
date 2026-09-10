@@ -86,6 +86,8 @@ def _human(report):
                     f"  completion acceptance / integration: {_available(outcome['completion_acceptance'])} / {_available(outcome['integration_status'])}",
                 ]
             )
+        elif detail := run["integrity"].get("detail"):
+            lines.append(f"  cause: {detail}")
         lines.append("")
     if report["comparisons"]:
         lines.append("Comparisons")

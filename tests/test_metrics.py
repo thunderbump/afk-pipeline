@@ -258,6 +258,46 @@ class MetricsEventTests(unittest.TestCase):
             finally:
                 os.close(descriptor)
 
+    def test_record_at_eight_mib_boundary_preserves_usage_and_digest(self):
+        event = {
+            "type": "message_end",
+            "message": {
+                "id": "large",
+                "role": "assistant",
+                "usage": {
+                    "input": 10,
+                    "output": 2,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "totalTokens": 12,
+                    "cost": {"total": 0.01},
+                },
+                "content": "",
+            },
+        }
+        event["message"]["content"] = "x" * (
+            8 * 1024 * 1024 - len(json.dumps(event).encode()) - 1
+        )
+        raw = (json.dumps(event) + "\n").encode()
+        self.assertEqual(len(raw), 8 * 1024 * 1024)
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "events.jsonl"
+            path.write_bytes(raw)
+            with path.open("rb") as stream:
+                result = parse_pi_events(
+                    stream.fileno(), hashlib.sha256(raw).hexdigest()
+                )
+            self.assertEqual(result["finalized_requests"], 1)
+            self.assertEqual(result["usage"]["totalTokens"], 12)
+            self.assertEqual(result["cost"]["amount"], 0.01)
+            self.assertNotIn("content", json.dumps(result))
+            path.write_bytes(raw.replace(b"xxx", b"yyy", 1))
+            with (
+                self.assertRaisesRegex(ValueError, "hash disagrees"),
+                path.open("rb") as stream,
+            ):
+                parse_pi_events(stream.fileno(), hashlib.sha256(raw).hexdigest())
+
     def test_stream_rejects_an_oversized_record_at_a_fixed_bound(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "events.jsonl"

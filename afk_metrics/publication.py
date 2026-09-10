@@ -517,7 +517,10 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
         ):
             raise PublicationError("source Run changed during metrics read")
         if summary["integrity"]["status"] != "verified":
-            raise PublicationError("source metrics verification failed")
+            detail = summary["integrity"].get("detail")
+            raise PublicationError(
+                "source metrics verification failed" + (f": {detail}" if detail else "")
+            )
         stages = _stages(summary, project, identity["run_id"])
         total_stages += len(stages)
         if total_stages > MAX_STAGES:

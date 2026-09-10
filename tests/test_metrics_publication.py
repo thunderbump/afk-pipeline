@@ -9,12 +9,14 @@ from pathlib import Path
 from unittest import mock
 
 import afk_export
+from afk_metrics.__main__ import _human
 from afk_metrics.publication import (
     PublicationError,
     build_publication,
     load_publication_request,
     publish,
 )
+from afk_metrics.report import build_report
 from tests import test_export_cli
 
 
@@ -139,6 +141,77 @@ class MetricsPublicationTests(unittest.TestCase):
             totals = publication["runs"][0]["summary"]["inference"]["totals"]
             self.assertEqual(totals["usage_coverage"], "unavailable")
             self.assertEqual(totals["cost"]["status"], "unavailable")
+
+    def test_large_pi_records_publish_usage_and_report_safe_limit_failures(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            inference = source / "coordinator/04-review/inference"
+            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            message = {
+                "id": "large-message",
+                "role": "assistant",
+                "content": "PRIVATE PAYLOAD" + "x" * (1024 * 1024),
+                "usage": {
+                    "input": 10,
+                    "output": 2,
+                    "cacheRead": 0,
+                    "cacheWrite": 0,
+                    "totalTokens": 12,
+                    "cost": {"total": 0.01},
+                },
+            }
+            events = inference / "attempts/1/events.jsonl"
+            raw = "".join(
+                json.dumps(event) + "\n"
+                for event in [
+                    {"type": "message_start", "message": message},
+                    {"type": "message_end", "message": message},
+                    {"type": "message_end", "message": message},
+                    {"type": "agent_end", "messages": [message]},
+                ]
+            ).encode()
+            events.write_bytes(raw)
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["attempts"][0]["artifacts"]["events_sha256"] = hashlib.sha256(
+                raw
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            bundle = root / "bundle"
+            afk_export.export_run(source, bundle, schema_version=3)
+            request = {
+                "schema_version": 1,
+                "project": "operations-webui",
+                "runs": [
+                    {
+                        "source": str(source),
+                        "bundle": str(bundle),
+                        "selection": "latest",
+                    }
+                ],
+            }
+            publication = build_publication(request)
+            totals = publication["runs"][0]["summary"]["inference"]["totals"]
+            self.assertEqual(totals["usage"]["totalTokens"], 12)
+            self.assertEqual(totals["cost"]["amount"], 0.01)
+            self.assertNotIn("PRIVATE PAYLOAD", json.dumps(publication))
+            # Exact rejection boundary through authenticated report/publication.
+            limit = len(raw.splitlines(keepends=True)[0]) - 1
+            with mock.patch("afk_metrics.report.MAX_JSONL_RECORD_BYTES", limit):
+                report = build_report([source])
+                failed = report["runs"][0]
+                self.assertEqual(failed["integrity"]["status"], "invalid")
+                self.assertIsNone(failed["inference"])
+                detail = (
+                    f"oversized JSONL event at line 1: record exceeds {limit} bytes"
+                )
+                self.assertEqual(failed["integrity"]["detail"], detail)
+                self.assertIn(detail, _human(report))
+                with self.assertRaisesRegex(PublicationError, detail):
+                    build_publication(request)
+                self.assertNotIn("PRIVATE PAYLOAD", json.dumps(report))
+                self.assertNotIn(str(source), _human(report))
 
     def test_unreferenced_sealed_receipt_fails_publication_accounting(self):
         with tempfile.TemporaryDirectory() as temporary:
