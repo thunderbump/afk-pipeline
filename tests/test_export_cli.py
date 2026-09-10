@@ -1304,7 +1304,7 @@ class ExportCliTests(unittest.TestCase):
         with (
             mock.patch(
                 "afk_export.normalize_run_v2",
-                return_value=({"schema_version": 2}, {}),
+                return_value=({"schema_version": 2, "response_limit": 1}, {}),
             ) as normalize_v2,
             mock.patch("afk_export.artifact_candidates", return_value=[]) as candidates,
             mock.patch("afk_export.artifact_candidates_v3", return_value=[]),
@@ -1315,7 +1315,15 @@ class ExportCliTests(unittest.TestCase):
         normalize_v2.assert_called_once_with(observed, include_artifacts=False)
         candidates.assert_called_once_with(observed)
         publish.assert_called_once_with(observed, candidates=[])
-        self.assertEqual(record, {"schema_version": 3, "artifacts": []})
+        self.assertEqual(
+            record,
+            {
+                "schema_version": 3,
+                "response_limit": 1,
+                "continuation_allowances": [],
+                "artifacts": [],
+            },
+        )
         self.assertEqual(payloads, {})
 
     def test_v2_fails_closed_when_related_work_itself_exceeds_bundle_limits(self):

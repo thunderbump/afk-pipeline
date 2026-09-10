@@ -397,6 +397,33 @@ class MetricsPublicationTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1, result.stderr)
                 self.assertEqual(json.loads(result.stdout)["runs"], 1)
 
+    def test_v3_allowances_are_source_bound_and_historical_absence_is_supported(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            _source, bundle, request = self.fixture(Path(temporary))
+            workflow = bundle / "workflow-run.json"
+            manifest_path = bundle / "manifest.json"
+            value = json.loads(workflow.read_text())
+            self.assertEqual(value.pop("continuation_allowances"), [])
+            for addition in (None, [1]):
+                if addition is not None:
+                    value["continuation_allowances"] = addition
+                raw = json.dumps(value).encode()
+                workflow.write_bytes(raw)
+                manifest = json.loads(manifest_path.read_text())
+                for entry in manifest["files"]:
+                    if entry["path"] == "workflow-run.json":
+                        entry.update(
+                            bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest()
+                        )
+                manifest_path.write_text(json.dumps(manifest))
+                if addition is None:
+                    self.assertEqual(len(build_publication(request)["runs"]), 1)
+                else:
+                    with self.assertRaisesRegex(
+                        PublicationError, "semantic Run disagree"
+                    ):
+                        build_publication(request)
+
     def test_bundle_hash_and_semantic_mismatch_fail_without_destination(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

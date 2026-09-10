@@ -1,6 +1,6 @@
 {
   "agent_timeout_seconds": 60,
-  "assignment_path": "/tmp/tmpvhfmhix5/unavailable/source-run/assignment.json",
+  "assignment_path": "/tmp/tmpdve_nnm5/unavailable/source-run/assignment.json",
   "max_responses": 1,
   "schema_version": 1,
   "validation": {

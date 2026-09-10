@@ -957,6 +957,7 @@ class CoordinatorCliTest(unittest.TestCase):
         record = json.loads((bundle / "workflow-run.json").read_text())
         self.assertEqual(exported["identity"]["run_id"], "continued-1.continuation.01")
         self.assertEqual(record["terminal"], {"decision": "exhausted"})
+        self.assertEqual(record["continuation_allowances"], [1])
         sources = {artifact["source"]["path"] for artifact in record["artifacts"]}
         self.assertIn("continuations/01/output.json", sources)
         self.assertNotIn("continuations/02/output.json", sources)
@@ -1001,6 +1002,12 @@ class CoordinatorCliTest(unittest.TestCase):
                 prepared,
                 selected_bundle,
                 terminal_continuation=None if selection == "latest" else selection,
+            )
+            self.assertEqual(
+                json.loads((selected_bundle / "workflow-run.json").read_text())[
+                    "continuation_allowances"
+                ],
+                {"original": [], "01": [1], "latest": [1, 2]}[selection],
             )
             request = {
                 "schema_version": 1,

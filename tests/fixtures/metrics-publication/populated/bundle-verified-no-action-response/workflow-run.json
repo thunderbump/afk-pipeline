@@ -5,7 +5,7 @@
       "media_type": "application/json",
       "path": "artifacts/assignment.json",
       "public_bytes": 269,
-      "public_sha256": "d95a59cb122fd723133e282f052c30f6ee3a79495c37701cf1ec1c1df17277db",
+      "public_sha256": "2721b19bca383a64c1d2475a41e08acb2942b562dd4ce1a56569488a20be5171",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
@@ -33,7 +33,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
       "public_bytes": 275,
-      "public_sha256": "3d1161598ed004b8ca1814ce0e3ad6a0a8e1537ebf98e5785cec062c1c8abefe",
+      "public_sha256": "e3ed3cd0070ccb4751e3352d59b7da1ee1c7b42232561b8df08539df4d062356",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -207,7 +207,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/output.json",
       "public_bytes": 355,
-      "public_sha256": "760cd3baf3e2b6e0d6821e0ac51f4716690ad9e400b982afbac97b2c28adcdb0",
+      "public_sha256": "b4d6e21a17a39df81704df43b5e2cc5a206aadfe8e33561307136b86d6f415d7",
       "sanitization_status": "sanitized",
       "scope": "component:3:change",
       "source": {
@@ -529,7 +529,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/09-change/output.json",
       "public_bytes": 355,
-      "public_sha256": "760cd3baf3e2b6e0d6821e0ac51f4716690ad9e400b982afbac97b2c28adcdb0",
+      "public_sha256": "b4d6e21a17a39df81704df43b5e2cc5a206aadfe8e33561307136b86d6f415d7",
       "sanitization_status": "sanitized",
       "scope": "component:9:change",
       "source": {
@@ -781,7 +781,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/assignment.json",
       "public_bytes": 269,
-      "public_sha256": "d95a59cb122fd723133e282f052c30f6ee3a79495c37701cf1ec1c1df17277db",
+      "public_sha256": "2721b19bca383a64c1d2475a41e08acb2942b562dd4ce1a56569488a20be5171",
       "sanitization_status": "unchanged",
       "scope": "coordinator",
       "source": {
@@ -795,7 +795,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
       "public_bytes": 275,
-      "public_sha256": "3d1161598ed004b8ca1814ce0e3ad6a0a8e1537ebf98e5785cec062c1c8abefe",
+      "public_sha256": "e3ed3cd0070ccb4751e3352d59b7da1ee1c7b42232561b8df08539df4d062356",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -837,7 +837,7 @@
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
       "public_bytes": 1211,
-      "public_sha256": "9f2cadecb9e6551c8ab09f9f06ef04248d6209ef45e368f0ee10cd732878ca1b",
+      "public_sha256": "c5e5b751fc1de62c8c703057e6d8294ff7b0b9b3c2bb6372ea5274bc8170af41",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
@@ -1066,6 +1066,7 @@
   "bead": {
     "id": "central-example"
   },
+  "continuation_allowances": [],
   "evidence": [],
   "history": [
     {

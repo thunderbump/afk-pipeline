@@ -700,6 +700,7 @@ def load_source(
         terminal_directory,
         continuations,
         retained_inference_paths,
+        continuation_allowances,
     ) = load_continuation_lineage(
         coordinator,
         request,
@@ -733,6 +734,7 @@ def load_source(
         "coordinator": coordinator,
         "terminal_directory": terminal_directory,
         "continuations": continuations,
+        "continuation_allowances": continuation_allowances,
         "_metrics_retained_inference_paths": retained_inference_paths,
         "redactions": {
             value
@@ -812,19 +814,25 @@ def load_continuation_lineage(
                 if path.exists() or path.is_symlink():
                     retained_inference_paths.add(path)
 
+    allowances = [item.input["additional_responses"] for item in observed.sealed]
+    if observed.active is not None:
+        allowances.append(observed.active.input["additional_responses"])
+
     if terminal_continuation is not None:
         selected = observed.selected
+        selected_items = [
+            item
+            for item in observed.sealed
+            if selected.directory != coordinator
+            and item.directory.name <= selected.directory.name
+        ]
         return (
             selected.state,
             selected.output,
             selected.directory,
-            [
-                item.directory
-                for item in observed.sealed
-                if selected.directory != coordinator
-                and item.directory.name <= selected.directory.name
-            ],
+            [item.directory for item in selected_items],
             retained_inference_paths,
+            [item.input["additional_responses"] for item in selected_items],
         )
 
     continuations = [item.directory for item in observed.sealed]
@@ -838,8 +846,16 @@ def load_continuation_lineage(
             terminal.directory,
             continuations,
             retained_inference_paths,
+            allowances,
         )
-    return state, output, coordinator, continuations, retained_inference_paths
+    return (
+        state,
+        output,
+        coordinator,
+        continuations,
+        retained_inference_paths,
+        allowances,
+    )
 
 
 def locate_invocation_file(coordinator, continuation_directories, record, name):
@@ -1110,6 +1126,11 @@ def normalize_run_v3(observed):
         observed, candidates=artifact_candidates_v3(observed, candidates)
     )
     record["schema_version"] = 3
+    # Preserve validated budget authority even when artifact downloads are omitted.
+    additions = observed.get("continuation_allowances", [])
+    if record["response_limit"] + sum(additions) > 2**53 - 1:
+        raise ExportError("Response allowance exceeds public safe integer range")
+    record["continuation_allowances"] = additions
     record["artifacts"] = descriptors
     sessions = inference_sessions_v3(candidates)
     if sessions:

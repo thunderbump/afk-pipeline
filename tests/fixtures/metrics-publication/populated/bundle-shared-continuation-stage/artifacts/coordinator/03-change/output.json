@@ -3,10 +3,10 @@
     "objective": "portable",
     "repository": {},
     "source": {
-      "directory": "/tmp/tmpvhfmhix5/shared-continuation-stage/source-run/coordinator/01-attempt",
+      "directory": "/tmp/tmpdve_nnm5/shared-continuation-stage/source-run/coordinator/01-attempt",
       "kind": "attempt"
     },
-    "workspace": "/tmp/tmpvhfmhix5/shared-continuation-stage/source-run/workspace"
+    "workspace": "/tmp/tmpdve_nnm5/shared-continuation-stage/source-run/workspace"
   },
   "outcome": "completed",
   "schema_version": 1

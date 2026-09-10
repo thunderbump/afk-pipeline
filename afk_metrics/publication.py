@@ -474,11 +474,17 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
         ) as error:
             raise PublicationError("source Run verification failed") from error
         schema, workflow, _raw, workflow_digest = _read_bundle(bundle)
+        expected_bundle = expected
+        if schema == 3 and "continuation_allowances" in workflow:
+            expected_bundle = expected | {
+                "continuation_allowances": observed.get("continuation_allowances", [])
+            }
         identity = observed["identity"]
         if (
             identity.get("project") != project
             or workflow.get("identity") != identity
-            or _semantic_record(workflow, schema) != _semantic_record(expected, schema)
+            or _semantic_record(workflow, schema)
+            != _semantic_record(expected_bundle, schema)
         ):
             raise PublicationError("source and bundle semantic Run disagree")
         identity_key = (identity.get("project"), identity.get("run_id"))
@@ -512,6 +518,8 @@ def build_publication(request: dict[str, Any]) -> dict[str, Any]:
             raise PublicationError("source Run changed during metrics read") from error
         if (
             confirmed_record != expected
+            or confirmed.get("continuation_allowances", [])
+            != observed.get("continuation_allowances", [])
             or confirmed_evidence_checkpoint != evidence_checkpoint
             or confirmed_publication_digest != publication_digest
         ):

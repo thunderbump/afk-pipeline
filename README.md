@@ -702,6 +702,13 @@ must export them to a Publication Bundle v3 or migrate them before that
 deadline. The exact shared and prepared-versus-paused bindings and the removal
 condition are recorded in `ROUTING_COMPATIBILITY_AUDIT.md`.
 
+Current v3 Run records carry `continuation_allowances`, an ordered array of
+positive added Response counts from validated continuation inputs. Original
+Runs carry `[]`. `response_limit` remains the original allowance; for example,
+6 with `[4, 2]` gives segment limits 6, 10, and 12. This semantic metadata survives
+omitted artifact downloads. The public cumulative allowance must fit a JavaScript
+safe integer. Metrics intake verifies this field against the retained source.
+
 Publication Bundle v3 is the default producer output. It retains the readable
 normalized Run fields, a historical Preflight request ledger when present, a
 bounded `acceptance_routing` stage, and a semantic `artifacts` inventory. The
