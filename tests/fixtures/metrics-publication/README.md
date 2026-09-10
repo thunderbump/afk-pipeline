@@ -67,7 +67,7 @@ All coverage fields use `complete | partial | unavailable`. All token objects co
 
 Expected stages come from authenticated preparation and Coordinator history, never receipt discovery: recorded Acceptance Planning; every started Attempt, Review, Finding Assessment, and actionable or repair Feedback Response, including abandoned entries. Deterministic stages and verified no-action Responses are excluded. A command-worker Attempt is expected but has a missing receipt. Unstarted future stages and repeated continuation references are not counted. An unsealed abandoned invocation remains missing even if a receipt appears after the export checkpoint. A sealed receipt outside the expected set invalidates publication.
 
-`inference.totals` has `elapsed_seconds`, `usage`, `compaction_usage`, `usage_coverage`, and `cost`. Cost has `status: reported_estimate | partial | unavailable`, `kind: pi_reported_estimate | unavailable`, nullable numeric `amount`, `currency: null`, and `billed_charge: false | null`. A partial amount is the measured subtotal. No currency or invoice charge is inferred. Missing expected evidence makes usage/cost partial when a relevant measurement exists and unavailable otherwise; evidence completeness alone never claims usage or cost completeness.
+`inference.totals` has `elapsed_seconds`, `usage`, `compaction_usage`, `usage_coverage`, and `cost`. Cost has `status: reported_estimate | partial | unavailable`, `kind: pi_reported_estimate | unavailable`, nullable numeric `amount`, `currency: "USD" | null`, and `billed_charge: false | null`. A partial amount is the measured subtotal. No currency or invoice charge is inferred. Missing expected evidence makes usage/cost partial when a relevant measurement exists and unavailable otherwise; evidence completeness alone never claims usage or cost completeness.
 
 Each invocation has:
 
@@ -119,3 +119,9 @@ Run ownership is exactly:
 ```
 
 The bounded `purpose` enum is `acceptance_planning | preparation | publication | run_wall_span | unattributed`. Run timing rows have `outcome: null`; acceptance-planning invocation rows carry their authenticated invocation outcome. Run-level unavailable timings remain `null`.
+
+## Frozen USD API-equivalent cost
+
+Current Pi estimates use `currency: "USD"` when an amount is available; unavailable cost retains null currency. The amount is Pi's retained model-rate calculation, not a recalculation with current prices. Replay does not consult model catalogs. Positive retained amounts remain unchanged. A reported zero with nonzero or incomplete usage cannot establish API-equivalent pricing and is unavailable; explicit zero cost with complete zero usage remains zero. Compaction amounts follow the same rule and remain included once in invocation/Run estimates.
+
+This extends the existing v2 currency field without changing the envelope or adding a calculator. Consumers may retain null-denominated v2 estimates as unknown; they must not guess dollars for them. New USD amounts require no conversion. Existing provenance and partial/unavailable coverage remain in machine data.

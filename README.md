@@ -147,10 +147,12 @@ and treats zero expected stages as complete. Missing expected evidence downgrade
 Run usage and cost independently without estimating absent values.
 
 `usage.cost` is labeled a **Pi-reported estimate from model rates**, not a billed
-charge. Currency, Pi version, and historical price-table date remain unknown
-unless retained evidence establishes them; this increment neither fetches
-prices nor queries billing. Missing or subscription pricing is unavailable,
-never zero, and no historical estimate is recomputed.
+charge. Pi model-rate amounts are denominated in USD and represent API-equivalent
+cost for comparison, including subscription-backed executions. The retained
+event amount is frozen: no current rates are fetched and no historical estimate
+is recomputed. Pi version and historical price-table date remain unknown.
+Missing cost, or zero cost with nonzero/incomplete token usage, is unavailable;
+explicit zero cost with complete zero usage remains a measured zero.
 
 Timing distinguishes Run wall span, preparation, inference invocation elapsed,
 trusted in-process response-validator time, and repository Validation time.

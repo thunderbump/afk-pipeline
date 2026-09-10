@@ -7,8 +7,8 @@
       "python3",
       "-m",
       "afk_coordinate",
-      "/tmp/tmpan6w6hcf/verified-no-action-response/source-run/coordinator-request.json",
-      "/tmp/tmpan6w6hcf/verified-no-action-response/source-run/coordinator"
+      "/tmp/tmpvhfmhix5/verified-no-action-response/source-run/coordinator-request.json",
+      "/tmp/tmpvhfmhix5/verified-no-action-response/source-run/coordinator"
     ],
     "decision": "stop",
     "directory": "coordinator",
@@ -26,11 +26,11 @@
     "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "base_ref": "main",
     "branch": "afk-central-example-run-example",
-    "path": "/tmp/tmpan6w6hcf/verified-no-action-response/repository",
-    "worktree": "/tmp/tmpan6w6hcf/verified-no-action-response/workspace"
+    "path": "/tmp/tmpvhfmhix5/verified-no-action-response/repository",
+    "worktree": "/tmp/tmpvhfmhix5/verified-no-action-response/workspace"
   },
   "run": {
-    "artifact_root": "/tmp/tmpan6w6hcf/verified-no-action-response/source-run",
+    "artifact_root": "/tmp/tmpvhfmhix5/verified-no-action-response/source-run",
     "id": "populated-verified-no-action-response"
   },
   "schema_version": 1,

@@ -13,7 +13,7 @@
     {
       "bytes": 259,
       "path": "artifacts/coordinator-request.json",
-      "sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d"
+      "sha256": "acb9e6dbc6738f6f3958f75637938571321686ae645dca4ffeddd7580588ce05"
     },
     {
       "bytes": 21,
@@ -68,7 +68,7 @@
     {
       "bytes": 323,
       "path": "artifacts/coordinator/03-change/output.json",
-      "sha256": "ac90edfc96735a433f27de413038e6099c77063806a591a66ed8bea9c2d39ecc"
+      "sha256": "3e53ea90e3aca1faddeb7fd770c838e0bc9eb7e5dd4b2e3236a9f43f0c07d573"
     },
     {
       "bytes": 44,
@@ -163,7 +163,7 @@
     {
       "bytes": 259,
       "path": "artifacts/coordinator/input.json",
-      "sha256": "5f1bfc2929a044884cb23662d3d3bac62244024f26515986870770c400faba4d"
+      "sha256": "acb9e6dbc6738f6f3958f75637938571321686ae645dca4ffeddd7580588ce05"
     },
     {
       "bytes": 1323,
@@ -178,12 +178,12 @@
     {
       "bytes": 1106,
       "path": "artifacts/preparation.json",
-      "sha256": "2d21b30e15e5dd33c5f2afd863b78a1b68373079c6f7d4ef386c58565760b455"
+      "sha256": "8aa66f674ea9f42525537936685fbb6054b605b954ec6218a262944d3be32b68"
     },
     {
       "bytes": 27679,
       "path": "workflow-run.json",
-      "sha256": "1bf30d330524c09f1ea5e12c3da47f7de9a65dcc9a75d1ef67a1bc1368d97de5"
+      "sha256": "d1c07a082b027de34eed259c3f5b501f0fcedaf207686601c933fa926da0021e"
     }
   ],
   "identity": {

@@ -88,7 +88,7 @@ class PopulatedPublicationTests(unittest.TestCase):
             self.assertEqual(
                 metrics["cost"]["provenance"]["calculator"], "Pi model rates"
             )
-            self.assertIsNone(metrics["cost"]["currency"])
+            self.assertEqual(metrics["cost"]["currency"], "USD")
             self.assertFalse(metrics["cost"]["billed_charge"])
             zero = invocations["finding_assessment"]["metrics"]
             self.assertEqual(zero["cost"]["amount"], 0)

@@ -2,9 +2,9 @@
   "comparisons": [
     {
       "equivalent_frozen_conditions": true,
-      "left": "d014cc8311aa3b6f27054c862823bb44c8c5a2daadeb87109a04c437144edf48",
+      "left": "2465d5b92e4db0a85f3a3e42d6b78dd6bdcf5b82aa30c09f241eda90dd4f3806",
       "ranking": "observational_only",
-      "right": "c4c9b0776c5ec8e73ae1af2adbcac3323ed6062abee9234d84311cae21b89bf1",
+      "right": "c0c9c31633f0905e07c28e304f99603fb59e5f6a542d4b007bf75469988ccbd4",
       "warnings": []
     }
   ],
@@ -26,22 +26,22 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-verified-no-action-response",
-        "workflow_run_sha256": "6c8fad9112a3be4f1df7593ed721efc4ea6f805b89014caee16ad3aacaa07588"
+        "workflow_run_sha256": "61865bc5b4c8067b9f5441e5f7cd034f4cdd7b3cfd504ad2cd54b54a747d110c"
       },
       "stages": [
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -121,16 +121,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -160,16 +160,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -299,16 +299,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -338,16 +338,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -521,16 +521,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -558,7 +558,7 @@
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "930f4a0cc9c8d615289b62b45fad57c93801872da166a8cff4eb832a6867d0ae"
+              "source_event_identity": "90f9b143339b9cc52fd8725cbf3437c76052fcc61430bcf29f9bcbf2552adeb8"
             },
             {
               "adapter": "pi-v1",
@@ -576,16 +576,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -613,7 +613,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "aed136c29990689f564e5748186cf72c866807c387734e894ac3a0414f6ce807"
+              "source_event_identity": "56cd4e9db646f6100b892d994ace1131e870ba52b5cf25ceecf328cb4b508c89"
             },
             {
               "adapter": "pi-v1",
@@ -631,16 +631,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -668,7 +668,7 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "e5cc05701f412f4fd90797675e09c0b3440cd0db05f527615953783e294f0012"
+              "source_event_identity": "942fcb28c61ea63787af392b25143a6cc4c1825a2e14b4477f6925559409d13e"
             },
             {
               "adapter": "pi-v1",
@@ -686,16 +686,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -723,7 +723,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "09febfe71c645d994a10eee10103ec5cae535f44b0597d4bd26876c0836e41d5"
+              "source_event_identity": "a28ded6d7e87fc5e1f1dcf1966f5d8d500f7b0ed4318ca0138f89bfe42933686"
             },
             {
               "adapter": "pi-v1",
@@ -741,16 +741,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -778,17 +778,17 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "e8020fb5d46ac042fa1870494435aed5ac9af9885c4c3b9417e25e69e3b562ee"
+              "source_event_identity": "ccdb5dae2319dcc4b0ee8aa05c42dc2aae99e140122e8c323d0a88de5268b461"
             }
           ],
           "totals": {
             "compaction_usage": {},
             "cost": {
-              "amount": 0,
-              "billed_charge": false,
+              "amount": null,
+              "billed_charge": null,
               "currency": null,
-              "kind": "pi_reported_estimate",
-              "status": "reported_estimate"
+              "kind": "unavailable",
+              "status": "unavailable"
             },
             "elapsed_seconds": 5,
             "usage": {
@@ -823,7 +823,7 @@
           "project": "operations-webui",
           "run_id": "populated-verified-no-action-response"
         },
-        "source_identity": "d014cc8311aa3b6f27054c862823bb44c8c5a2daadeb87109a04c437144edf48",
+        "source_identity": "2465d5b92e4db0a85f3a3e42d6b78dd6bdcf5b82aa30c09f241eda90dd4f3806",
         "timing": {
           "active_execution_intervals": [
             {
@@ -880,22 +880,22 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-shared-continuation-stage.continuation.01",
-        "workflow_run_sha256": "7cf12285002dd23138ea2b3ceedbe958417e2ef763afb0d5cf676cbc13362c83"
+        "workflow_run_sha256": "63ffcb9b09554d96bf17912708fe2b057a8c5d33d26229a7f9d4afc5d46f8bd5"
       },
       "stages": [
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -975,16 +975,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -1014,16 +1014,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -1078,16 +1078,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -1167,16 +1167,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -1206,16 +1206,16 @@
         {
           "compaction_usage": {},
           "cost": {
-            "amount": 0,
-            "billed_charge": false,
+            "amount": null,
+            "billed_charge": null,
             "currency": null,
-            "kind": "pi_reported_estimate",
+            "kind": "unavailable",
             "provenance": {
-              "calculator": "Pi model rates",
+              "calculator": null,
               "pi_version": null,
               "price_table_date": null
             },
-            "status": "reported_estimate"
+            "status": "unavailable"
           },
           "elapsed_kind": "invocation_adapter_elapsed_not_pure_inference",
           "elapsed_seconds": 1,
@@ -1389,16 +1389,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1426,7 +1426,7 @@
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "b68e1ad152fc6e25c4f4465c6d428c19a63939af8897187100e80403f93282fa"
+              "source_event_identity": "f311127e64fc8c1674b91a71ebcabbe22c9400fd11073b114375e40892f36188"
             },
             {
               "adapter": "pi-v1",
@@ -1444,16 +1444,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1481,7 +1481,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "0b38b42847291b7cb8a57cb264cc65c959e4a23d6dfaf891fd116b3b3548daf4"
+              "source_event_identity": "47fe7e8a294592a2839736a7607a2caa268d612444caeb0ca947f679d0b97248"
             },
             {
               "adapter": "pi-v1",
@@ -1499,16 +1499,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1536,7 +1536,7 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "adaea8edca43edc9ad1976a6c00a59a3c7e6122c29a01ad6e81f9651a1de06fc"
+              "source_event_identity": "a2801c75f57c13bb38031e70927aea5f74e4c7e312983fd33cb127f91d4bc33b"
             },
             {
               "adapter": "pi-v1",
@@ -1554,16 +1554,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1591,7 +1591,7 @@
               "purpose": "feedback_response",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "138572472926148698c830fe6018c2b490d1db6901e2a7a4079c74c82320163b"
+              "source_event_identity": "d762995a5bcce1a1984c94f057f288360e909e9a1975925040eb111b33f610e1"
             },
             {
               "adapter": "pi-v1",
@@ -1609,16 +1609,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1646,7 +1646,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "909fc36837415dc960dd1b53b62c97625a4558101800cc191f99dae5347572d2"
+              "source_event_identity": "f235c27ecd969637907c6b0367886c04b3d5499421f153a59d5b261a36cd74ce"
             },
             {
               "adapter": "pi-v1",
@@ -1664,16 +1664,16 @@
                   "usage": {}
                 },
                 "cost": {
-                  "amount": 0,
-                  "billed_charge": false,
+                  "amount": null,
+                  "billed_charge": null,
                   "currency": null,
-                  "kind": "pi_reported_estimate",
+                  "kind": "unavailable",
                   "provenance": {
-                    "calculator": "Pi model rates",
+                    "calculator": null,
                     "pi_version": null,
                     "price_table_date": null
                   },
-                  "status": "reported_estimate"
+                  "status": "unavailable"
                 },
                 "coverage": "complete",
                 "finalized_requests": 1,
@@ -1701,17 +1701,17 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "a4389bc549617fc583dc33a99b6b582a7ec4c307e3cd26143ab3e138377312cd"
+              "source_event_identity": "b3fe56f75bd4f146b692aa41dea84c37eb7362e2aa03690a062aba29e4afd187"
             }
           ],
           "totals": {
             "compaction_usage": {},
             "cost": {
-              "amount": 0,
-              "billed_charge": false,
+              "amount": null,
+              "billed_charge": null,
               "currency": null,
-              "kind": "pi_reported_estimate",
-              "status": "reported_estimate"
+              "kind": "unavailable",
+              "status": "unavailable"
             },
             "elapsed_seconds": 6,
             "usage": {
@@ -1746,7 +1746,7 @@
           "project": "operations-webui",
           "run_id": "populated-shared-continuation-stage.continuation.01"
         },
-        "source_identity": "c4c9b0776c5ec8e73ae1af2adbcac3323ed6062abee9234d84311cae21b89bf1",
+        "source_identity": "c0c9c31633f0905e07c28e304f99603fb59e5f6a542d4b007bf75469988ccbd4",
         "timing": {
           "active_execution_intervals": [
             {

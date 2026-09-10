@@ -31,6 +31,40 @@ ROOT = Path(__file__).parents[1]
 
 
 class MetricsEventTests(unittest.TestCase):
+    def test_retained_api_cost_is_usd_without_repricing_and_zero_is_not_inferred(self):
+        for usage, amount in [
+            ({"input": 100, "cost": {"total": 1.234567}}, 1.234567),
+            ({"input": 100, "cost": {"total": 0}}, None),
+            ({"cost": {"total": 0}}, None),
+            ({"input": 100}, None),
+            (
+                {
+                    **dict.fromkeys(
+                        ("input", "output", "cacheRead", "cacheWrite", "totalTokens"), 0
+                    ),
+                    "cost": {"total": 0},
+                },
+                0,
+            ),
+        ]:
+            with self.subTest(usage=usage), tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / "events.jsonl"
+                path.write_text(
+                    json.dumps(
+                        {
+                            "type": "message_end",
+                            "message": {"role": "assistant", "usage": usage},
+                        }
+                    )
+                    + "\n"
+                )
+                result = parse_pi_events(path)
+                self.assertEqual(result["cost"]["amount"], amount)
+                self.assertEqual(
+                    result["cost"]["currency"], "USD" if amount is not None else None
+                )
+                self.assertEqual(parse_pi_events(path), result)
+
     def test_partial_token_categories_do_not_claim_complete_coverage(self):
         for kind in ("message_end", "compaction_end"):
             with self.subTest(kind=kind), tempfile.TemporaryDirectory() as temporary:

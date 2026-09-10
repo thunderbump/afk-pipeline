@@ -18,7 +18,7 @@
         "bundle_schema_version": 2,
         "project": "operations-webui",
         "run_id": "populated-partial",
-        "workflow_run_sha256": "8e4e5f2d4571f184879b3c92abff1b74c49c04347f026004fb25507e336512c4"
+        "workflow_run_sha256": "0608a9e9548285a195145fcd20c737832b8c5aba403464b5dd342358200f479d"
       },
       "stages": [
         {
@@ -108,7 +108,7 @@
           "cost": {
             "amount": 0.03,
             "billed_charge": false,
-            "currency": null,
+            "currency": "USD",
             "kind": "pi_reported_estimate",
             "provenance": {
               "calculator": "Pi model rates",
@@ -147,7 +147,7 @@
           "cost": {
             "amount": 0,
             "billed_charge": false,
-            "currency": null,
+            "currency": "USD",
             "kind": "pi_reported_estimate",
             "provenance": {
               "calculator": "Pi model rates",
@@ -346,7 +346,7 @@
                 "cost": {
                   "amount": 0.03,
                   "billed_charge": false,
-                  "currency": null,
+                  "currency": "USD",
                   "kind": "pi_reported_estimate",
                   "provenance": {
                     "calculator": "Pi model rates",
@@ -381,7 +381,7 @@
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "2614d6df9b52623c042ef4fb47a72791d9233f36910501cc3f0259d0a2fa110c"
+              "source_event_identity": "b833bd7d579d6e5f8c84aa4427890d913419cc8fb6409c5dedeb53b4337bedc9"
             },
             {
               "adapter": "pi-v1",
@@ -401,7 +401,7 @@
                 "cost": {
                   "amount": 0,
                   "billed_charge": false,
-                  "currency": null,
+                  "currency": "USD",
                   "kind": "pi_reported_estimate",
                   "provenance": {
                     "calculator": "Pi model rates",
@@ -436,7 +436,7 @@
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "ac95047264c5076b289eef58539fc463b4c75f6726030353a273f549400bc383"
+              "source_event_identity": "0899c40a4b47c7357711883251f80d35f9a0537b6cf20145101ed5992e169cb8"
             }
           ],
           "totals": {
@@ -451,7 +451,7 @@
             "cost": {
               "amount": 0.03,
               "billed_charge": false,
-              "currency": null,
+              "currency": "USD",
               "kind": "pi_reported_estimate",
               "status": "partial"
             },

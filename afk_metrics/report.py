@@ -115,11 +115,18 @@ def _reported_cost(raw_usage: Any) -> float | int | None:
     if not isinstance(raw_usage, dict):
         return None
     raw_cost = raw_usage.get("cost")
-    return (
+    amount = (
         _number(raw_cost.get("total"))
         if isinstance(raw_cost, dict)
         else _number(raw_cost)
     )
+    # Pi can emit zero rates for unpriced/subscription models. Only complete
+    # zero usage establishes a zero API-equivalent estimate from that evidence.
+    if amount == 0:
+        usage = _usage(raw_usage)
+        if not set(TOKEN_FIELDS[:-1]).issubset(usage) or any(usage.values()):
+            return None
+    return amount
 
 
 def parse_pi_events(
@@ -333,7 +340,7 @@ def parse_pi_events(
             "status": cost_status,
             "kind": "pi_reported_estimate" if has_cost else "unavailable",
             "amount": cost if has_cost else None,
-            "currency": None,
+            "currency": "USD" if has_cost else None,
             "billed_charge": False if has_cost else None,
             "provenance": {
                 "calculator": "Pi model rates" if has_cost else None,
@@ -1178,7 +1185,7 @@ def _invocation(
         "status": cost_status,
         "kind": "pi_reported_estimate" if costs else "unavailable",
         "amount": sum(costs) if costs else None,
-        "currency": None,
+        "currency": "USD" if costs else None,
         "billed_charge": False if costs else None,
         "provenance": {
             "calculator": "Pi model rates" if costs else None,
@@ -1994,7 +2001,7 @@ def summarize_source(
                         "pi_reported_estimate" if available_costs else "unavailable"
                     ),
                     "amount": sum(available_costs) if available_costs else None,
-                    "currency": None,
+                    "currency": "USD" if available_costs else None,
                     "billed_charge": False if available_costs else None,
                 },
             },
