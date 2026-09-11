@@ -43,6 +43,21 @@
       "unavailable_reason": null
     },
     {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/01-attempt/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/01-attempt/input.json",
@@ -69,6 +84,21 @@
       },
       "state": "downloadable",
       "unavailable_reason": null
+    },
+    {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:2:validation",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/02-validation/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
     },
     {
       "kind": "json",
@@ -99,6 +129,21 @@
       "unavailable_reason": null
     },
     {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:3:change",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/03-change/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/input.json",
@@ -125,6 +170,21 @@
       },
       "state": "downloadable",
       "unavailable_reason": null
+    },
+    {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:4:review",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/04-review/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
     },
     {
       "kind": "json",
@@ -155,6 +215,21 @@
       "unavailable_reason": null
     },
     {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:5:assessment",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/05-assessment/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
       "kind": "json",
       "media_type": "application/json",
       "path": "artifacts/coordinator/05-assessment/input.json",
@@ -181,6 +256,21 @@
       },
       "state": "downloadable",
       "unavailable_reason": null
+    },
+    {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:6:iteration",
+      "source": {
+        "bytes": 18,
+        "path": "coordinator/06-iteration/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
     },
     {
       "kind": "json",
@@ -265,6 +355,21 @@
       },
       "state": "downloadable",
       "unavailable_reason": null
+    },
+    {
+      "kind": "inference_evidence_checkpoint",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "acceptance_planning",
+      "source": {
+        "bytes": 18,
+        "path": "planner/inference",
+        "sha256": "222667f43f9523fc629245ed567d43490d97c8c68ac48af5bae6433827d01900"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
     },
     {
       "kind": "json",

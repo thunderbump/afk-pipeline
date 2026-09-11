@@ -1,0 +1,8 @@
+{
+  "change_directory": "/tmp/tmpw6_cv34_/split-completed/source-run/coordinator/03-change",
+  "review_mode": "split",
+  "schema_version": 1,
+  "timeout_seconds": 60,
+  "validation_directory": "/tmp/tmpw6_cv34_/split-completed/source-run/coordinator/02-validation",
+  "workspace": "/tmp/tmpw6_cv34_/split-completed/workspace"
+}

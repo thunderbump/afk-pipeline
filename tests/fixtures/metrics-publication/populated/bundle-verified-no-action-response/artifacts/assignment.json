@@ -7,5 +7,5 @@
   },
   "timeout_seconds": 60,
   "worker": "inference",
-  "workspace": "/tmp/tmpdve_nnm5/verified-no-action-response/workspace"
+  "workspace": "/tmp/tmpw6_cv34_/verified-no-action-response/workspace"
 }

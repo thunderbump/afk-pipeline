@@ -5,7 +5,7 @@
       "media_type": "application/json",
       "path": "artifacts/assignment.json",
       "public_bytes": 269,
-      "public_sha256": "2721b19bca383a64c1d2475a41e08acb2942b562dd4ce1a56569488a20be5171",
+      "public_sha256": "2183128f512b42257803f79644ebf63d0b349ec719f7ce79eeb535a9041d62f0",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {
@@ -33,7 +33,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
       "public_bytes": 275,
-      "public_sha256": "e3ed3cd0070ccb4751e3352d59b7da1ee1c7b42232561b8df08539df4d062356",
+      "public_sha256": "e7beaac85020fbc0da2e185cc19b6372a7ff014118cc73889762951d0baa7809",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -207,7 +207,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/output.json",
       "public_bytes": 355,
-      "public_sha256": "b4d6e21a17a39df81704df43b5e2cc5a206aadfe8e33561307136b86d6f415d7",
+      "public_sha256": "a9381e73c48e9df62f70b1030ff41779477ed4ae1381b726c9ba64e76e2b0a6e",
       "sanitization_status": "sanitized",
       "scope": "component:3:change",
       "source": {
@@ -529,7 +529,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/09-change/output.json",
       "public_bytes": 355,
-      "public_sha256": "b4d6e21a17a39df81704df43b5e2cc5a206aadfe8e33561307136b86d6f415d7",
+      "public_sha256": "a9381e73c48e9df62f70b1030ff41779477ed4ae1381b726c9ba64e76e2b0a6e",
       "sanitization_status": "sanitized",
       "scope": "component:9:change",
       "source": {
@@ -781,7 +781,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/assignment.json",
       "public_bytes": 269,
-      "public_sha256": "2721b19bca383a64c1d2475a41e08acb2942b562dd4ce1a56569488a20be5171",
+      "public_sha256": "2183128f512b42257803f79644ebf63d0b349ec719f7ce79eeb535a9041d62f0",
       "sanitization_status": "unchanged",
       "scope": "coordinator",
       "source": {
@@ -795,7 +795,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
       "public_bytes": 275,
-      "public_sha256": "e3ed3cd0070ccb4751e3352d59b7da1ee1c7b42232561b8df08539df4d062356",
+      "public_sha256": "e7beaac85020fbc0da2e185cc19b6372a7ff014118cc73889762951d0baa7809",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -837,7 +837,7 @@
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
       "public_bytes": 1211,
-      "public_sha256": "c5e5b751fc1de62c8c703057e6d8294ff7b0b9b3c2bb6372ea5274bc8170af41",
+      "public_sha256": "849c291a2e98b1f7ea981039a1c637d3e7c568bfceabb8472009db9be349f2c7",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {

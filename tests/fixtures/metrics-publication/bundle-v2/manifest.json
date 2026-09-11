@@ -126,9 +126,9 @@
       "sha256": "b162577f2bc3ed3a42659af6f5c3f1b4ecfffead8ef2f1c11599590adab4a47d"
     },
     {
-      "bytes": 16430,
+      "bytes": 19920,
       "path": "workflow-run.json",
-      "sha256": "775a1bceee1c0c5b963d0205730d1a65a6ea4b772c023d769c4837f7ea9f81a7"
+      "sha256": "56aee1901ef3a6c35fed315a2aaf8cbf5dece620e0e331fd253eaeb8e5e999ec"
     }
   ],
   "identity": {

@@ -1,0 +1,13 @@
+{
+  "agent_timeout_seconds": 60,
+  "assignment_path": "/tmp/tmpw6_cv34_/split-completed/source-run/assignment.json",
+  "max_responses": 1,
+  "review_mode": "split",
+  "schema_version": 1,
+  "validation": {
+    "command": [
+      "./scripts/validate"
+    ],
+    "timeout_seconds": 60
+  }
+}

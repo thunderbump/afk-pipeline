@@ -7,8 +7,8 @@
       "python3",
       "-m",
       "afk_coordinate",
-      "/tmp/tmpdve_nnm5/shared-continuation-stage/source-run/coordinator-request.json",
-      "/tmp/tmpdve_nnm5/shared-continuation-stage/source-run/coordinator"
+      "/tmp/tmpw6_cv34_/shared-continuation-stage/source-run/coordinator-request.json",
+      "/tmp/tmpw6_cv34_/shared-continuation-stage/source-run/coordinator"
     ],
     "decision": "exhausted",
     "directory": "coordinator",
@@ -26,11 +26,11 @@
     "base_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "base_ref": "main",
     "branch": "afk-central-example-run-example",
-    "path": "/tmp/tmpdve_nnm5/shared-continuation-stage/repository",
-    "worktree": "/tmp/tmpdve_nnm5/shared-continuation-stage/workspace"
+    "path": "/tmp/tmpw6_cv34_/shared-continuation-stage/repository",
+    "worktree": "/tmp/tmpw6_cv34_/shared-continuation-stage/workspace"
   },
   "run": {
-    "artifact_root": "/tmp/tmpdve_nnm5/shared-continuation-stage/source-run",
+    "artifact_root": "/tmp/tmpw6_cv34_/shared-continuation-stage/source-run",
     "id": "populated-shared-continuation-stage"
   },
   "schema_version": 1,

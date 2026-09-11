@@ -1,0 +1,8 @@
+{
+  "artifacts": {
+    "events": "events.jsonl",
+    "stderr": "stderr.log"
+  },
+  "outcome": "succeeded",
+  "schema_version": 1
+}

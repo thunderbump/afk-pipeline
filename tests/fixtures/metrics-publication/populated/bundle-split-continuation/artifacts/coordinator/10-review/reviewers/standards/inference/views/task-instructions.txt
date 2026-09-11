@@ -1,0 +1,1 @@
+This is the isolated standards lens invocation. Report only findings with lens "standards".

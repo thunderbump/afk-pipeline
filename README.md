@@ -998,12 +998,12 @@ again after inference, and validated by the Run reader and exporter. A Run reade
 with repository access also compares patch bytes with Git. The existing public
 `diff` artifact now represents the full work range; repair and previous-cycle
 files remain private local evidence, without new public artifact kinds.
-Finding Assessment retains its existing latest-change inline payload, derived
+Finding Assessment retains its latest-change scope, with large evidence referenced, derived
 from the actual Committed Change range, instead of inheriting Review's larger
 full-work patch. Its diff scope is unchanged.
 
 Standalone and retained legacy input without `work_context` continues to use
-task contract version 6 and the latest-change diff, referenced when large. The default runtime
+task contract version 10 and the latest-change diff, referenced when large. The default runtime
 adapter uses Pi with the frozen Review model/thinking policy. Deployment uses
 the shared inference configuration; durable Review input cannot replace an
 adapter or command. Authentication stays in the execution environment.

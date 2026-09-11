@@ -2,9 +2,9 @@
   "comparisons": [
     {
       "equivalent_frozen_conditions": true,
-      "left": "e64efd763b624c7423b51bf244653b6af47b4a671f20d4be90fb944a82e9cab3",
+      "left": "184a881565f6c50311d3a1cece2947ae9e07e60421b3b1073824d6f576008979",
       "ranking": "observational_only",
-      "right": "d05c0a10e6d7fb1c03d161efae292897b9b22b1392844cf6980f1fd412a773ab",
+      "right": "8e78aab108efe19601db5cc3c984ffaee9a9dc6f5bed59cf7f5e64708ca9e70c",
       "warnings": []
     }
   ],
@@ -26,7 +26,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-verified-no-action-response",
-        "workflow_run_sha256": "b97c609f8fc2685a34755eccaa52e4ed06e286f53180d0c6470b96f95c7ad69d"
+        "workflow_run_sha256": "130bece362b43983a8d763aeb06dc26d28a788c667e0ab6f3e6004fb41fdc87c"
       },
       "stages": [
         {
@@ -554,11 +554,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "attempt",
+                "kind": "component",
+                "sequence": 1
+              },
               "provider": "synthetic-provider",
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "659fe84c11a52a6ab7595167d0f03df73f37858ac22652c4d5fc2cae09e05731"
+              "source_event_identity": "6ebe501cb1d4c67ad4cb2967cb6612f2646e6ed4bf47b0e97ba7694426b3acb5"
             },
             {
               "adapter": "pi-v1",
@@ -609,11 +614,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "review",
+                "kind": "component",
+                "sequence": 4
+              },
               "provider": "synthetic-provider",
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "9e6798de8ddeac5ce737070b1c16dcae903265123c71922d6ea688beaf4e3536"
+              "source_event_identity": "a293fa13a0775389827916bad3b273e5f2dfb5f27f8f2403585835912a08394f"
             },
             {
               "adapter": "pi-v1",
@@ -664,11 +674,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "assessment",
+                "kind": "component",
+                "sequence": 5
+              },
               "provider": "synthetic-provider",
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "bc8e840d0b0566144adfd29045362b630489b2ecec989849b4668d7061586330"
+              "source_event_identity": "55eccd009dbc4ff2abfb49037a222fe65a87683de3ff745c124a1d1a7f59d909"
             },
             {
               "adapter": "pi-v1",
@@ -719,11 +734,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "review",
+                "kind": "component",
+                "sequence": 10
+              },
               "provider": "synthetic-provider",
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "9b88c9b69acfe833ba50fb43a3055723969117b7408dfc4001c152b47d73ff2d"
+              "source_event_identity": "b4caeb6df523eef4de774b644c9ec4848efe1d9c6cd1e4e7e02ba6dc8bacca0f"
             },
             {
               "adapter": "pi-v1",
@@ -774,11 +794,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "assessment",
+                "kind": "component",
+                "sequence": 11
+              },
               "provider": "synthetic-provider",
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "d25642caf683a9c2658f3fba3fec74640671109a327fc544bbb7ded7a0d69717"
+              "source_event_identity": "b75f76bb84cc2a00745c5408da6104eac45a137bf9e721cabc74d3ca7125f7ba"
             }
           ],
           "totals": {
@@ -818,12 +843,32 @@
             "passed"
           ]
         },
+        "review_stages": [
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 4
+          },
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 10
+          }
+        ],
         "run_identity": {
           "bead_id": "central-example",
           "project": "operations-webui",
           "run_id": "populated-verified-no-action-response"
         },
-        "source_identity": "e64efd763b624c7423b51bf244653b6af47b4a671f20d4be90fb944a82e9cab3",
+        "source_identity": "184a881565f6c50311d3a1cece2947ae9e07e60421b3b1073824d6f576008979",
         "timing": {
           "active_execution_intervals": [
             {
@@ -880,7 +925,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "populated-shared-continuation-stage.continuation.01",
-        "workflow_run_sha256": "b6ef2f38c72eb1acc15d6c643a156b200c4dbc974df3b9b6d018af34478c0691"
+        "workflow_run_sha256": "b5e00922d5e634dd39c330a68d4bbffdff9fbf3a4ed4e9c7f15e72498d9b01b1"
       },
       "stages": [
         {
@@ -1422,11 +1467,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "attempt",
+                "kind": "component",
+                "sequence": 1
+              },
               "provider": "synthetic-provider",
               "purpose": "attempt",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "6bce59c5cad3a49b4cef07420c0ebab18b7fc4cd42ca9cbd1da3259eedc1490d"
+              "source_event_identity": "d60261375dacbdcb8b610b7def9366cc1d2ea87607249afe72ad0542ca93df64"
             },
             {
               "adapter": "pi-v1",
@@ -1477,11 +1527,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "review",
+                "kind": "component",
+                "sequence": 4
+              },
               "provider": "synthetic-provider",
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "4613ab1fd90cd7991883b8809d601b74904fbb70ab1c2335cbb79dcad633e84a"
+              "source_event_identity": "c640208053c21badb106ac8fca199bddbca19498f0b3d60304d4ffa6788b46ec"
             },
             {
               "adapter": "pi-v1",
@@ -1532,11 +1587,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "assessment",
+                "kind": "component",
+                "sequence": 5
+              },
               "provider": "synthetic-provider",
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "d8df8012f314800988afc8159e2abf56994de1760ebf4b7b429a1abcad7eca6b"
+              "source_event_identity": "9913f5beb60e9110feed5de60db30bea5e2056e93b1b4a12b8de4de84e34afdb"
             },
             {
               "adapter": "pi-v1",
@@ -1587,11 +1647,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "response",
+                "kind": "component",
+                "sequence": 7
+              },
               "provider": "synthetic-provider",
               "purpose": "feedback_response",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "2c16c17c88c92aff23f8d8e5e4b282454c62dbe43c3864d583b0cf484c4593e2"
+              "source_event_identity": "0e82dbb1963b8d99a9e3fe5bb8c2e7cda075e92a292f85e99c2c57bc07ad916c"
             },
             {
               "adapter": "pi-v1",
@@ -1642,11 +1707,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "review",
+                "kind": "component",
+                "sequence": 10
+              },
               "provider": "synthetic-provider",
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "fbafca16e4a8f33881bf16939d291ba1a1c06c7eff2347ef5b45b7ebc0f986dd"
+              "source_event_identity": "9e963303a3759702081bc41f1678dfd0ebcc28389bf3cc9abd940c99ac20a183"
             },
             {
               "adapter": "pi-v1",
@@ -1697,11 +1767,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "assessment",
+                "kind": "component",
+                "sequence": 11
+              },
               "provider": "synthetic-provider",
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "786c523d780aca6426cd11af218c98bbfca2fbb8578fb22bd8ea3417cbc92186"
+              "source_event_identity": "23a63efbadb09086474799f8b1bf621f32b3d3b89a6e92668a2bdfb36b0a106f"
             }
           ],
           "totals": {
@@ -1741,12 +1816,32 @@
             "passed"
           ]
         },
+        "review_stages": [
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 4
+          },
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 10
+          }
+        ],
         "run_identity": {
           "bead_id": "central-example",
           "project": "operations-webui",
           "run_id": "populated-shared-continuation-stage.continuation.01"
         },
-        "source_identity": "d05c0a10e6d7fb1c03d161efae292897b9b22b1392844cf6980f1fd412a773ab",
+        "source_identity": "8e78aab108efe19601db5cc3c984ffaee9a9dc6f5bed59cf7f5e64708ca9e70c",
         "timing": {
           "active_execution_intervals": [
             {

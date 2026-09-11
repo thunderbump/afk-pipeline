@@ -1,6 +1,6 @@
 # AFK metrics publication schema v2
 
-These fixtures are synthetic and were generated from `ExportCliTests.sealed_preparer`; they contain no host Run evidence. `bundle-v2/` and `bundle-v3/` are the matching export bundles. `valid-publication.json` is a complete two-Run consumer fixture. `invalid-publication.json` has a deliberately incorrect first `workflow_run_sha256` and must be rejected by a consumer that is given the bundle. The `populated/evidence-coverage-variants.json` companion is a schema-v2 publication generated from exported verified-no-action and shared-continuation Runs; its matching bundles are committed beside it. `populated/review-variants.json` is the path-free producer contract matrix for combined defaulting, split empty/duplicate findings, partial failure, abandonment, and continuation. See `VARIANTS.md` for their public-seam regression proofs.
+These fixtures are synthetic and were generated from `ExportCliTests.sealed_preparer`; they contain no host Run evidence. `bundle-v2/` and `bundle-v3/` are the matching export bundles. `valid-publication.json` is a complete two-Run consumer fixture. `invalid-publication.json` has a deliberately incorrect first `workflow_run_sha256` and must be rejected by a consumer that is given the bundle. The `populated/evidence-coverage-variants.json` companion is a schema-v2 publication generated from exported verified-no-action and shared-continuation Runs; its matching bundles are committed beside it. `populated/review-variants.json` is an illustrative path-free contract matrix for combined defaulting, split empty/duplicate findings, partial failure, abandonment, and continuation. See `VARIANTS.md` for their public-seam regression proofs.
 
 ## Producing a snapshot
 
@@ -64,7 +64,7 @@ A published summary always has `integrity: {"status":"verified"}`. Invalid evide
 
 All coverage fields use `complete | partial | unavailable`. All token objects contain only measured non-negative numeric fields from `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, and `reasoning`. Missing keys do not mean zero. Counts are non-negative integers. Seconds are non-negative numbers or `null` unless a legacy sentinel is explicitly stated below.
 
-`inference.evidence_coverage` is `{status, expected, measured, missing}`. Expected and measured are non-negative integer counts of unique inference stages in the selected lineage. Measured means a receipt was authenticated, even when usage and cost are unavailable. Status is `complete` when the counts agree (including zero), `partial` when some but not all expected stages are measured, and `unavailable` when expected evidence exists but none is measured. Every missing row is `{ownership, reason}` using the stage ownership shape without project/run fields; reason is `missing_receipt | unsealed_receipt`. The invariant is `expected == measured + len(missing)`.
+`inference.evidence_coverage` is `{status, expected, measured, missing}`. Expected and measured are non-negative integer counts of unique inference invocations in the selected lineage. Measured means a receipt was authenticated, even when usage and cost are unavailable. Status is `complete` when the counts agree (including zero), `partial` when some but not all expected stages are measured, and `unavailable` when expected evidence exists but none is measured. Every missing row is `{ownership, reason}` using the stage ownership shape without project/run fields; reason is `missing_receipt | unsealed_receipt`. The invariant is `expected == measured + len(missing)`.
 
 Expected stages come from authenticated preparation and Coordinator history, never receipt discovery: recorded Acceptance Planning; every started Attempt, Review, Finding Assessment, and actionable or repair Feedback Response, including abandoned entries. Deterministic stages and verified no-action Responses are excluded. A command-worker Attempt is expected but has a missing receipt. Unstarted future stages and repeated continuation references are not counted. An unsealed abandoned invocation remains missing even if a receipt appears after the export checkpoint. A sealed receipt outside the expected set invalidates publication.
 
@@ -135,3 +135,17 @@ The bounded `purpose` enum is `acceptance_planning | preparation | publication |
 Current Pi estimates use `currency: "USD"` when an amount is available; unavailable cost retains null currency. The amount is Pi's retained model-rate calculation, not a recalculation with current prices. Replay does not consult model catalogs. Positive retained amounts remain unchanged. A reported zero with nonzero or incomplete usage cannot establish API-equivalent pricing and is unavailable; explicit zero cost with complete zero usage remains zero. Compaction amounts follow the same rule and remain included once in invocation/Run estimates.
 
 This extends the existing v2 currency field without changing the envelope or adding a calculator. Consumers may retain null-denominated v2 estimates as unknown; they must not guess dollars for them. New USD amounts require no conversion. Existing provenance and partial/unavailable coverage remain in machine data.
+
+## Populated split adoption fixtures
+
+`populated/split-publication.json` is a real schema-v2 metrics publication generated through authenticated synthetic receipts, Export v3 and metrics publication. Its matching `bundle-split-completed`, `bundle-split-partial` and `bundle-split-continuation` directories are portable consumer inputs. They cover duplicate Behavior findings, empty Design/Standards findings, a timed-out second reviewer with an unstarted third reviewer, and a cumulative continuation that counts each retained reviewer once. Assessment decisions preserve both duplicate indices. Logical Review wall time is four seconds; each measured invocation takes one second. Missing non-Review receipts are explicitly reported rather than filled with zeroes.
+
+Regenerate these and the existing combined cases offline with:
+
+```sh
+python3 -m tests.metrics_publication_fixtures /tmp/afk-metrics-fixtures-new
+python3 -m tests.metrics_publication_fixtures --baseline /tmp/afk-metrics-baselines-new
+python3 -m unittest tests.test_metrics_publication_fixtures
+```
+
+The destination must not already exist. No model calls or retained host Runs are used. `review-variants.json` remains an explanatory matrix; consumers should use the actual publication and bundles above.

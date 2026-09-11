@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -211,12 +213,296 @@ def review_variant_matrix():
     }
 
 
+def populate_split_review(source, sequence=4, *, failed=False):
+    """Build real authenticated split receipts, including duplicate/empty lenses."""
+    helper = test_export_cli.ExportCliTests()
+    coordinator = source / "coordinator"
+    directory = coordinator / f"{sequence:02d}-review"
+    for path in (source / "coordinator-request.json", coordinator / "input.json"):
+        value = json.loads(path.read_text())
+        value["review_mode"] = "split"
+        write_json(path, value)
+    value = {
+        "schema_version": 1,
+        "workspace": str(source.parent / "workspace"),
+        "change_directory": str(coordinator / f"{sequence - 1:02d}-change"),
+        "validation_directory": str(coordinator / f"{sequence - 2:02d}-validation"),
+        "timeout_seconds": 60,
+        "review_mode": "split",
+    }
+    write_json(directory / "input.json", value)
+    shutil.rmtree(directory / "inference", ignore_errors=True)
+    workspace = source.parent / "workspace"
+    if not workspace.exists():
+        workspace.mkdir()
+        (workspace / "README.md").write_text("Synthetic fixture.\n")
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_DATE": "2026-08-19T00:00:00Z",
+            "GIT_COMMITTER_DATE": "2026-08-19T00:00:00Z",
+        }
+        for args in (
+            ["init", "-q"],
+            ["add", "README.md"],
+            [
+                "-c",
+                "user.name=Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "commit",
+                "-qm",
+                "fixture",
+            ],
+        ):
+            subprocess.run(["git", "-C", str(workspace), *args], check=True, env=env)
+    head = subprocess.check_output(
+        ["git", "-C", str(workspace), "rev-parse", "HEAD"], text=True
+    ).strip()
+    change_path = coordinator / f"{sequence - 1:02d}-change/output.json"
+    change = json.loads(change_path.read_text())
+    change["change"]["repository"] = {"after": {"head": head}}
+    write_json(change_path, change)
+    template = json.loads((directory / "output.json").read_text())["review"]
+    records = []
+    for lens in ("behavior", "design", "standards")[: 2 if failed else 3]:
+        inference = directory / "reviewers" / lens / "inference"
+        inference.parent.mkdir(parents=True)
+        add_pi(inference, "review", [message(lens, {"input": 2, "output": 1})])
+        helper.bind_split_review_lens(inference, lens)
+        raw = {
+            **template,
+            "summary": lens,
+            "findings": template["findings"] * 2 if lens == "behavior" else [],
+        }
+        receipt_path = inference / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        timed_out = failed and lens == "design"
+        if timed_out:
+            receipt["attempts"][0].pop("validation")
+            receipt["attempts"][0]["protocol"] = {"status": "timed_out"}
+            receipt.update(
+                protocol={"status": "timed_out"},
+                validation={"status": "not_run"},
+                terminal_response=None,
+                outcome="timed_out",
+            )
+        else:
+            terminal = json.dumps(raw)
+            response = inference / "attempts/1/response.json"
+            write_json(response, terminal)
+            receipt["terminal_response"] = terminal
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response.read_bytes()
+            ).hexdigest()
+        write_json(receipt_path, receipt)
+        records.append(
+            {
+                "lens": lens,
+                "outcome": receipt["outcome"],
+                "process": {"returncode": 0},
+                "agent": None if timed_out else {"status": "completed"},
+                "review": None if timed_out else raw,
+                "artifacts": {
+                    "events": f"reviewers/{lens}/events.jsonl",
+                    "stderr": f"reviewers/{lens}/stderr.log",
+                    "inference": f"reviewers/{lens}/inference",
+                },
+            }
+        )
+    output = json.loads((directory / "output.json").read_text())
+    output.update(
+        review_mode="split",
+        outcome="timed_out" if failed else "completed",
+        agent=None if failed else {"status": "completed"},
+        duration_seconds=4,
+        review_invocations=records,
+        finding_provenance=[]
+        if failed
+        else [
+            {"finding_index": i, "lens": "behavior", "source_finding_index": i}
+            for i in range(2)
+        ],
+        review=None
+        if failed
+        else {
+            **template,
+            "summary": "\n".join(
+                f"{row['lens'].capitalize()}: {row['review']['summary']}"
+                for row in records
+            ),
+            "findings": template["findings"] * 2,
+        },
+    )
+    write_json(directory / "output.json", output)
+    if not failed:
+        assessment_path = coordinator / f"{sequence + 1:02d}-assessment/output.json"
+        assessment = json.loads(assessment_path.read_text())
+        decision = assessment["assessment"]["decisions"][0]
+        assessment["assessment"]["decisions"] = [
+            {**decision, "finding_index": i} for i in range(2)
+        ]
+        write_json(assessment_path, assessment)
+        iteration_path = coordinator / f"{sequence + 2:02d}-iteration/output.json"
+        iteration = json.loads(iteration_path.read_text())
+        iteration["policy"]["actionable_findings"] = 2
+        write_json(iteration_path, iteration)
+
+
+def generate_split_cases(root, destination):
+    """Export populated split fixtures through the same publication seam consumers use."""
+    requests = []
+    for name in ("split-completed", "split-partial", "split-continuation"):
+        source = test_export_cli.ExportCliTests().sealed_preparer(root / name)
+        coordinator = source / "coordinator"
+        preparation = json.loads((source / "preparation.json").read_text())
+        preparation["run"]["id"] = name
+        history = test_export_cli.ExportCliTests().history()
+        if name == "split-continuation":
+            history = append_response_cycle(source, no_action=False)
+        populate_split_review(source, failed=name == "split-partial")
+        if name == "split-continuation":
+            populate_split_review(source, 10)
+            # Preserve one exhausted root and a cumulative continuation referencing
+            # the same first Review receipts, without copying those invocations.
+            for path in (
+                source / "coordinator-request.json",
+                coordinator / "input.json",
+            ):
+                value = json.loads(path.read_text())
+                value["max_responses"] = 0
+                write_json(path, value)
+            path = coordinator / "06-iteration/output.json"
+            value = json.loads(path.read_text())
+            value["policy"].update(decision="exhausted", max_responses=0)
+            value["policy"].pop("next_response_number", None)
+            write_json(path, value)
+            original = {
+                "schema_version": 1,
+                "status": "completed",
+                "next_sequence": 7,
+                "next_component": None,
+                "active_invocation": None,
+                "history": history[:6],
+                "terminal": {"decision": "exhausted"},
+            }
+            write_json(coordinator / "state.json", original)
+            write_json(
+                coordinator / "output.json",
+                {
+                    "schema_version": 1,
+                    "outcome": "completed",
+                    "decision": "exhausted",
+                    "history": history[:6],
+                },
+            )
+            preparation["coordinator"]["decision"] = "exhausted"
+            continuation = coordinator / "continuations/01"
+            continuation.mkdir(parents=True)
+            request = {
+                "schema_version": 1,
+                "additional_responses": 1,
+                "completed_responses": 0,
+                "effective_max_responses": 1,
+                "prior_output": "../../output.json",
+            }
+            write_json(continuation / "input.json", request)
+            write_json(
+                continuation / "state.json",
+                {
+                    **original,
+                    "next_sequence": 13,
+                    "history": history,
+                    "terminal": {"decision": "stop"},
+                    "continuation": request,
+                },
+            )
+            write_json(
+                continuation / "output.json",
+                {
+                    "schema_version": 1,
+                    "outcome": "completed",
+                    "decision": "stop",
+                    "history": history,
+                },
+            )
+        if name == "split-partial":
+            history = history[:4]
+            history[-1]["outcome"] = "timed_out"
+            terminal = {
+                "failed_component": "review",
+                "component_outcome": "timed_out",
+                "exit_code": 1,
+            }
+            write_json(
+                coordinator / "state.json",
+                {
+                    "schema_version": 1,
+                    "status": "failed",
+                    "next_sequence": 5,
+                    "next_component": None,
+                    "active_invocation": None,
+                    "history": history,
+                    "terminal": terminal,
+                },
+            )
+            write_json(
+                coordinator / "output.json",
+                {
+                    "schema_version": 1,
+                    "outcome": "failed",
+                    "history": history,
+                    **terminal,
+                },
+            )
+            preparation["coordinator"].update(
+                status="failed", exit_code=1, outcome="failed", decision=None
+            )
+        write_json(source / "preparation.json", preparation)
+        bundle = destination / f"bundle-{name}"
+        afk_export.export_run(source, bundle, schema_version=3)
+        requests.append(
+            {"source": str(source), "bundle": str(bundle), "selection": "latest"}
+        )
+    with mock.patch("afk_metrics.publication._source_revision", return_value=None):
+        publication = build_publication(
+            {"schema_version": 1, "project": "operations-webui", "runs": requests}
+        )
+    write_json(destination / "split-publication.json", publication)
+
+
+def generate_baselines(destination):
+    """Reproduce the unmeasured v2/v3 intake examples using today's producer."""
+    destination.mkdir()
+    with tempfile.TemporaryDirectory() as temporary:
+        requests = []
+        for schema in (2, 3):
+            source = test_export_cli.ExportCliTests().sealed_preparer(
+                Path(temporary) / str(schema)
+            )
+            preparation = json.loads((source / "preparation.json").read_text())
+            preparation["run"]["id"] = f"synthetic-run-v{schema}"
+            write_json(source / "preparation.json", preparation)
+            bundle = destination / f"bundle-v{schema}"
+            afk_export.export_run(source, bundle, schema_version=schema)
+            requests.append(
+                {"source": str(source), "bundle": str(bundle), "selection": "latest"}
+            )
+        with mock.patch("afk_metrics.publication._source_revision", return_value=None):
+            publication = build_publication(
+                {"schema_version": 1, "project": "operations-webui", "runs": requests}
+            )
+        write_json(destination / "valid-publication.json", publication)
+        publication["runs"][0]["binding"]["workflow_run_sha256"] = "0" * 64
+        write_json(destination / "invalid-publication.json", publication)
+
+
 def generate(destination):
     """Write only to a new directory; preserve the original upstream baselines."""
     destination.mkdir()
     write_json(destination / "review-variants.json", review_variant_matrix())
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
+        generate_split_cases(root, destination)
         requests = []
         for scenario in ("partial", "unavailable"):
             case = root / scenario
@@ -542,4 +828,5 @@ def generate(destination):
 
 
 if __name__ == "__main__":
-    generate(Path(sys.argv[1]).resolve())
+    generator = generate_baselines if sys.argv[1:2] == ["--baseline"] else generate
+    generator(Path(sys.argv[-1]).resolve())

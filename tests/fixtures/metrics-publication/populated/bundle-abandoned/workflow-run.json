@@ -5,7 +5,7 @@
       "media_type": "application/json",
       "path": "artifacts/assignment.json",
       "public_bytes": 298,
-      "public_sha256": "103a5e7950dd881a62f6afedd7fd0a7d452d353d742881199c0cafa230fa5aa1",
+      "public_sha256": "ab9e165634bec3242b5dfe4e57ac7f57f1a6ef2df9b0931c956efe6eb04a109c",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -33,7 +33,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator-request.json",
       "public_bytes": 257,
-      "public_sha256": "01bc473e6d83dc488ae4b7c5fd1a283d5b232741b00337d315573b4c234a3907",
+      "public_sha256": "7905700c25542cf6c9452e188c7016965af72f9e54c18649339401b2db01caea",
       "sanitization_status": "sanitized",
       "scope": "run",
       "source": {
@@ -130,7 +130,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/03-change/output.json",
       "public_bytes": 319,
-      "public_sha256": "5b134c47f7b63fb8dd28a5379ac6a068c39ec342c3fb1a81fe16e66e08ea9639",
+      "public_sha256": "8cdaf33be9fbb22b1d49cfb421be4a4432b3b15c80766d2e11360fbcd51d1213",
       "sanitization_status": "sanitized",
       "scope": "component:3:change",
       "source": {
@@ -256,7 +256,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/assignment.json",
       "public_bytes": 298,
-      "public_sha256": "103a5e7950dd881a62f6afedd7fd0a7d452d353d742881199c0cafa230fa5aa1",
+      "public_sha256": "ab9e165634bec3242b5dfe4e57ac7f57f1a6ef2df9b0931c956efe6eb04a109c",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -270,7 +270,7 @@
       "media_type": "application/json",
       "path": "artifacts/coordinator/input.json",
       "public_bytes": 257,
-      "public_sha256": "01bc473e6d83dc488ae4b7c5fd1a283d5b232741b00337d315573b4c234a3907",
+      "public_sha256": "7905700c25542cf6c9452e188c7016965af72f9e54c18649339401b2db01caea",
       "sanitization_status": "sanitized",
       "scope": "coordinator",
       "source": {
@@ -312,7 +312,7 @@
       "media_type": "application/json",
       "path": "artifacts/preparation.json",
       "public_bytes": 1095,
-      "public_sha256": "8f93793ad3d61d0cf895f6e29092f6506c581899cbe1bab0e6b422228ad24581",
+      "public_sha256": "b95c575cc5a36cc1fe7ee7997125ef7f79595d12ccb294fa6cf0cadc0c194cec",
       "sanitization_status": "unchanged",
       "scope": "run",
       "source": {

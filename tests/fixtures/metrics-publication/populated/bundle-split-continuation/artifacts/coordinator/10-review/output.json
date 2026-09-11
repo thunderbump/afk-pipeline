@@ -1,0 +1,187 @@
+{
+  "agent": {
+    "status": "completed"
+  },
+  "artifacts": {
+    "diff": "review.diff",
+    "events": "events.jsonl",
+    "stderr": "stderr.log"
+  },
+  "duration_seconds": 4,
+  "finding_provenance": [
+    {
+      "finding_index": 0,
+      "lens": "behavior",
+      "source_finding_index": 0
+    },
+    {
+      "finding_index": 1,
+      "lens": "behavior",
+      "source_finding_index": 1
+    }
+  ],
+  "outcome": "completed",
+  "review": {
+    "audit": {
+      "completed": true,
+      "scopes": [
+        "objective",
+        "acceptance_criteria",
+        "reviewed_diff",
+        "supplied_evidence"
+      ]
+    },
+    "findings": [
+      {
+        "details": "Fix it.",
+        "lens": "behavior",
+        "locations": [
+          {
+            "line": 1,
+            "path": "README.md"
+          }
+        ],
+        "scope_claim": {
+          "kind": "current",
+          "rationale": "The current objective owns this behavior."
+        },
+        "title": "Example"
+      },
+      {
+        "details": "Fix it.",
+        "lens": "behavior",
+        "locations": [
+          {
+            "line": 1,
+            "path": "README.md"
+          }
+        ],
+        "scope_claim": {
+          "kind": "current",
+          "rationale": "The current objective owns this behavior."
+        },
+        "title": "Example"
+      }
+    ],
+    "summary": "Behavior: behavior\nDesign: design\nStandards: standards"
+  },
+  "review_invocations": [
+    {
+      "agent": {
+        "status": "completed"
+      },
+      "artifacts": {
+        "events": "reviewers/behavior/events.jsonl",
+        "inference": "reviewers/behavior/inference",
+        "stderr": "reviewers/behavior/stderr.log"
+      },
+      "lens": "behavior",
+      "outcome": "succeeded",
+      "process": {
+        "returncode": 0
+      },
+      "review": {
+        "audit": {
+          "completed": true,
+          "scopes": [
+            "objective",
+            "acceptance_criteria",
+            "reviewed_diff",
+            "supplied_evidence"
+          ]
+        },
+        "findings": [
+          {
+            "details": "Fix it.",
+            "lens": "behavior",
+            "locations": [
+              {
+                "line": 1,
+                "path": "README.md"
+              }
+            ],
+            "scope_claim": {
+              "kind": "current",
+              "rationale": "The current objective owns this behavior."
+            },
+            "title": "Example"
+          },
+          {
+            "details": "Fix it.",
+            "lens": "behavior",
+            "locations": [
+              {
+                "line": 1,
+                "path": "README.md"
+              }
+            ],
+            "scope_claim": {
+              "kind": "current",
+              "rationale": "The current objective owns this behavior."
+            },
+            "title": "Example"
+          }
+        ],
+        "summary": "behavior"
+      }
+    },
+    {
+      "agent": {
+        "status": "completed"
+      },
+      "artifacts": {
+        "events": "reviewers/design/events.jsonl",
+        "inference": "reviewers/design/inference",
+        "stderr": "reviewers/design/stderr.log"
+      },
+      "lens": "design",
+      "outcome": "succeeded",
+      "process": {
+        "returncode": 0
+      },
+      "review": {
+        "audit": {
+          "completed": true,
+          "scopes": [
+            "objective",
+            "acceptance_criteria",
+            "reviewed_diff",
+            "supplied_evidence"
+          ]
+        },
+        "findings": [],
+        "summary": "design"
+      }
+    },
+    {
+      "agent": {
+        "status": "completed"
+      },
+      "artifacts": {
+        "events": "reviewers/standards/events.jsonl",
+        "inference": "reviewers/standards/inference",
+        "stderr": "reviewers/standards/stderr.log"
+      },
+      "lens": "standards",
+      "outcome": "succeeded",
+      "process": {
+        "returncode": 0
+      },
+      "review": {
+        "audit": {
+          "completed": true,
+          "scopes": [
+            "objective",
+            "acceptance_criteria",
+            "reviewed_diff",
+            "supplied_evidence"
+          ]
+        },
+        "findings": [],
+        "summary": "standards"
+      }
+    }
+  ],
+  "review_mode": "split",
+  "schema_version": 1
+}

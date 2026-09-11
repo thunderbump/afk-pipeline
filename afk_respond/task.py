@@ -45,7 +45,7 @@ def build_task(
     objective: str,
     packet_directory: Path | None = None,
 ) -> TaskContract:
-    """Build assessed-feedback v3 or the unchanged validation-repair v1 task."""
+    """Build assessed-feedback v5 or validation-repair v2 with bounded task data."""
     repair = "validation_directory" in response_input
     data = {"objective": objective, "actionable_findings": selected}
     if not repair and len(json.dumps(data).encode()) > MAX_JSON_BYTES:

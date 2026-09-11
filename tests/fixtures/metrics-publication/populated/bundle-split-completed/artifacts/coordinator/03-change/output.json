@@ -1,0 +1,17 @@
+{
+  "change": {
+    "objective": "portable",
+    "repository": {
+      "after": {
+        "head": "b5a9251f5235a9e2e69fb63700d28573c702f49c"
+      }
+    },
+    "source": {
+      "directory": "/tmp/tmpw6_cv34_/split-completed/source-run/coordinator/01-attempt",
+      "kind": "attempt"
+    },
+    "workspace": "/tmp/tmpw6_cv34_/split-completed/source-run/workspace"
+  },
+  "outcome": "completed",
+  "schema_version": 1
+}

@@ -1,0 +1,682 @@
+{
+  "artifacts": [
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/assignment.json",
+      "public_bytes": 302,
+      "public_sha256": "54257baf892b0aabe0510ccfaaab9c7ed7d6627f1f9696a11750dd4d4ddd9d68",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/bead.json",
+      "public_bytes": 208,
+      "public_sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27",
+      "sanitization_status": "sanitized",
+      "scope": "run",
+      "source": {
+        "path": "bead.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator-request.json",
+      "public_bytes": 287,
+      "public_sha256": "813b76fc64aef17a2149d5222c2a5c5052147b03461abd1d81be9e5f14e5793b",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "coordinator-request.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "attempt_session_transcript",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "unsafe_or_invalid"
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "public_bytes": 53,
+      "public_sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "public_bytes": 131,
+      "public_sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351",
+      "sanitization_status": "sanitized",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "public_bytes": 56,
+      "public_sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3",
+      "sanitization_status": "sanitized",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "public_bytes": 126,
+      "public_sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b",
+      "sanitization_status": "sanitized",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/input.json",
+      "public_bytes": 52,
+      "public_sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8",
+      "sanitization_status": "sanitized",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/03-change/output.json",
+      "public_bytes": 416,
+      "public_sha256": "fc9bf7cfd33282ffb0105ed740460f1357633dba8a6972747e83a7cc42306d72",
+      "sanitization_status": "unchanged",
+      "scope": "component:3:change",
+      "source": {
+        "path": "coordinator/03-change/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/input.json",
+      "public_bytes": 322,
+      "public_sha256": "68bf3e0d77fd9c0d6dfa37178bc027477da368ce49c59a086c948d7392da9b4e",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/output.json",
+      "public_bytes": 2122,
+      "public_sha256": "73c3bf1de6f9c84ff0c41723434b0cd7da8fdb7b091a036fc4e9bf2625e9a7aa",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/attempts/1/response.json",
+      "public_bytes": 650,
+      "public_sha256": "027a1257d5cb74e72d296019472ff5827ec849251983caf7a781b66d341136dc",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "path": "coordinator/04-review/reviewers/behavior/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 216,
+        "path": "coordinator/04-review/reviewers/behavior/inference/prompt.json",
+        "sha256": "4b23bb8b6ddd67e416c036752db9a138eff3eb5be5e03cb00ffb66e63c1c286a"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 216,
+        "path": "coordinator/04-review/reviewers/behavior/inference/prompt.json",
+        "sha256": "4b23bb8b6ddd67e416c036752db9a138eff3eb5be5e03cb00ffb66e63c1c286a"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/task-instructions.txt",
+      "public_bytes": 89,
+      "public_sha256": "c8c7d0d264ff5bbc9c8347188e0695f8dc3f62cd3fd34b851731d9541fef4084",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 216,
+        "path": "coordinator/04-review/reviewers/behavior/inference/prompt.json",
+        "sha256": "4b23bb8b6ddd67e416c036752db9a138eff3eb5be5e03cb00ffb66e63c1c286a"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 216,
+        "path": "coordinator/04-review/reviewers/behavior/inference/prompt.json",
+        "sha256": "4b23bb8b6ddd67e416c036752db9a138eff3eb5be5e03cb00ffb66e63c1c286a"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/attempts/1/response.json",
+      "public_bytes": 21,
+      "public_sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510",
+      "sanitization_status": "sanitized",
+      "scope": "inference:review",
+      "source": {
+        "path": "coordinator/04-review/reviewers/design/inference/attempts/1/response.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_prompt",
+      "media_type": "application/json",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 212,
+        "path": "coordinator/04-review/reviewers/design/inference/prompt.json",
+        "sha256": "58ec33759fee6e5b5d8e67b88dda80e30b7cc59737c2ea2e13ab9cd16552f907"
+      },
+      "state": "unavailable",
+      "unavailable_reason": "private_source"
+    },
+    {
+      "kind": "inference_system_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/system-instructions.txt",
+      "public_bytes": 9,
+      "public_sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 212,
+        "path": "coordinator/04-review/reviewers/design/inference/prompt.json",
+        "sha256": "58ec33759fee6e5b5d8e67b88dda80e30b7cc59737c2ea2e13ab9cd16552f907"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_instructions",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/task-instructions.txt",
+      "public_bytes": 85,
+      "public_sha256": "85fa395c5a8c701401e29d6ccc7c37886fedfe6aa236ba67a52043643860647f",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 212,
+        "path": "coordinator/04-review/reviewers/design/inference/prompt.json",
+        "sha256": "58ec33759fee6e5b5d8e67b88dda80e30b7cc59737c2ea2e13ab9cd16552f907"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "inference_task_data",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/task-data.json",
+      "public_bytes": 5,
+      "public_sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+      "sanitization_status": "unchanged",
+      "scope": "inference:review",
+      "source": {
+        "bytes": 212,
+        "path": "coordinator/04-review/reviewers/design/inference/prompt.json",
+        "sha256": "58ec33759fee6e5b5d8e67b88dda80e30b7cc59737c2ea2e13ab9cd16552f907"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/assignment.json",
+      "public_bytes": 302,
+      "public_sha256": "54257baf892b0aabe0510ccfaaab9c7ed7d6627f1f9696a11750dd4d4ddd9d68",
+      "sanitization_status": "sanitized",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/assignment.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/input.json",
+      "public_bytes": 287,
+      "public_sha256": "813b76fc64aef17a2149d5222c2a5c5052147b03461abd1d81be9e5f14e5793b",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/input.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/output.json",
+      "public_bytes": 992,
+      "public_sha256": "2f8d6015aad01c60647ec024a8505b42215c84bf44da75a08cf5466b0846cce3",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/output.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/coordinator/state.json",
+      "public_bytes": 1094,
+      "public_sha256": "01b1d7f627b8d8a24b19204731ecd6d3a1e0f0ed2d83f2bd440dffc4e2e108c6",
+      "sanitization_status": "unchanged",
+      "scope": "coordinator",
+      "source": {
+        "path": "coordinator/state.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "json",
+      "media_type": "application/json",
+      "path": "artifacts/preparation.json",
+      "public_bytes": 1109,
+      "public_sha256": "e44e8051d61a08f65b7b2b10c225932a0782c2d7cded25084ff9f68989391f8c",
+      "sanitization_status": "unchanged",
+      "scope": "run",
+      "source": {
+        "path": "preparation.json"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "public_bytes": 18,
+      "public_sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee",
+      "sanitization_status": "unchanged",
+      "scope": "component:2:validation",
+      "source": {
+        "path": "coordinator/02-validation/stdout.log"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "diff",
+      "media_type": "text/x-diff; charset=utf-8",
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "public_bytes": 35,
+      "public_sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/review.diff"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    },
+    {
+      "kind": "log",
+      "media_type": "text/plain; charset=utf-8",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/stderr.log"
+      },
+      "state": "empty",
+      "unavailable_reason": "empty"
+    },
+    {
+      "kind": "attempt_events_private",
+      "media_type": "application/x-ndjson",
+      "public_bytes": 0,
+      "public_sha256": null,
+      "sanitization_status": "not_applicable",
+      "scope": "component:1:attempt",
+      "source": {
+        "path": "coordinator/01-attempt/events.jsonl"
+      },
+      "state": "unsafe",
+      "unavailable_reason": "private_attempt_events"
+    },
+    {
+      "kind": "events",
+      "media_type": "application/x-ndjson",
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "public_bytes": 44,
+      "public_sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d",
+      "sanitization_status": "unchanged",
+      "scope": "component:4:review",
+      "source": {
+        "path": "coordinator/04-review/events.jsonl"
+      },
+      "state": "downloadable",
+      "unavailable_reason": null
+    }
+  ],
+  "bead": {
+    "id": "central-example"
+  },
+  "continuation_allowances": [],
+  "evidence": [],
+  "history": [
+    {
+      "component": "attempt",
+      "evidence": [],
+      "inputs": [],
+      "outcome": "succeeded",
+      "output": {
+        "details": {
+          "kind": "attempt"
+        },
+        "outcome": "succeeded"
+      },
+      "sequence": 1
+    },
+    {
+      "component": "validation",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "passed",
+      "output": {
+        "details": {
+          "kind": "validation"
+        },
+        "outcome": "passed"
+      },
+      "sequence": 2
+    },
+    {
+      "component": "change",
+      "evidence": [],
+      "inputs": [
+        1
+      ],
+      "outcome": "completed",
+      "output": {
+        "details": {
+          "kind": "change"
+        },
+        "outcome": "completed"
+      },
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "evidence": [],
+      "inputs": [
+        2,
+        3
+      ],
+      "outcome": "timed_out",
+      "output": {
+        "agent": null,
+        "details": {
+          "finding_provenance": [],
+          "kind": "review",
+          "mode": "split",
+          "reviewer_invocations": [
+            {
+              "lens": "behavior",
+              "outcome": "succeeded",
+              "review": {
+                "audit": {
+                  "completed": true,
+                  "scopes": [
+                    "objective",
+                    "acceptance_criteria",
+                    "reviewed_diff",
+                    "supplied_evidence"
+                  ]
+                },
+                "findings": [
+                  {
+                    "details": "Fix it.",
+                    "lens": "behavior",
+                    "locations": [
+                      {
+                        "line": 1,
+                        "path": "README.md"
+                      }
+                    ],
+                    "scope_claim": {
+                      "kind": "current",
+                      "rationale": "The current objective owns this behavior."
+                    },
+                    "title": "Example"
+                  },
+                  {
+                    "details": "Fix it.",
+                    "lens": "behavior",
+                    "locations": [
+                      {
+                        "line": 1,
+                        "path": "README.md"
+                      }
+                    ],
+                    "scope_claim": {
+                      "kind": "current",
+                      "rationale": "The current objective owns this behavior."
+                    },
+                    "title": "Example"
+                  }
+                ],
+                "summary": "behavior"
+              }
+            },
+            {
+              "lens": "design",
+              "outcome": "timed_out",
+              "review": null
+            },
+            {
+              "lens": "standards",
+              "outcome": "unstarted",
+              "review": null
+            }
+          ]
+        },
+        "duration_seconds": 4,
+        "outcome": "timed_out"
+      },
+      "sequence": 4
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "split-partial"
+  },
+  "inference_sessions": [
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "accepted",
+          "terminal": true,
+          "validation_status": "accepted"
+        }
+      ],
+      "directory": "coordinator/04-review/reviewers/behavior/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:review",
+      "validation_status": "accepted"
+    },
+    {
+      "attempt_count": 1,
+      "attempts": [
+        {
+          "attempt_number": 1,
+          "protocol_status": "timed_out",
+          "terminal": false,
+          "validation_status": null
+        }
+      ],
+      "directory": "coordinator/04-review/reviewers/design/inference",
+      "duration_seconds": 1,
+      "identity": {
+        "adapter": "pi-v1",
+        "adapter_contract_version": 1,
+        "adapter_family": "pi",
+        "model": "gpt-test",
+        "runtime": "afk-inference-v1",
+        "thinking": "medium"
+      },
+      "requested_capability": "READ_ONLY",
+      "scope": "inference:review",
+      "validation_status": "not_run"
+    }
+  ],
+  "objective": "Publish one portable Workflow Run.",
+  "response_limit": 1,
+  "schema_version": 3,
+  "status": "failed",
+  "terminal": {
+    "component_outcome": "timed_out",
+    "exit_code": 1,
+    "failed_component": "review"
+  }
+}

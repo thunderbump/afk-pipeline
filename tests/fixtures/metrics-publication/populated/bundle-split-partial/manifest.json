@@ -1,0 +1,150 @@
+{
+  "files": [
+    {
+      "bytes": 302,
+      "path": "artifacts/assignment.json",
+      "sha256": "54257baf892b0aabe0510ccfaaab9c7ed7d6627f1f9696a11750dd4d4ddd9d68"
+    },
+    {
+      "bytes": 208,
+      "path": "artifacts/bead.json",
+      "sha256": "d7ad6bbd770ed911ac48ccef335a0492b671e40a649b11ebdf4744229a736f27"
+    },
+    {
+      "bytes": 287,
+      "path": "artifacts/coordinator-request.json",
+      "sha256": "813b76fc64aef17a2149d5222c2a5c5052147b03461abd1d81be9e5f14e5793b"
+    },
+    {
+      "bytes": 53,
+      "path": "artifacts/coordinator/01-attempt/input.json",
+      "sha256": "39a4d7b0dc0301851066db723bc7b6a1e33f51d70f1d1ed56077d5771336dd02"
+    },
+    {
+      "bytes": 131,
+      "path": "artifacts/coordinator/01-attempt/output.json",
+      "sha256": "823cd1ed5783eed5f321488a78d01051c37930796918e974884574bbc72a6351"
+    },
+    {
+      "bytes": 56,
+      "path": "artifacts/coordinator/02-validation/input.json",
+      "sha256": "06832944bb750b227be4f48e3fe12caa359a4779b5192d29dbcfbf1d3550afd3"
+    },
+    {
+      "bytes": 126,
+      "path": "artifacts/coordinator/02-validation/output.json",
+      "sha256": "511460754ffe41c55b823a8e5382330e8f454780d7540c0114e80fdba5828a5b"
+    },
+    {
+      "bytes": 18,
+      "path": "artifacts/coordinator/02-validation/stdout.log",
+      "sha256": "16e3bbb50d11d6de04878dd016227f280125582b449c85f8c4ec00770697b6ee"
+    },
+    {
+      "bytes": 52,
+      "path": "artifacts/coordinator/03-change/input.json",
+      "sha256": "4cc848363996ade4fddffadfa209feb654471efd669da66eea59a77058b218a8"
+    },
+    {
+      "bytes": 416,
+      "path": "artifacts/coordinator/03-change/output.json",
+      "sha256": "fc9bf7cfd33282ffb0105ed740460f1357633dba8a6972747e83a7cc42306d72"
+    },
+    {
+      "bytes": 44,
+      "path": "artifacts/coordinator/04-review/events.jsonl",
+      "sha256": "3cfd4ca7d60206b0d1a80de850f8bfa1a26d7eff343f35b0c3d6256f7c16e13d"
+    },
+    {
+      "bytes": 322,
+      "path": "artifacts/coordinator/04-review/input.json",
+      "sha256": "68bf3e0d77fd9c0d6dfa37178bc027477da368ce49c59a086c948d7392da9b4e"
+    },
+    {
+      "bytes": 2122,
+      "path": "artifacts/coordinator/04-review/output.json",
+      "sha256": "73c3bf1de6f9c84ff0c41723434b0cd7da8fdb7b091a036fc4e9bf2625e9a7aa"
+    },
+    {
+      "bytes": 35,
+      "path": "artifacts/coordinator/04-review/review.diff",
+      "sha256": "cd51f00342bad0092b0f3e9757611572579bb33eacd900acda4e97c8da38241d"
+    },
+    {
+      "bytes": 650,
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/attempts/1/response.json",
+      "sha256": "027a1257d5cb74e72d296019472ff5827ec849251983caf7a781b66d341136dc"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 89,
+      "path": "artifacts/coordinator/04-review/reviewers/behavior/inference/views/task-instructions.txt",
+      "sha256": "c8c7d0d264ff5bbc9c8347188e0695f8dc3f62cd3fd34b851731d9541fef4084"
+    },
+    {
+      "bytes": 21,
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/attempts/1/response.json",
+      "sha256": "1eb34fc7e015b9f0847e4f90b058390f3751356526428ceae4a1d9d28691d510"
+    },
+    {
+      "bytes": 9,
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/system-instructions.txt",
+      "sha256": "1e5e3ce20c720a1021d8f9f5e8f7c3055a97315c79230508bbd37b08502208db"
+    },
+    {
+      "bytes": 5,
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/task-data.json",
+      "sha256": "38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed"
+    },
+    {
+      "bytes": 85,
+      "path": "artifacts/coordinator/04-review/reviewers/design/inference/views/task-instructions.txt",
+      "sha256": "85fa395c5a8c701401e29d6ccc7c37886fedfe6aa236ba67a52043643860647f"
+    },
+    {
+      "bytes": 302,
+      "path": "artifacts/coordinator/assignment.json",
+      "sha256": "54257baf892b0aabe0510ccfaaab9c7ed7d6627f1f9696a11750dd4d4ddd9d68"
+    },
+    {
+      "bytes": 287,
+      "path": "artifacts/coordinator/input.json",
+      "sha256": "813b76fc64aef17a2149d5222c2a5c5052147b03461abd1d81be9e5f14e5793b"
+    },
+    {
+      "bytes": 992,
+      "path": "artifacts/coordinator/output.json",
+      "sha256": "2f8d6015aad01c60647ec024a8505b42215c84bf44da75a08cf5466b0846cce3"
+    },
+    {
+      "bytes": 1094,
+      "path": "artifacts/coordinator/state.json",
+      "sha256": "01b1d7f627b8d8a24b19204731ecd6d3a1e0f0ed2d83f2bd440dffc4e2e108c6"
+    },
+    {
+      "bytes": 1109,
+      "path": "artifacts/preparation.json",
+      "sha256": "e44e8051d61a08f65b7b2b10c225932a0782c2d7cded25084ff9f68989391f8c"
+    },
+    {
+      "bytes": 21764,
+      "path": "workflow-run.json",
+      "sha256": "7e50a042207e690e7f9061168dbb1b8105d28129b5dea96e72238eb988c83cc6"
+    }
+  ],
+  "identity": {
+    "project": "operations-webui",
+    "run_id": "split-partial"
+  },
+  "kind": "afk-workflow-run",
+  "schema_version": 3
+}

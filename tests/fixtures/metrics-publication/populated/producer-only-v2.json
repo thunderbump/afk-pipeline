@@ -18,7 +18,7 @@
         "bundle_schema_version": 2,
         "project": "operations-webui",
         "run_id": "populated-partial",
-        "workflow_run_sha256": "5a444628de57b008ecea94349092ee2c040fb26b170d6da53615e963673cc74e"
+        "workflow_run_sha256": "fbbac4594aa5bf82a16fd3f3536459459c150be21ae2ac73b908292322720640"
       },
       "stages": [
         {
@@ -377,11 +377,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "review",
+                "kind": "component",
+                "sequence": 4
+              },
               "provider": "synthetic-provider",
               "purpose": "review",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "d400a62effbdd4540cd604b210b31a459469d5d339583cc09e1541597b5c501c"
+              "source_event_identity": "40f8be2d70e6a0ee52c167f33e7bfdc111fd32b1a5665e214bab1d41b5a5a890"
             },
             {
               "adapter": "pi-v1",
@@ -432,11 +437,16 @@
                 }
               ],
               "outcome": "succeeded",
+              "ownership": {
+                "component": "assessment",
+                "kind": "component",
+                "sequence": 5
+              },
               "provider": "synthetic-provider",
               "purpose": "finding_assessment",
               "response_validator_coverage": "unavailable",
               "response_validator_seconds": null,
-              "source_event_identity": "f674eab80ec026d36699e7c494e9f2ac60a033f4ad3e8cbbfd965636e46098fd"
+              "source_event_identity": "90051966bafaa5c1216219f4ca832085296da1987dafd0767040aff6e1885a88"
             }
           ],
           "totals": {
@@ -482,6 +492,17 @@
             "passed"
           ]
         },
+        "review_stages": [
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 4
+          }
+        ],
         "run_identity": {
           "bead_id": "central-example",
           "project": "operations-webui",

@@ -1,0 +1,1 @@
+This is the isolated design lens invocation. Report only findings with lens "design".

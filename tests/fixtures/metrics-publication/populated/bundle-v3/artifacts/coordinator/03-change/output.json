@@ -3,10 +3,10 @@
     "objective": "portable",
     "repository": {},
     "source": {
-      "directory": "/tmp/tmpdve_nnm5/unavailable/source-run/coordinator/01-attempt",
+      "directory": "/tmp/tmpw6_cv34_/unavailable/source-run/coordinator/01-attempt",
       "kind": "attempt"
     },
-    "workspace": "/tmp/tmpdve_nnm5/unavailable/source-run/workspace"
+    "workspace": "/tmp/tmpw6_cv34_/unavailable/source-run/workspace"
   },
   "outcome": "completed",
   "schema_version": 1

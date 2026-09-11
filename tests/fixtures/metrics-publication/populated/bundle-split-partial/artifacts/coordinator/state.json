@@ -1,0 +1,52 @@
+{
+  "active_invocation": null,
+  "history": [
+    {
+      "component": "attempt",
+      "directory": "01-attempt",
+      "input_from": {
+        "assignment": "assignment.json"
+      },
+      "outcome": "succeeded",
+      "sequence": 1
+    },
+    {
+      "component": "validation",
+      "directory": "02-validation",
+      "input_from": {
+        "change": "01-attempt",
+        "workspace": "assignment.json"
+      },
+      "outcome": "passed",
+      "sequence": 2
+    },
+    {
+      "component": "change",
+      "directory": "03-change",
+      "input_from": {
+        "source": "01-attempt"
+      },
+      "outcome": "completed",
+      "sequence": 3
+    },
+    {
+      "component": "review",
+      "directory": "04-review",
+      "input_from": {
+        "change": "03-change",
+        "validation": "02-validation"
+      },
+      "outcome": "timed_out",
+      "sequence": 4
+    }
+  ],
+  "next_component": null,
+  "next_sequence": 5,
+  "schema_version": 1,
+  "status": "failed",
+  "terminal": {
+    "component_outcome": "timed_out",
+    "exit_code": 1,
+    "failed_component": "review"
+  }
+}

@@ -2,9 +2,9 @@
   "comparisons": [
     {
       "equivalent_frozen_conditions": true,
-      "left": "464d579110731cdb7705a69dce9e0770adcb62a93a457bbc9d366a24741628c4",
+      "left": "7795ce5a281329a30e3c9c1d79f7fc284c58763669565edacb0cda3eb03666e8",
       "ranking": "observational_only",
-      "right": "a382cff42ae971b3967d8b06fb6f504b02b47181fc26c1cbcfdbd944e0c75a1f",
+      "right": "096a2cfeb08fdc4f7083b76d322568ff737919176b9355be9390029801863d4f",
       "warnings": []
     }
   ],
@@ -26,7 +26,7 @@
         "bundle_schema_version": 2,
         "project": "operations-webui",
         "run_id": "synthetic-run-v2",
-        "workflow_run_sha256": "775a1bceee1c0c5b963d0205730d1a65a6ea4b772c023d769c4837f7ea9f81a7"
+        "workflow_run_sha256": "56aee1901ef3a6c35fed315a2aaf8cbf5dece620e0e331fd253eaeb8e5e999ec"
       },
       "stages": [
         {
@@ -339,12 +339,23 @@
             "passed"
           ]
         },
+        "review_stages": [
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 4
+          }
+        ],
         "run_identity": {
           "bead_id": "central-example",
           "project": "operations-webui",
           "run_id": "synthetic-run-v2"
         },
-        "source_identity": "464d579110731cdb7705a69dce9e0770adcb62a93a457bbc9d366a24741628c4",
+        "source_identity": "7795ce5a281329a30e3c9c1d79f7fc284c58763669565edacb0cda3eb03666e8",
         "timing": {
           "active_execution_intervals": [
             {
@@ -381,7 +392,7 @@
         "bundle_schema_version": 3,
         "project": "operations-webui",
         "run_id": "synthetic-run-v3",
-        "workflow_run_sha256": "d4f847be954b953aa42693ac96c033999d830b3da60e8f6b89faefac2f48bb65"
+        "workflow_run_sha256": "6e6037bc87a3b5fa718fc1f15f432e34234a9025d0102c8642da19bfd5bd7376"
       },
       "stages": [
         {
@@ -694,12 +705,23 @@
             "passed"
           ]
         },
+        "review_stages": [
+          {
+            "elapsed": {
+              "coverage": "unavailable",
+              "seconds": null
+            },
+            "mode": "combined",
+            "outcome": "completed",
+            "sequence": 4
+          }
+        ],
         "run_identity": {
           "bead_id": "central-example",
           "project": "operations-webui",
           "run_id": "synthetic-run-v3"
         },
-        "source_identity": "a382cff42ae971b3967d8b06fb6f504b02b47181fc26c1cbcfdbd944e0c75a1f",
+        "source_identity": "096a2cfeb08fdc4f7083b76d322568ff737919176b9355be9390029801863d4f",
         "timing": {
           "active_execution_intervals": [
             {
