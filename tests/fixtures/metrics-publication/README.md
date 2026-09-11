@@ -104,13 +104,21 @@ Every stage row has `ownership`, `outcome`, and these named metric fields:
 
 Missing or unsupported measurements use `null`, `{}`, and an explicit `unavailable`/`partial` marker. Zero is emitted only when zero was measured. Pure model latency is never derived.
 
-Component ownership is exactly:
+Logical component ownership is exactly:
 
 ```json
 {"kind":"component","project":"project-slug","run_id":"exact-run-id","sequence":2,"component":"validation"}
 ```
 
 `component` uses the Coordinator component enum: `attempt | validation | change | review | assessment | response | iteration`. `sequence` is the exact positive Coordinator sequence. `outcome` is the Coordinator history outcome.
+
+Each split Review invocation additionally has reviewer ownership exactly:
+
+```json
+{"kind":"component_reviewer","project":"project-slug","run_id":"exact-run-id","sequence":4,"component":"review","lens":"behavior"}
+```
+
+For `component_reviewer`, `sequence` identifies the one logical Review component, `component` is `review`, and `lens` is `behavior | design | standards`. Rows are emitted in that fixed lens order for each started invocation, and `outcome` is that reviewer invocation's outcome. The logical Review retains its separate `component` row, so consumers must not treat the reviewer rows as additional Coordinator components.
 
 Run ownership is exactly:
 

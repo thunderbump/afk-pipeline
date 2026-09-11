@@ -237,6 +237,65 @@ class ReviewContractTest(unittest.TestCase):
                 directory,
             )
 
+    def test_receipt_binding_accepts_large_authentic_split_invocations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            review = self.review()
+            invocations = []
+            for lens in ("behavior", "design", "standards"):
+                inference = directory / "reviewers" / lens / "inference"
+                inference.mkdir(parents=True)
+                marker = (
+                    f"This is the isolated {lens} lens invocation. Report only findings "
+                    f'with lens "{lens}".'
+                )
+                # Review carries full Validation logs in task data and Pi's
+                # rendered prompt. Even modest authentic logs exceed the old
+                # generic 1 MiB JSON cap once both representations are retained.
+                retained_log = "validation output\n" * 70_000
+                invocation = {
+                    "schema_version": 1,
+                    "purpose": "review",
+                    "task_contract_version": 8,
+                    "prompt": {
+                        "purpose": "review",
+                        "task_contract_version": 8,
+                        "trusted_task_instructions": marker,
+                        "untrusted_task_data": {
+                            "validation": {"stdout": retained_log, "stderr": ""}
+                        },
+                        "task_prompt": retained_log,
+                    },
+                    "requested_capability": "READ_ONLY",
+                }
+                raw = json.dumps(invocation).encode()
+                self.assertGreater(len(raw), 1024 * 1024)
+                (inference / "invocation.json").write_bytes(raw)
+                (inference / "receipt.json").write_text(
+                    json.dumps(
+                        {
+                            "outcome": "succeeded",
+                            "protocol": {"status": "accepted"},
+                            "terminal_response": json.dumps(review),
+                            "hashes": {
+                                "invocation_sha256": hashlib.sha256(raw).hexdigest()
+                            },
+                        }
+                    )
+                )
+                invocations.append(
+                    {"lens": lens, "outcome": "succeeded", "review": review}
+                )
+
+            validate_invocation_receipts(
+                {
+                    "outcome": "completed",
+                    "review_mode": "split",
+                    "review_invocations": invocations,
+                },
+                directory,
+            )
+
     def test_receipt_binding_decodes_json_text_and_allows_failed_split_prefix(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
