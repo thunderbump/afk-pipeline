@@ -125,7 +125,7 @@ def main() -> int:
         f"artifacts: events={events_path}, stderr={stderr_path})"
     )
 
-    task = build_task(response_input, selected, objective)
+    task = build_task(response_input, selected, objective, result_directory)
 
     inference_result = invoke(
         purpose=task.purpose,
@@ -137,6 +137,7 @@ def main() -> int:
         timeout_seconds=response_input["timeout_seconds"],
         evidence_directory=result_directory / "inference",
         validator=task.validator,
+        read_only_evidence=task.read_only_evidence,
     )
     publish_runtime_logs(result_directory, inference_result.receipt)
     progress("feedback-response agent completed")

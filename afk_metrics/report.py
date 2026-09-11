@@ -1648,6 +1648,7 @@ def summarize_source(
             if key in seen:
                 raise ValueError("inference invocation has duplicate ownership")
             seen.add(key)
+            item["ownership"] = stage_owner
             if include_stage_binding:
                 item["_stage_owner"] = stage_owner
             invocations.append(item)
@@ -2123,6 +2124,18 @@ def summarize_source(
             "overlap_note": "unattributed excludes the union of authenticated preparation, invocation, Validation, and publication intervals; nested response validation is not subtracted again",
         },
     }
+    result["review_stages"] = [
+        {
+            "sequence": entry["sequence"],
+            "outcome": entry["outcome"],
+            "mode": observed["request"].get("review_mode", "combined"),
+            "elapsed": component_elapsed_measurements.get(
+                entry["sequence"], {"seconds": None, "coverage": "unavailable"}
+            ),
+        }
+        for entry in state["history"]
+        if entry["component"] == "review"
+    ]
     if include_stage_binding:
         result["_publication_stage_data"] = {
             "history": [

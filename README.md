@@ -975,7 +975,7 @@ For a new prepared Assignment, Coordinator adds:
 
 Review verifies that base against the Assignment carried by the existing
 Committed Change source proof, rather than inferring it from a branch. Task
-contract version 6 supplies a bounded Git change summary and hash/size-bound
+contract version 11 supplies a bounded Git change summary and hash/size-bound
 file references. `diff.patch` covers work base through current candidate;
 `repair.patch` covers the true latest Committed Change. When both ranges match,
 the two references share `diff.patch` without duplicating it. Each patch is
@@ -1003,7 +1003,7 @@ from the actual Committed Change range, instead of inheriting Review's larger
 full-work patch. Its diff scope is unchanged.
 
 Standalone and retained legacy input without `work_context` continues to use
-task contract version 5 and the latest-change inline diff. The default runtime
+task contract version 6 and the latest-change diff, referenced when large. The default runtime
 adapter uses Pi with the frozen Review model/thinking policy. Deployment uses
 the shared inference configuration; durable Review input cannot replace an
 adapter or command. Authentication stays in the execution environment.
@@ -1018,8 +1018,8 @@ unsupported operating assumptions, speculative hardening and preferences alone
 remain insufficient. Validity and ownership are separate judgments; only the
 existing confirmed/current route makes a finding actionable.
 
-The clarified instructions use Review task versions 6 (legacy diff delivery)
-and 7 (complete-work delivery), and Assessment version 5. Existing result schemas,
+The clarified instructions use Review task versions 10 (latest-change scope)
+and 11 (complete-work scope), and Assessment version 6. Existing result schemas,
 context schema 1, model policy, and routing are unchanged. Retained receipts keep
 their original instructions; newly executed stages use the current standard,
 including stages in a continued legacy Run. There is no new inference stage or
@@ -1131,7 +1131,7 @@ appends its generated prompt as the final argument.
 
 The result directory contains `input.json`, raw `events.jsonl`, raw
 `stderr.log`, and an atomically sealed `output.json`. Finding Assessment task
-contract version 2 returns a summary and exactly one decision for every
+contract version 6 returns a summary and exactly one decision for every
 immutable Review finding. Each decision contains its zero-based `finding_index`,
 independent `defect_decision` (`confirmed` or `rejected`) and rationale, plus an
 independent `scope` (`current`, `related`, or `unknown`) and scope rationale.
@@ -1145,6 +1145,27 @@ Completion is separate from the boolean decisions and does not authorize repair,
 aggregate routing, or GitHub posting. The workspace must remain unchanged. Exit
 status is `0` for completed, `1` for sealed non-success, and `2` for invalid
 invocation, configuration, input, or Review evidence.
+
+## Evidence delivery and interruption boundaries
+
+Attempt, Review, Assessment and Response reference large retained evidence.
+Text is inline only when its JSON encoding fits 4 KiB. Larger logs, diffs and
+artifact values carry an absolute path, byte count and SHA-256; JSON references
+may include a JSON pointer. Workers should search files and inspect relevant
+ranges rather than loading entire artifacts into context. Write-capable workers
+may read the explicitly listed external evidence but may only edit their workspace.
+Pi refuses task data above 64 KiB before rendering/base64 duplication. This is a
+context guard, not permission to silently truncate the objective or findings.
+Split receipt authentication now uses a 1 MiB invocation bound, not a log-size
+expansion allowance. Historical giant inline invocations are not a compatibility target.
+
+Review uses one outer KeyboardInterrupt boundary after taking ownership of its
+stage directory. It stops launching reviewers and attempts one interrupted seal,
+retaining the started prefix and no aggregate. Zero started reviewers is valid.
+An already sealed completion is preserved. Forced termination, failed storage,
+or another interruption during shutdown can leave an unsealed stage; use explicit
+Coordinator reconciliation/retry. There is no promise to seal through every
+possible interruption point.
 
 ## Feedback Response
 
@@ -1165,14 +1186,14 @@ Feedback Response input is structured JSON:
 }
 ```
 
-Assessed-feedback task version 4 includes each selected finding's original
+Assessed-feedback task version 5 includes each selected finding's original
 `finding.scope_claim`, Assessment's `assessment_rationale`, and final
 `assessment_scope` object with its kind and rationale. This preserves provenance
 when Assessment overrides Review. Only confirmed/current findings are selected;
 no dismissed, related or unknown-owner finding is added to the worker packet.
 The JSON task data is limited to 1 MiB; oversize packets are refused before
-inference, never truncated. The packet adds one scope object per selected
-finding, not historical cycles or another evidence copy. Supplied evidence is read-only reference data; write authority remains the
+inference, never truncated. Packets larger than 4 KiB are retained once as response-task-data.json and
+referenced by the worker; they are not embedded in the rendered prompt. Supplied evidence is read-only reference data; write authority remains the
 prepared workspace.
 
 Response identifies the governing invariant, groups findings sharing a cause,
@@ -1182,7 +1203,7 @@ refactoring or speculative hardening. The existing summary/response text explain
 the cause, change and meaningful regression evidence, or why a useful check was
 unavailable. One response per supplied finding remains mandatory even when a
 single repair addresses several findings. Successful repairs pass through the
-existing deterministic Validation gate. Validation repair keeps task version 1
+existing deterministic Validation gate. Validation repair uses task version 2
 and its distinct failed-Validation input.
 
 A demonstrated conflict with the frozen objective or adopted contract may instead

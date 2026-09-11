@@ -94,7 +94,7 @@ class AttemptExecutorTest(unittest.TestCase):
         prompt = json.loads((result / "inference/prompt.json").read_text())
         self.assertEqual(output["outcome"], "succeeded")
         self.assertEqual(receipt["outcome"], "succeeded")
-        self.assertEqual(prompt["task_contract_version"], 1)
+        self.assertEqual(prompt["task_contract_version"], 2)
         self.assertEqual(
             prompt["untrusted_task_data"]["objective"], assignment["objective"]
         )

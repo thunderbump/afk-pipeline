@@ -35,14 +35,13 @@ class ReadOnlyEvidenceTest(unittest.TestCase):
             self.assertEqual(result.receipt["policy"]["system_instructions"], system)
             self.assertEqual(list(workspace.iterdir()), [])
 
-    def test_no_tools_write_and_directory_grants_are_rejected_before_invocation(self):
+    def test_no_tools_and_directory_grants_are_rejected_before_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             file = root / "evidence.txt"
             file.write_text("evidence")
             for capability, path in [
                 (Capability.NO_TOOLS, file),
-                (Capability.WRITE, file),
                 (Capability.READ_ONLY, root),
             ]:
                 with self.subTest(capability=capability), self.assertRaises(ValueError):
@@ -59,3 +58,14 @@ class ReadOnlyEvidenceTest(unittest.TestCase):
                         read_only_evidence=(str(path),),
                     )
             self.assertFalse((root / "inference").exists())
+
+    def test_write_worker_can_read_evidence_without_external_write_authority(self):
+        from afk_inference.runtime import evidence_system_instructions
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "validation.log"
+            path.write_text("retained evidence")
+            instructions = evidence_system_instructions(Capability.WRITE, (str(path),))
+            self.assertIn("read, but never modify", instructions)
+            self.assertIn("modify files only within the execution root", instructions)
+            self.assertIn(str(path), instructions)

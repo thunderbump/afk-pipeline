@@ -194,6 +194,7 @@ class ReviewCliTest(unittest.TestCase):
         self.assertFalse((result / "output.json.tmp").exists())
 
     def test_split_review_runs_three_isolated_lenses_and_seals_provenance(self):
+        (self.validation / "stdout.log").write_text("large diagnostic line\n" * 4096)
         input_path, result, environment = self.prepare_review("no-findings")
         review_input = json.loads(input_path.read_text())
         review_input["review_mode"] = "split"
@@ -223,6 +224,13 @@ class ReviewCliTest(unittest.TestCase):
             prompt = json.loads((directory / "inference" / "prompt.json").read_text())[
                 "trusted_task_instructions"
             ]
+            packet = json.loads((directory / "inference" / "prompt.json").read_text())
+            reference = packet["untrusted_task_data"]["validation"]["stdout"]
+            self.assertEqual(reference["path"], str(self.validation / "stdout.log"))
+            self.assertIn(reference["path"], packet["system"])
+            self.assertLess(
+                (directory / "inference/invocation.json").stat().st_size, 65536
+            )
             self.assertIn(f"isolated {lens} lens", prompt)
             for other in {"behavior", "design", "standards"} - {lens}:
                 self.assertNotIn(f"{other.capitalize()} lens:", prompt)
@@ -433,7 +441,74 @@ class ReviewCliTest(unittest.TestCase):
         self.assertTrue(
             (result / "reviewers/behavior/inference/receipt.json").is_file()
         )
-        self.assertTrue(output["repository"]["unchanged"])
+        self.assertIsNone(output["repository"]["unchanged"])
+
+    def test_split_interruption_boundaries_and_failed_shutdown(self):
+        from afk_export import failed_review_details
+        from afk_review import __main__ as review_main
+        from afk_review.contract import validate_invocation_receipts
+
+        for boundary in ("first", "finalize", "after_seal", "shutdown_failure"):
+            with self.subTest(boundary=boundary):
+                input_path, result, environment = self.prepare_review(
+                    "no-findings", result_name=boundary
+                )
+                request = json.loads(input_path.read_text())
+                request["review_mode"] = "split"
+                self.write_json(input_path, request)
+                original_progress = review_main.progress
+
+                def progress(
+                    message, boundary=boundary, original_progress=original_progress
+                ):
+                    if (
+                        boundary == "finalize"
+                        and message == "observing repository after review"
+                    ) or (
+                        boundary == "after_seal"
+                        and message.startswith("sealed completed")
+                    ):
+                        raise KeyboardInterrupt
+                    original_progress(message)
+
+                with (
+                    mock.patch.object(
+                        sys, "argv", ["afk_review", str(input_path), str(result)]
+                    ),
+                    mock.patch.dict(os.environ, environment, clear=True),
+                    mock.patch.object(review_main, "progress", side_effect=progress),
+                ):
+                    if boundary in {"first", "shutdown_failure"}:
+                        with mock.patch.object(
+                            review_main, "build_task", side_effect=KeyboardInterrupt
+                        ):
+                            if boundary == "shutdown_failure":
+                                with (
+                                    mock.patch.object(
+                                        review_main,
+                                        "seal_json",
+                                        side_effect=OSError("disk unavailable"),
+                                    ),
+                                    self.assertRaises(OSError),
+                                ):
+                                    review_main.main()
+                                self.assertFalse((result / "output.json").exists())
+                                continue
+                            code = review_main.main()
+                    else:
+                        code = review_main.main()
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(code, 0 if boundary == "after_seal" else 1)
+                self.assertEqual(
+                    output["outcome"],
+                    "completed" if boundary == "after_seal" else "interrupted",
+                )
+                if boundary != "after_seal":
+                    self.assertIsNone(output["review"])
+                    validate_invocation_receipts(output, result)
+                    # Empty and completed prefixes remain accepted by the export projection.
+                    details = failed_review_details(output, [])
+                    self.assertEqual(details["mode"], "split")
 
     def test_final_split_lens_mutation_never_publishes_an_aggregate(self):
         input_path, result, environment = self.prepare_review("mutate-final-lens")

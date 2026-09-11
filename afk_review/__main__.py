@@ -75,14 +75,6 @@ def main() -> int:
         )
     progress("preparing review result directory")
     result_directory.mkdir()
-    write_json(result_directory / "input.json", review_input)
-    diff_path = result_directory / "diff.patch"
-    if previous is None:
-        write_diff(diff_path, workspace, evidence)
-    else:
-        evidence["work_context"] = write_context(
-            result_directory, review_input, evidence, previous
-        )
     started_at = timestamp()
     started = time.monotonic()
     reviewed_head = evidence["change"]["repository"]["after"]["head"]
@@ -94,11 +86,18 @@ def main() -> int:
     evidence_error = None
     after = before
 
-    interrupted = False
-    for lens in lenses:
-        inference_result = None
-        invocation_directory = None
-        try:
+    diff_path = result_directory / "diff.patch"
+    output_path = result_directory / "output.json"
+    try:
+        write_json(result_directory / "input.json", review_input)
+        diff_path = result_directory / "diff.patch"
+        if previous is None:
+            write_diff(diff_path, workspace, evidence)
+        else:
+            evidence["work_context"] = write_context(
+                result_directory, review_input, evidence, previous
+            )
+        for lens in lenses:
             invocation_directory = (
                 result_directory
                 if lens is None
@@ -194,171 +193,193 @@ def main() -> int:
                 or evidence_error is not None
             ):
                 break
-        except KeyboardInterrupt:
-            # Once Review owns the result directory, an operator interruption is
-            # a stage outcome, not permission to leave prior lens evidence
-            # unsealed or to omit output.json. If invoke already sealed a receipt,
-            # finish projecting its logs before sealing the stage outcome.
-            interrupted = True
-            if inference_result is not None and invocation_directory is not None:
-                try:
-                    publish_runtime_logs(invocation_directory, inference_result.receipt)
-                except KeyboardInterrupt:
-                    pass
-            break
 
-    progress("observing repository after review")
-    try:
-        after = repository_state(workspace)
-    except KeyboardInterrupt:
-        interrupted = True
-    except (OSError, subprocess.SubprocessError) as error:
-        after = None
-        observation_error = str(error)
-    unchanged = None if after is None else before == after
-    # Recheck once after the final invocation so the sealed aggregate remains
-    # bound to the same context that every individual lens was allowed to read.
-    if previous is not None and evidence_error is None:
-        reader = EvidenceReader((result_directory,))
+        progress("observing repository after review")
         try:
-            validate_artifacts(
-                result_directory,
-                review_input["work_context"],
-                evidence["work_context"],
-                reader,
-                evidence["change"],
-            )
-        except KeyboardInterrupt:
-            interrupted = True
-        except (OSError, ValueError, EvidenceUnavailable) as error:
-            evidence_error = str(error)
-        finally:
-            reader.close()
-
-    # A clean aggregate is admissible only after both the final repository
-    # observation and retained-evidence checks pass. In particular, success of
-    # the last split invocation cannot outrank a mutation it made.
-    invocations_succeeded = len(results) == len(lenses) and all(
-        result.outcome == "succeeded" for result in results
-    )
-    all_succeeded = (
-        not interrupted
-        and invocations_succeeded
-        and unchanged is True
-        and observation_error is None
-        and evidence_error is None
-    )
-    if all_succeeded and mode == "split":
-        findings = []
-        provenance = []
-        summaries = []
-        for lens, result in zip(lenses, results):
-            summaries.append(f"{lens.capitalize()}: {result.value['summary']}")
-            for source_index, finding in enumerate(result.value["findings"]):
-                provenance.append(
-                    {
-                        "finding_index": len(findings),
-                        "lens": lens,
-                        "source_finding_index": source_index,
-                    }
+            after = repository_state(workspace)
+        except (OSError, subprocess.SubprocessError) as error:
+            after = None
+            observation_error = str(error)
+        unchanged = None if after is None else before == after
+        # Recheck once after the final invocation so the sealed aggregate remains
+        # bound to the same context that every individual lens was allowed to read.
+        if previous is not None and evidence_error is None:
+            reader = EvidenceReader((result_directory,))
+            try:
+                validate_artifacts(
+                    result_directory,
+                    review_input["work_context"],
+                    evidence["work_context"],
+                    reader,
+                    evidence["change"],
                 )
-                findings.append(finding)
-        review = {
-            "summary": "\n".join(summaries),
-            "findings": findings,
-            "audit": {
-                "completed": True,
-                "scopes": [
-                    "objective",
-                    "acceptance_criteria",
-                    "reviewed_diff",
-                    "supplied_evidence",
-                ],
-            },
-        }
-    elif all_succeeded:
-        review = results[0].value
-        provenance = [
-            {
-                "finding_index": index,
-                "lens": finding["lens"],
-                "source_finding_index": index,
+            except (OSError, ValueError, EvidenceUnavailable) as error:
+                evidence_error = str(error)
+            finally:
+                reader.close()
+
+        # A clean aggregate is admissible only after both the final repository
+        # observation and retained-evidence checks pass. In particular, success of
+        # the last split invocation cannot outrank a mutation it made.
+        invocations_succeeded = len(results) == len(lenses) and all(
+            result.outcome == "succeeded" for result in results
+        )
+        all_succeeded = (
+            invocations_succeeded
+            and unchanged is True
+            and observation_error is None
+            and evidence_error is None
+        )
+        if all_succeeded and mode == "split":
+            findings = []
+            provenance = []
+            summaries = []
+            for lens, result in zip(lenses, results):
+                summaries.append(f"{lens.capitalize()}: {result.value['summary']}")
+                for source_index, finding in enumerate(result.value["findings"]):
+                    provenance.append(
+                        {
+                            "finding_index": len(findings),
+                            "lens": lens,
+                            "source_finding_index": source_index,
+                        }
+                    )
+                    findings.append(finding)
+            review = {
+                "summary": "\n".join(summaries),
+                "findings": findings,
+                "audit": {
+                    "completed": True,
+                    "scopes": [
+                        "objective",
+                        "acceptance_criteria",
+                        "reviewed_diff",
+                        "supplied_evidence",
+                    ],
+                },
             }
-            for index, finding in enumerate(review["findings"])
-        ]
-    else:
-        review = None
-        provenance = []
-    failed_result = next(
-        (item for item in results if item.outcome != "succeeded"), None
-    )
-    outcome = (
-        "interrupted"
-        if interrupted
-        or (failed_result is not None and failed_result.outcome == "interrupted")
-        else "timed_out"
-        if failed_result is not None and failed_result.outcome == "timed_out"
-        else "completed"
-        if all_succeeded
-        else "failed"
-    )
-    agent = {"status": "completed"} if all_succeeded else None
-    review_error = evidence_error or next(
-        (
-            record["review_error"]
-            for record in invocation_records
-            if "review_error" in record
-        ),
-        None,
-    )
-    output = {
-        "schema_version": 1,
-        "outcome": outcome,
-        "started_at": started_at,
-        "finished_at": timestamp(),
-        "duration_seconds": round(time.monotonic() - started, 3),
-        **(
-            {
-                "process": invocation_records[0]["process"]
-                if invocation_records
-                else None
-            }
-            if mode == "combined"
-            else {}
-        ),
-        "agent": agent,
-        "review": review,
-        **({"review_error": review_error} if review_error else {}),
-        **(
-            {
-                "review_mode": mode,
-                "review_invocations": invocation_records,
-                "finding_provenance": provenance,
-            }
-            if "review_mode" in review_input
-            else {}
-        ),
-        "repository": {
-            "before": before,
-            "after": after,
-            "unchanged": unchanged,
-            **({"observation_error": observation_error} if observation_error else {}),
-        },
-        "validation_evidence": evidence["validation_identity"],
-        **({"work_context": evidence["work_context"]} if previous is not None else {}),
-        "artifacts": {
-            "diff": "diff.patch",
+        elif all_succeeded:
+            review = results[0].value
+            provenance = [
+                {
+                    "finding_index": index,
+                    "lens": finding["lens"],
+                    "source_finding_index": index,
+                }
+                for index, finding in enumerate(review["findings"])
+            ]
+        else:
+            review = None
+            provenance = []
+        failed_result = next(
+            (item for item in results if item.outcome != "succeeded"), None
+        )
+        outcome = (
+            "interrupted"
+            if failed_result is not None and failed_result.outcome == "interrupted"
+            else "timed_out"
+            if failed_result is not None and failed_result.outcome == "timed_out"
+            else "completed"
+            if all_succeeded
+            else "failed"
+        )
+        agent = {"status": "completed"} if all_succeeded else None
+        review_error = evidence_error or next(
+            (
+                record["review_error"]
+                for record in invocation_records
+                if "review_error" in record
+            ),
+            None,
+        )
+        output = {
+            "schema_version": 1,
+            "outcome": outcome,
+            "started_at": started_at,
+            "finished_at": timestamp(),
+            "duration_seconds": round(time.monotonic() - started, 3),
             **(
-                {"events": "events.jsonl", "stderr": "stderr.log"}
+                {
+                    "process": invocation_records[0]["process"]
+                    if invocation_records
+                    else None
+                }
                 if mode == "combined"
                 else {}
             ),
-        },
-    }
-    output_path = result_directory / "output.json"
-    seal_json(output_path, output)
-    progress(f"sealed {outcome} review outcome at {output_path}")
-    return 0 if outcome == "completed" else 1
+            "agent": agent,
+            "review": review,
+            **({"review_error": review_error} if review_error else {}),
+            **(
+                {
+                    "review_mode": mode,
+                    "review_invocations": invocation_records,
+                    "finding_provenance": provenance,
+                }
+                if "review_mode" in review_input
+                else {}
+            ),
+            "repository": {
+                "before": before,
+                "after": after,
+                "unchanged": unchanged,
+                **(
+                    {"observation_error": observation_error}
+                    if observation_error
+                    else {}
+                ),
+            },
+            "validation_evidence": evidence["validation_identity"],
+            **(
+                {"work_context": evidence["work_context"]}
+                if previous is not None
+                else {}
+            ),
+            "artifacts": {
+                "diff": "diff.patch",
+                **(
+                    {"events": "events.jsonl", "stderr": "stderr.log"}
+                    if mode == "combined"
+                    else {}
+                ),
+            },
+        }
+        seal_json(output_path, output)
+        progress(f"sealed {outcome} review outcome at {output_path}")
+        return 0 if outcome == "completed" else 1
+    except KeyboardInterrupt:
+        # One best-effort shutdown. If final sealing or cleanup is interrupted
+        # again, leave the stage unsealed for explicit Coordinator recovery.
+        if output_path.exists():
+            return (
+                0
+                if json.loads(output_path.read_text())["outcome"] == "completed"
+                else 1
+            )
+        output = {
+            "schema_version": 1,
+            "outcome": "interrupted",
+            "started_at": started_at,
+            "finished_at": timestamp(),
+            "duration_seconds": round(time.monotonic() - started, 3),
+            "agent": None,
+            "review": None,
+            "repository": {"before": before, "after": None, "unchanged": None},
+            "validation_evidence": evidence["validation_identity"],
+            "artifacts": {"diff": "diff.patch"} if diff_path.exists() else {},
+            **({"process": None} if mode == "combined" else {}),
+            **(
+                {
+                    "review_mode": mode,
+                    "review_invocations": invocation_records,
+                    "finding_provenance": [],
+                }
+                if "review_mode" in review_input
+                else {}
+            ),
+        }
+        seal_json(output_path, output)
+        return 1
 
 
 def validate_input(value: object) -> None:

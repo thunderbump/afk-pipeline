@@ -125,7 +125,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         }
         task = build_attempt_task(assignment)
         self.assertEqual(task.purpose, "attempt")
-        self.assertEqual(task.contract_version, 1)
+        self.assertEqual(task.contract_version, 2)
         self.assertEqual(task.capability, Capability.WRITE)
         self.assertEqual(
             task.untrusted_data,
@@ -174,7 +174,7 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         }
         selected = actionable_findings(review, validate_assessment(review, assessment))
         task = build_response_task({}, selected, "Repair existing metrics cost intake.")
-        self.assertEqual(task.contract_version, 4)
+        self.assertEqual(task.contract_version, 5)
         self.assertEqual(
             [
                 item["finding_index"]
@@ -236,8 +236,10 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
             diff = root / "diff.patch"
             diff.write_text("diff content\n")
             review = {"findings": []}
+            (root / "stdout.log").write_text("validation out")
+            (root / "stderr.log").write_text("validation err")
             review_task = build_review_task(
-                {},
+                {"validation_directory": str(root)},
                 {
                     "change": {
                         "objective": "objective",
@@ -262,6 +264,10 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
                 "objective",
                 root,
                 {
+                    "input": {
+                        "validation_directory": str(root),
+                        "change_directory": str(root),
+                    },
                     "change_output": {"change": "output"},
                     "validation_input": {"validation": "input"},
                     "validation": {"validation": "output"},
@@ -308,9 +314,9 @@ class RoleLocalInferenceTaskContractTest(unittest.TestCase):
         for task, capability in expected:
             with self.subTest(purpose=task.purpose):
                 expected_version = {
-                    "review": 6,
-                    "finding_assessment": 5,
-                    "feedback_response": 4,
+                    "review": 10,
+                    "finding_assessment": 6,
+                    "feedback_response": 5,
                 }[task.purpose]
                 self.assertEqual(task.contract_version, expected_version)
                 self.assertEqual(task.capability, capability)

@@ -65,7 +65,7 @@ def main() -> int:
     )
     inference_result = None
     if assignment.get("worker") == "inference":
-        task = build_task(assignment)
+        task = build_task(assignment, attempt_directory / "input.json")
         inference_result = invoke(
             purpose=task.purpose,
             task_contract_version=task.contract_version,
@@ -76,6 +76,7 @@ def main() -> int:
             timeout_seconds=assignment["timeout_seconds"],
             evidence_directory=attempt_directory / "inference",
             validator=task.validator,
+            read_only_evidence=task.read_only_evidence,
         )
         publish_runtime_logs(attempt_directory, inference_result.receipt)
         process = runtime_process(inference_result.receipt)

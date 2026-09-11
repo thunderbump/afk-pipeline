@@ -7,6 +7,12 @@ from afk_assess.contract import validate_assessment
 from afk_evidence.access import EvidenceReader
 from afk_finding_standard import FINDING_STANDARD
 from afk_inference import Capability, ResponseRejected, TaskContract
+from afk_prompt_evidence import (
+    EVIDENCE_INSTRUCTIONS,
+    referenced_paths,
+    text_evidence,
+    value_evidence,
+)
 from afk_related_work import SELECTION_GUIDANCE, snapshot_records
 from afk_review.context import validate_artifacts
 
@@ -37,17 +43,7 @@ def build_task(
     related = assessment_input.get("related_work")
     related_records = snapshot_records(related) if related is not None else []
     related_work_ids = {record["id"] for record in related_records}
-    if "work_context" in evidence.get("input", {}):
-        # Review's diff.patch now covers the whole work item. Preserve the
-        # assessor's existing latest-change payload without inlining that larger file.
-        from afk_review.context import diff_bytes
-
-        repository = evidence["change_output"]["change"]["repository"]
-        reviewed_diff = diff_bytes(
-            workspace, repository["before"]["head"], repository["after"]["head"]
-        ).decode()
-    else:
-        reviewed_diff = (review_directory / "diff.patch").read_text()
+    validation_directory = Path(evidence["input"]["validation_directory"])
     previous_files = {}
     if "work_context" in evidence.get("input", {}):
         reader = EvidenceReader((review_directory,))
@@ -63,6 +59,12 @@ def build_task(
             for key, item in manifest["files"].items()
             if key.startswith("previous_")
         }
+    diff_path = review_directory / (
+        manifest["files"]["repair_diff"]["path"]
+        if "work_context" in evidence.get("input", {})
+        else "diff.patch"
+    )
+    reviewed_diff = text_evidence(diff_path)
     data = {
         "objective": objective,
         "findings": review["findings"],
@@ -72,12 +74,22 @@ def build_task(
         "validation": {
             "input": evidence["validation_input"],
             "output": evidence["validation"],
-            "stdout": evidence["validation_stdout"],
-            "stderr": evidence["validation_stderr"],
+            "stdout": text_evidence(validation_directory / "stdout.log"),
+            "stderr": text_evidence(validation_directory / "stderr.log"),
         },
         "related_work": related_records,
         **({"previous_cycle": previous_files} if previous_files else {}),
     }
+
+    change_path = Path(evidence["input"]["change_directory"]) / "output.json"
+    data["objective"] = value_evidence(objective, change_path, "/change/objective")
+    data["committed_change"] = value_evidence(data["committed_change"], change_path)
+    data["review"] = value_evidence(review, review_directory / "output.json", "/review")
+    data["findings"] = value_evidence(
+        review["findings"], review_directory / "output.json", "/review/findings"
+    )
+    if related is not None:
+        data["related_work"] = value_evidence(related_records, related["path"])
 
     def validate(value: object):
         try:
@@ -89,10 +101,20 @@ def build_task(
 
     return TaskContract(
         purpose="finding_assessment",
-        contract_version=5,
-        trusted_instructions=ASSESSMENT_INSTRUCTIONS,
+        contract_version=6,
+        trusted_instructions=ASSESSMENT_INSTRUCTIONS + "\n\n" + EVIDENCE_INSTRUCTIONS,
         untrusted_data=data,
         capability=Capability.READ_ONLY,
         validator=validate,
-        read_only_evidence=tuple(item["path"] for item in previous_files.values()),
+        read_only_evidence=tuple(item["path"] for item in previous_files.values())
+        + referenced_paths(
+            reviewed_diff,
+            data["validation"]["stdout"],
+            data["validation"]["stderr"],
+            data["objective"],
+            data["committed_change"],
+            data["review"],
+            data["findings"],
+            data["related_work"],
+        ),
     )

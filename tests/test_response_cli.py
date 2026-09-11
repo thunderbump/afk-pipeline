@@ -324,7 +324,7 @@ class ResponseCliTest(unittest.TestCase):
         self.assertEqual(
             selected["assessment_rationale"], "Fixture assessment rationale."
         )
-        self.assertEqual(prompt["task_contract_version"], 4)
+        self.assertEqual(prompt["task_contract_version"], 5)
         for clause in (
             "governing invariant",
             "shared cause",
@@ -441,7 +441,7 @@ class ResponseCliTest(unittest.TestCase):
         output = json.loads((result / "output.json").read_text())
         self.assertEqual(output["response"]["finding_responses"], [])
         prompt = json.loads((result / "inference/prompt.json").read_text())
-        self.assertEqual(prompt["task_contract_version"], 1)
+        self.assertEqual(prompt["task_contract_version"], 2)
         self.assertEqual(prompt["untrusted_task_data"]["actionable_findings"], [])
         self.assertNotIn("assessment_scope", prompt["trusted_task_instructions"])
         failure = prompt["untrusted_task_data"]["failed_validation"]

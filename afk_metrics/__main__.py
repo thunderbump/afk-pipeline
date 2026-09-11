@@ -50,6 +50,16 @@ def _human(report):
                     label = ", ".join(values) if values else "identity unavailable"
                     if label not in model_parts:
                         model_parts.append(label)
+            for stage in run.get("review_stages", []):
+                lines.append(
+                    f"  Review {stage['sequence']} ({stage['mode']}): wall {_available(stage['elapsed']['seconds'])} s; {stage['outcome']}"
+                )
+            for invocation in run["inference"]["invocations"]:
+                owner = invocation.get("ownership", {})
+                if owner.get("kind") == "component_reviewer":
+                    lines.append(
+                        f"    Review {owner['sequence']} / {owner['lens']}: invocation elapsed {_available(invocation.get('elapsed', {}).get('seconds'))} s"
+                    )
             cost = totals["cost"]
             usage_coverage = totals.get("usage_coverage", "unavailable")
             cost_status = cost.get("status", "unavailable")

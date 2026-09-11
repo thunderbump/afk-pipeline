@@ -49,7 +49,7 @@ Each Run object has exactly `binding`, `summary`, and `stages`.
 
 The producer verifies the manifest identity and the workflow file's declared size/hash. It independently normalizes the selected source observation and compares all semantic Run fields. Only bundle `artifacts`, v3 `inference_sessions`, and operational publication delivery fields are excluded. Schema version is normalized to the verified bundle version. Caller-provided digests are not accepted.
 
-`summary` is the complete schema-v2 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, and `timing`. The nested contract is listed below. `source_identity` is the key used by comparisons.
+`summary` is the complete schema-v2 local report Run object, unchanged: `source_identity`, `integrity`, `run_identity`, `work`, `outcome`, `inference`, `timing`, and `review_stages`. The nested contract is listed below. `source_identity` is the key used by comparisons.
 
 ## Nested summary contract
 
@@ -60,6 +60,7 @@ A published summary always has `integrity: {"status":"verified"}`. Invalid evide
 * `outcome`: `terminal` is `completed | failed`; `coordinator_status` is `completed | failed`; `coordinator_decision` is `stop | exhausted | null`. `validation_results` lists retained Validation outcomes, `passed | failed | timed_out | interrupted`. `repair_count` counts Response components and `retry_count` counts observed inference retries. `completion_acceptance` and `integration_status` are currently the literal `unavailable`.
 * `inference`: `invocations`, `evidence_coverage`, and `totals`, described below.
 * `timing`: the fields described below.
+* `review_stages`: ordered logical Review rows with `sequence`, `outcome`, frozen `mode` (`combined | split`), and `elapsed: {seconds, coverage}`. Missing duration is null/unavailable, never a fabricated zero. This is component wall time, not a sum of invocation durations.
 
 All coverage fields use `complete | partial | unavailable`. All token objects contain only measured non-negative numeric fields from `input`, `output`, `cacheRead`, `cacheWrite`, `totalTokens`, and `reasoning`. Missing keys do not mean zero. Counts are non-negative integers. Seconds are non-negative numbers or `null` unless a legacy sentinel is explicitly stated below.
 
@@ -75,6 +76,7 @@ Each invocation has:
 * `purpose`: `acceptance_planning | attempt | review | finding_assessment | feedback_response`.
 * Nullable string `adapter`, `adapter_family`, `provider`, and `model`. Pi invocations also have `observed_identities`, an array of objects with nullable `provider` and `model`.
 * `outcome`: `succeeded | response_rejected | adapter_failed | validator_failed | timed_out | interrupted`; nullable `attempt_count`.
+* `ownership`: the authenticated owner without project/run decoration: `component` with sequence/component, `component_reviewer` with sequence/component/lens, or `run` with purpose. Available in ordinary JSON reports as well as publication.
 * `elapsed`: `kind: invocation_adapter_elapsed_not_pure_inference`, nullable `seconds`, and nullable timestamp strings `started_at` and `ended_at`.
 * `response_validator_seconds`, `response_validator_coverage`, and `metrics`.
 
@@ -94,7 +96,7 @@ Invocation `metrics` always has `coverage`, `usage`, `compaction` with `aggregat
 Every stage row has `ownership`, `outcome`, and these named metric fields:
 
 * `elapsed_seconds`: non-negative number or `null`.
-* `elapsed_kind`: `invocation_adapter_elapsed_not_pure_inference`, one of the Run purposes below, or `null`. Invocation elapsed includes adapter/runtime/tool work and is **not** pure model latency.
+* `elapsed_kind`: `invocation_adapter_elapsed_not_pure_inference`, `component_wall`, one of the Run purposes below, or `null`. Invocation elapsed includes adapter/runtime/tool work and is **not** pure model latency.
 * `usage`, `compaction_usage`: token-field objects; `{}` means no supported measurement, not zero use.
 * `usage_coverage`: enum `complete | partial | unavailable`.
 * `retry_count`: non-negative observed retry count.

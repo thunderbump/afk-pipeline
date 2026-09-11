@@ -116,7 +116,7 @@ class PiInferenceAdapterTest(unittest.TestCase):
                     (int(task_input.rsplit("/", 1)[1]),),
                 )
 
-    def test_large_task_reaches_real_pi_protocol_fixture_without_e2big(self):
+    def test_bounded_task_reaches_real_pi_protocol_fixture_through_file(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             pi = root / "pi"
@@ -124,7 +124,7 @@ class PiInferenceAdapterTest(unittest.TestCase):
                 "#!/usr/bin/env python3\n"
                 "import json, pathlib, sys\n"
                 "value = pathlib.Path(sys.argv[-1][1:]).read_text()\n"
-                "assert len(value) > 200000\n"
+                "assert 60000 < len(value) < 100000\n"
                 "events = [\n"
                 " {'type': 'agent_start'},\n"
                 " {'type': 'message_end', 'message': {'role': 'assistant', "
@@ -139,7 +139,7 @@ class PiInferenceAdapterTest(unittest.TestCase):
                 result = InferenceRuntime().invoke(
                     purpose="classify",
                     trusted_task_instructions="Return one JSON object.",
-                    untrusted_task_data={"text": "x" * 200000},
+                    untrusted_task_data={"text": "x" * 60000},
                     requested_capability=Capability.NO_TOOLS,
                     execution_root=root,
                     timeout_seconds=5,

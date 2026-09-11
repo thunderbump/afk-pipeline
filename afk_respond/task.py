@@ -5,6 +5,12 @@ from pathlib import Path
 
 from afk_evidence.access import MAX_JSON_BYTES
 from afk_inference import Capability, ResponseRejected, TaskContract
+from afk_prompt_evidence import (
+    EVIDENCE_INSTRUCTIONS,
+    referenced_paths,
+    text_evidence,
+    value_evidence,
+)
 from afk_respond.contract import validate_response
 
 RESPONSE_INSTRUCTIONS = """Act as an implementation feedback responder. Modify only the prepared workspace to address every supplied actionable assessed finding, create a clean Git commit for a repair, and return the required JSON response. Do not address dismissed findings, run external orchestration, or publish feedback.
@@ -37,6 +43,7 @@ def build_task(
     response_input: dict[str, object],
     selected: list[dict[str, object]],
     objective: str,
+    packet_directory: Path | None = None,
 ) -> TaskContract:
     """Build assessed-feedback v3 or the unchanged validation-repair v1 task."""
     repair = "validation_directory" in response_input
@@ -49,9 +56,24 @@ def build_task(
             "directory": str(validation_directory),
             "input": json.loads((validation_directory / "input.json").read_text()),
             "output": json.loads((validation_directory / "output.json").read_text()),
-            "stdout": (validation_directory / "stdout.log").read_text(),
-            "stderr": (validation_directory / "stderr.log").read_text(),
+            "stdout": text_evidence(validation_directory / "stdout.log"),
+            "stderr": text_evidence(validation_directory / "stderr.log"),
         }
+
+    read_only = (
+        referenced_paths(
+            data["failed_validation"]["stdout"], data["failed_validation"]["stderr"]
+        )
+        if repair
+        else ()
+    )
+    if len(json.dumps(data).encode()) > 4096 and packet_directory is not None:
+        # Selected findings combine Review observations and Assessment decisions;
+        # retain that derived packet once, rather than repeating it in prompts.
+        packet = packet_directory / "response-task-data.json"
+        packet.write_text(json.dumps(data))
+        data = {"task_data": value_evidence(data, packet)}
+        read_only += (str(packet.absolute()),)
 
     def validate(value: object):
         try:
@@ -63,9 +85,12 @@ def build_task(
 
     return TaskContract(
         purpose="feedback_response",
-        contract_version=1 if repair else 4,
-        trusted_instructions=REPAIR_INSTRUCTIONS if repair else RESPONSE_INSTRUCTIONS,
+        contract_version=2 if repair else 5,
+        trusted_instructions=(REPAIR_INSTRUCTIONS if repair else RESPONSE_INSTRUCTIONS)
+        + "\n\n"
+        + EVIDENCE_INSTRUCTIONS,
         untrusted_data=data,
         capability=Capability.WRITE,
         validator=validate,
+        read_only_evidence=read_only,
     )

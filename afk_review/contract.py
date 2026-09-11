@@ -6,12 +6,8 @@ import re
 import subprocess
 from pathlib import Path
 
-# A split Review invocation retains the full Validation logs both in structured
-# task data and in Pi's rendered base64 task prompt. A JSON control character can
-# expand to a six-byte escape in both representations before base64 adds its own
-# 4/3 expansion. Two supported 25 MiB logs therefore require about 700 MiB plus
-# the task's bounded diff and metadata.
-_MAX_INVOCATION_BYTES = 1024 * 1024 * 1024
+# Current tasks reference large evidence. The retained invocation stays bounded.
+_MAX_INVOCATION_BYTES = 1024 * 1024
 
 REVIEW_AUDIT = {
     "completed": True,
@@ -141,7 +137,7 @@ def _validate_split_invocation_lens(
         or hashlib.sha256(raw).hexdigest() != invocation_hash
         or not isinstance(invocation, dict)
         or invocation.get("purpose") != "review"
-        or version not in {8, 9}
+        or version not in {8, 9, 10, 11}
         or invocation.get("requested_capability") != "READ_ONLY"
         or not isinstance(prompt, dict)
         or prompt.get("purpose") != "review"
@@ -204,7 +200,7 @@ def validate_invocation_receipts(
     complete = output.get("outcome") == "completed"
     if (
         not isinstance(invocations, list)
-        or not invocations
+        or (complete and not invocations)
         or len(invocations) > len(expected_lenses)
         or (complete and len(invocations) != len(expected_lenses))
     ):

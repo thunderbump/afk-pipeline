@@ -875,6 +875,9 @@ class CoordinatorCliTest(unittest.TestCase):
         assignment_path, request_path = self.prepare_run(
             max_responses=0, full_review=True
         )
+        request = json.loads(request_path.read_text())
+        request["review_mode"] = "split"
+        self.write_json(request_path, request)
         assignment = json.loads(assignment_path.read_text())
         assignment.pop("command")
         assignment["worker"] = "inference"
@@ -904,6 +907,26 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "assignment.json").read_text()
         )["work_base"]
         self.write_json(preparation_path, preparation)
+        from afk_metrics.__main__ import _human
+        from afk_metrics.report import build_report
+
+        report = build_report([prepared])
+        measured = report["runs"][0]
+        self.assertEqual(measured["integrity"]["status"], "verified")
+        reviewers = [
+            item
+            for item in measured["inference"]["invocations"]
+            if item.get("ownership", {}).get("kind") == "component_reviewer"
+        ]
+        self.assertEqual(
+            {item["ownership"]["lens"] for item in reviewers},
+            {"behavior", "design", "standards"},
+        )
+        self.assertEqual(measured["review_stages"][0]["mode"], "split")
+        self.assertIsNotNone(measured["review_stages"][0]["elapsed"]["seconds"])
+        rendered = _human(report)
+        self.assertIn("/ behavior", rendered)
+        self.assertIn("wall", rendered)
         bundle = self.root / "bundle"
         export_run(prepared, bundle, schema_version=3)
         publication = build_publication(
@@ -1614,8 +1637,8 @@ class CoordinatorCliTest(unittest.TestCase):
             assessment["prompt"]["untrusted_task_data"]["reviewed_diff"],
             repair.read_text(),
         )
-        self.assertEqual(receipt["task_contract_version"], 7)
-        self.assertEqual(assessment["task_contract_version"], 5)
+        self.assertEqual(receipt["task_contract_version"], 11)
+        self.assertEqual(assessment["task_contract_version"], 6)
         for invocation in (receipt, assessment):
             instructions = invocation["prompt"]["trusted_task_instructions"]
             self.assertIn("A runtime failure is not required", instructions)
@@ -1728,7 +1751,7 @@ class CoordinatorCliTest(unittest.TestCase):
             (run / "04-review/inference/invocation.json").read_text()
         )
         data = invocation["prompt"]["untrusted_task_data"]
-        self.assertEqual(invocation["task_contract_version"], 7)
+        self.assertEqual(invocation["task_contract_version"], 11)
         self.assertLess(len(json.dumps(data).encode()), 15000)
         context = data["work_context"]
         full = Path(context["files"]["work_diff"]["path"])
