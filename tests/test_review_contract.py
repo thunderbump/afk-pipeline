@@ -99,7 +99,7 @@ class ReviewContractTest(unittest.TestCase):
                         {
                             "outcome": "succeeded",
                             "protocol": {"status": "accepted"},
-                            "terminal_response": review,
+                            "terminal_response": json.dumps(review),
                         }
                     )
                 )
@@ -137,6 +137,56 @@ class ReviewContractTest(unittest.TestCase):
                 validate_output_projection(
                     output, Path("."), "unused", review_directory=directory
                 )
+
+    def test_receipt_binding_decodes_json_text_and_allows_failed_split_prefix(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            invocations = []
+            cases = (
+                ("behavior", "succeeded", self.review()),
+                ("design", "timed_out", None),
+            )
+            for lens, outcome, review in cases:
+                inference = directory / "reviewers" / lens / "inference"
+                inference.mkdir(parents=True)
+                receipt = {
+                    "outcome": outcome,
+                    "protocol": {
+                        "status": "accepted" if outcome == "succeeded" else "timed_out"
+                    },
+                    "terminal_response": (
+                        json.dumps(review, separators=(",", ":"))
+                        if review is not None
+                        else None
+                    ),
+                }
+                (inference / "receipt.json").write_text(json.dumps(receipt))
+                invocations.append({"lens": lens, "outcome": outcome, "review": review})
+            output = {
+                "outcome": "timed_out",
+                "review_mode": "split",
+                "review_invocations": invocations,
+            }
+
+            from afk_review.contract import validate_invocation_receipts
+
+            validate_invocation_receipts(output, directory)
+            behavior_receipt = directory / "reviewers/behavior/inference/receipt.json"
+            receipt = json.loads(behavior_receipt.read_text())
+            receipt["terminal_response"] = self.review()
+            behavior_receipt.write_text(json.dumps(receipt))
+            with self.assertRaisesRegex(ValueError, "receipt disagrees"):
+                validate_invocation_receipts(output, directory)
+            receipt["terminal_response"] = json.dumps(
+                self.review(), separators=(",", ":")
+            )
+            behavior_receipt.write_text(json.dumps(receipt))
+            invocations[0]["review"] = {
+                **self.review(),
+                "summary": "Not the accepted response.",
+            }
+            with self.assertRaisesRegex(ValueError, "receipt disagrees"):
+                validate_invocation_receipts(output, directory)
 
     def test_rejects_missing_extra_or_malformed_audit(self):
         cases = {

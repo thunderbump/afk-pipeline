@@ -98,7 +98,13 @@ def validate_invocation_receipts(
     review_directory: Path,
     reader=None,
 ) -> None:
-    """Bind projected invocation Reviews to retained accepted receipts."""
+    """Bind every started invocation projection to its retained receipt.
+
+    Review's task contract accepts JSON text and projects the decoded object.
+    A failed split legitimately contains only the started lens prefix; absent
+    later lenses remain expected-but-unstarted evidence rather than malformed
+    invocation records.
+    """
     mode = output.get("review_mode")
     if mode not in {"combined", "split"}:
         return
@@ -106,7 +112,13 @@ def validate_invocation_receipts(
         ["combined"] if mode == "combined" else ["behavior", "design", "standards"]
     )
     invocations = output.get("review_invocations")
-    if not isinstance(invocations, list) or len(invocations) != len(expected_lenses):
+    complete = output.get("outcome") == "completed"
+    if (
+        not isinstance(invocations, list)
+        or not invocations
+        or len(invocations) > len(expected_lenses)
+        or (complete and len(invocations) != len(expected_lenses))
+    ):
         raise ValueError("Review invocation projection is malformed")
     for invocation, lens in zip(invocations, expected_lenses):
         if not isinstance(invocation, dict) or invocation.get("lens") != lens:
@@ -122,12 +134,30 @@ def validate_invocation_receipts(
             if reader is not None
             else json.loads(receipt_path.read_text())
         )
+        succeeded = invocation.get("outcome") == "succeeded"
+        terminal = (
+            receipt.get("terminal_response") if isinstance(receipt, dict) else None
+        )
+        try:
+            decoded_terminal = (
+                json.loads(terminal) if isinstance(terminal, str) else None
+            )
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                "Review invocation receipt disagrees with projection"
+            ) from error
         if (
             not isinstance(receipt, dict)
-            or receipt.get("outcome") != "succeeded"
-            or not isinstance(receipt.get("protocol"), dict)
-            or receipt["protocol"].get("status") != "accepted"
-            or receipt.get("terminal_response") != invocation.get("review")
+            or receipt.get("outcome") != invocation.get("outcome")
+            or (
+                succeeded
+                and (
+                    not isinstance(receipt.get("protocol"), dict)
+                    or receipt["protocol"].get("status") != "accepted"
+                    or decoded_terminal != invocation.get("review")
+                )
+            )
+            or (not succeeded and invocation.get("review") is not None)
         ):
             raise ValueError("Review invocation receipt disagrees with projection")
 

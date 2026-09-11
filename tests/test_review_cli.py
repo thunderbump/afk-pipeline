@@ -14,6 +14,7 @@ from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests" / "fixture_review_agent.py"
+ASSESSMENT_FIXTURE = ROOT / "tests" / "fixture_assessment_agent.py"
 
 
 class PublicReviewCliTest(unittest.TestCase):
@@ -224,6 +225,42 @@ class ReviewCliTest(unittest.TestCase):
             self.assertIn(f"isolated {lens} lens", prompt)
             for other in {"behavior", "design", "standards"} - {lens}:
                 self.assertNotIn(f"{other.capitalize()} lens:", prompt)
+
+        # Exercise the public consumer seam with the fixture-generated receipts,
+        # rather than validating only a hand-built descriptive matrix.
+        assessment_input = self.root / "assessment.json"
+        self.write_json(
+            assessment_input,
+            {
+                "schema_version": 1,
+                "workspace": str(self.workspace),
+                "review_directory": str(result),
+                "timeout_seconds": 5,
+            },
+        )
+        assessment_result = self.root / "assessment"
+        install_pi(self.root / "bin", ASSESSMENT_FIXTURE, "no-findings")
+        assessed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "afk_assess",
+                str(assessment_input),
+                str(assessment_result),
+            ],
+            cwd=ROOT,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(assessed.returncode, 0, assessed.stderr)
+        self.assertEqual(
+            json.loads((assessment_result / "output.json").read_text())["assessment"][
+                "decisions"
+            ],
+            [],
+        )
 
     def test_complete_validation_evidence_is_embedded_for_read_only_review(self):
         result, completed = self.run_review("validation-evidence")

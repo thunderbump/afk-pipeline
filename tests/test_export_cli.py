@@ -461,20 +461,65 @@ class ExportCliTests(unittest.TestCase):
                 )
             )
             review_path = coordinator / "04-review" / "output.json"
+            review_input_path = review_path.parent / "input.json"
+            review_input = json.loads(review_input_path.read_text())
+            review_input["review_mode"] = "split"
+            review_input_path.write_text(json.dumps(review_input))
+            accepted_review = {
+                "summary": "Behavior fixture completed with no findings.",
+                "findings": [],
+                "audit": {
+                    "completed": True,
+                    "scopes": [
+                        "objective",
+                        "acceptance_criteria",
+                        "reviewed_diff",
+                        "supplied_evidence",
+                    ],
+                },
+            }
             review_path.write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
                         "outcome": "failed",
-                        "process": {"exit_code": 1, "signal": None},
                         "agent": None,
+                        "review": None,
+                        "review_mode": "split",
+                        "review_invocations": [
+                            {
+                                "lens": "behavior",
+                                "outcome": "succeeded",
+                                "review": accepted_review,
+                            },
+                            {
+                                "lens": "design",
+                                "outcome": "adapter_failed",
+                                "review": None,
+                            },
+                        ],
+                        "finding_provenance": [],
                         "artifacts": {"events": "events.jsonl", "stderr": "stderr.log"},
                     }
                 )
             )
-            inference = review_path.parent / "inference"
-            self.add_inference_receipt(inference)
-            receipt_path = inference / "receipt.json"
+            behavior = review_path.parent / "reviewers/behavior/inference"
+            behavior.parent.mkdir(parents=True)
+            self.add_inference_receipt(behavior)
+            response_path = behavior / "attempts/1/response.json"
+            terminal_text = json.dumps(accepted_review)
+            response_path.write_text(json.dumps(terminal_text))
+            receipt_path = behavior / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["terminal_response"] = terminal_text
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+            design = review_path.parent / "reviewers/design/inference"
+            design.parent.mkdir(parents=True)
+            self.add_inference_receipt(design)
+            receipt_path = design / "receipt.json"
             receipt = json.loads(receipt_path.read_text())
             receipt["attempts"][0].pop("validation")
             receipt["attempts"][0]["protocol"] = {"status": "adapter_failed"}
@@ -500,8 +545,13 @@ class ExportCliTests(unittest.TestCase):
             failed_output = record["history"][-1]["output"]
             self.assertIsNone(failed_output["agent"])
             self.assertEqual(failed_output["details"], {"kind": "review"})
-            session = record["inference_sessions"][0]
-            self.assertEqual(session["scope"], "inference:review")
+            sessions = {
+                Path(session["directory"]).parts[-2]: session
+                for session in record["inference_sessions"]
+            }
+            self.assertEqual(set(sessions), {"behavior", "design"})
+            self.assertTrue(sessions["behavior"]["attempts"][0]["terminal"])
+            session = sessions["design"]
             self.assertEqual(
                 session["attempts"][0]["protocol_status"], "adapter_failed"
             )
@@ -510,12 +560,14 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(session["validation_status"], "not_started")
             artifact_sources = {item["source"]["path"] for item in record["artifacts"]}
             self.assertIn(
-                "coordinator/04-review/inference/prompt.json", artifact_sources
-            )
-            self.assertIn(
-                "coordinator/04-review/inference/attempts/1/response.json",
+                "coordinator/04-review/reviewers/behavior/inference/prompt.json",
                 artifact_sources,
             )
+            self.assertIn(
+                "coordinator/04-review/reviewers/design/inference/attempts/1/response.json",
+                artifact_sources,
+            )
+            self.assertFalse(any("standards" in path for path in artifact_sources))
 
     def test_rejects_null_agent_for_successful_component(self):
         with tempfile.TemporaryDirectory() as temporary:
