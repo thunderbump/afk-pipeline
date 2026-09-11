@@ -1543,22 +1543,10 @@ def artifact_candidates(observed):
             # that receipt-bound evidence in the normalized checkpoint.
             invocation_names = [(None, "inference/receipt.json")]
             if entry["component"] == "review":
-                candidate_input = locate_invocation_file(
-                    observed["coordinator"],
-                    observed.get("continuations", []),
-                    entry,
-                    "input.json",
-                )
-                try:
-                    review_mode = read_json(candidate_input).get(
-                        "review_mode", "combined"
-                    )
-                except FileNotFoundError:
-                    # Pre-contract synthetic/legacy evidence had no retained
-                    # component input and therefore can only denote combined.
-                    review_mode = "combined"
-                except (OSError, ValueError, json.JSONDecodeError) as error:
-                    raise ExportError("invalid retained Review input") from error
+                # Review topology is frozen by the Coordinator request before
+                # allocation. In particular, abandoned work need not have a
+                # component input.json from which topology could be inferred.
+                review_mode = observed["request"].get("review_mode", "combined")
                 if review_mode not in {"combined", "split"}:
                     raise ExportError("invalid retained Review mode")
                 if review_mode == "split":

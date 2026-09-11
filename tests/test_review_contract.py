@@ -196,6 +196,30 @@ class ReviewContractTest(unittest.TestCase):
             from afk_review.contract import validate_invocation_receipts
 
             validate_invocation_receipts(output, directory)
+
+            # An authenticated receipt after the first unsuccessful lens is
+            # still impossible for the sequential executor and must not make a
+            # tampered failed projection exportable.
+            inference = directory / "reviewers/standards/inference"
+            inference.mkdir(parents=True)
+            invocation_hash = self.write_split_invocation(inference, "standards")
+            (inference / "receipt.json").write_text(
+                json.dumps(
+                    {
+                        "outcome": "succeeded",
+                        "protocol": {"status": "accepted"},
+                        "terminal_response": json.dumps(self.review()),
+                        "hashes": {"invocation_sha256": invocation_hash},
+                    }
+                )
+            )
+            invocations.append(
+                {"lens": "standards", "outcome": "succeeded", "review": self.review()}
+            )
+            with self.assertRaisesRegex(ValueError, "projection is malformed"):
+                validate_invocation_receipts(output, directory)
+            invocations.pop()
+
             behavior_receipt = directory / "reviewers/behavior/inference/receipt.json"
             receipt = json.loads(behavior_receipt.read_text())
             receipt["terminal_response"] = self.review()

@@ -486,6 +486,39 @@ class ExportCliTests(unittest.TestCase):
             self.assertFalse(destination.exists())
             self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
 
+    def test_export_checkpoint_uses_frozen_split_mode_without_abandoned_input(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coordinator = root / "coordinator"
+            coordinator.mkdir()
+            observed = {
+                "run_root": root,
+                "coordinator": coordinator,
+                "request": {"review_mode": "split"},
+                "state": {
+                    "history": [
+                        {
+                            "sequence": 1,
+                            "component": "review",
+                            "directory": "01-review",
+                            "outcome": "abandoned",
+                        }
+                    ]
+                },
+            }
+
+            afk_export.artifact_candidates(observed)
+
+            self.assertEqual(
+                observed["_metrics_inference_states"],
+                {
+                    "planner/inference": "absent",
+                    "coordinator/01-review/reviewers/behavior/inference": "absent",
+                    "coordinator/01-review/reviewers/design/inference": "absent",
+                    "coordinator/01-review/reviewers/standards/inference": "absent",
+                },
+            )
+
     def test_exports_a_sealed_failed_run(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

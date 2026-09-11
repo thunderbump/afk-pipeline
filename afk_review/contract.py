@@ -204,8 +204,13 @@ def validate_invocation_receipts(
         or (complete and len(invocations) != len(expected_lenses))
     ):
         raise ValueError("Review invocation projection is malformed")
+    unsuccessful_seen = False
     for invocation, lens in zip(invocations, expected_lenses):
-        if not isinstance(invocation, dict) or invocation.get("lens") != lens:
+        if (
+            not isinstance(invocation, dict)
+            or invocation.get("lens") != lens
+            or unsuccessful_seen
+        ):
             raise ValueError("Review invocation projection is malformed")
         relative = (
             Path("inference")
@@ -221,6 +226,7 @@ def validate_invocation_receipts(
         if mode == "split" and isinstance(receipt, dict):
             _validate_split_invocation_lens(receipt, receipt_path.parent, lens, reader)
         succeeded = invocation.get("outcome") == "succeeded"
+        unsuccessful_seen = not succeeded
         terminal = (
             receipt.get("terminal_response") if isinstance(receipt, dict) else None
         )

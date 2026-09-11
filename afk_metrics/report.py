@@ -1495,18 +1495,10 @@ def summarize_source(
     for entry in state["history"]:
         component = entry["component"]
         if component == "review":
-            input_path = locate_invocation_file(
-                coordinator, continuation_roots, entry, "input.json"
-            )
-            try:
-                review_input = json.loads(input_path.read_text())
-                review_mode = review_input.get("review_mode", "combined")
-            except FileNotFoundError:
-                # Historical synthetic evidence without a component request
-                # predates split Review and is necessarily combined.
-                review_mode = "combined"
-            except (OSError, json.JSONDecodeError) as error:
-                raise ValueError("invalid retained Review input") from error
+            # The Coordinator request freezes topology before the component is
+            # allocated. An abandoned Review may never create input.json, so
+            # component-local evidence cannot be the mode discriminator.
+            review_mode = observed["request"].get("review_mode", "combined")
             if review_mode not in {"combined", "split"}:
                 raise ValueError("invalid retained Review mode")
             if review_mode == "split":

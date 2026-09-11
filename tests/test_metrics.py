@@ -1075,13 +1075,11 @@ class MetricsReportTests(unittest.TestCase):
             },
         )
 
-    def test_abandoned_split_review_uses_frozen_input_for_three_allowances(self):
+    def test_abandoned_split_review_uses_frozen_request_without_component_input(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             coordinator = root / "coordinator"
-            review = coordinator / "01-review"
-            review.mkdir(parents=True)
-            (review / "input.json").write_text(json.dumps({"review_mode": "split"}))
+            coordinator.mkdir()
             observed = {
                 "identity": {"run_id": "run-1"},
                 "assignment": {"objective": "objective"},
@@ -1100,7 +1098,7 @@ class MetricsReportTests(unittest.TestCase):
                 "preparation": {"timestamps": {}, "repository": {}},
                 "terminal_directory": coordinator,
                 "output": {"outcome": "failed"},
-                "request": {"validation": {}},
+                "request": {"validation": {}, "review_mode": "split"},
                 "bead_id": None,
             }
             with mock.patch("afk_metrics.report.load_source", return_value=observed):
