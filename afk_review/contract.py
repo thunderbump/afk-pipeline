@@ -105,12 +105,42 @@ def validate_invocation_receipts(
     later lenses remain expected-but-unstarted evidence rather than malformed
     invocation records.
     """
-    mode = output.get("review_mode")
+    mode = output.get("review_mode", "combined")
     if mode not in {"combined", "split"}:
         return
     expected_lenses = (
         ["combined"] if mode == "combined" else ["behavior", "design", "standards"]
     )
+    if "review_mode" not in output:
+        # Before invocation projections were added, a combined Review's root
+        # receipt was still the authority for the copied aggregate.
+        receipt_path = review_directory / "inference" / "receipt.json"
+        receipt = (
+            reader.json(receipt_path)
+            if reader is not None
+            else json.loads(receipt_path.read_text())
+        )
+        terminal = (
+            receipt.get("terminal_response") if isinstance(receipt, dict) else None
+        )
+        try:
+            decoded_terminal = (
+                json.loads(terminal) if isinstance(terminal, str) else None
+            )
+        except json.JSONDecodeError as error:
+            raise ValueError(
+                "Review invocation receipt disagrees with projection"
+            ) from error
+        if (
+            output.get("outcome") != "completed"
+            or not isinstance(receipt, dict)
+            or receipt.get("outcome") != "succeeded"
+            or not isinstance(receipt.get("protocol"), dict)
+            or receipt["protocol"].get("status") != "accepted"
+            or decoded_terminal != output.get("review")
+        ):
+            raise ValueError("Review invocation receipt disagrees with projection")
+        return
     invocations = output.get("review_invocations")
     complete = output.get("outcome") == "completed"
     if (
@@ -183,6 +213,19 @@ def validate_output_projection(
         output.get("review"), workspace, reviewed_head, related_work_ids
     )
     if "review_mode" not in output:
+        if review_directory is not None:
+            receipt_path = review_directory / "inference" / "receipt.json"
+            if receipt_path.is_file():
+                receipt = (
+                    reader.json(receipt_path)
+                    if reader is not None
+                    else json.loads(receipt_path.read_text())
+                )
+                # Pre-projection Review receipts use JSON text as the terminal
+                # response. Older synthetic/non-Review evidence can have no
+                # receipt or an unrelated structured terminal value.
+                if isinstance(receipt.get("terminal_response"), str):
+                    validate_invocation_receipts(output, review_directory, reader)
         return aggregate
     mode = output.get("review_mode")
     invocations = output.get("review_invocations")

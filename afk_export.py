@@ -2824,19 +2824,28 @@ def normalize_run(observed, include_evidence=True):
 
                 reader = EvidenceReader((observed["coordinator"],))
                 try:
-                    configured_mode = observed["request"].get("review_mode")
-                    if configured_mode is not None:
-                        review_input = validate_review_input(
-                            reader.json(directory / "input.json")
+                    configured = "review_mode" in observed["request"]
+                    receipt_path = directory / "inference" / "receipt.json"
+                    legacy_receipt = False
+                    if not configured and receipt_path.is_file():
+                        retained_receipt = reader.json(receipt_path)
+                        legacy_receipt = isinstance(
+                            retained_receipt.get("terminal_response"), str
                         )
-                        if (
-                            review_input.get("review_mode") != configured_mode
-                            or output.get("review_mode") != configured_mode
-                        ):
-                            raise ValueError(
-                                "Review mode disagrees with frozen Coordinator request"
-                            )
-                    if output["outcome"] == "completed" and configured_mode is not None:
+                    configured_mode = observed["request"].get("review_mode", "combined")
+                    review_input = reader.json(directory / "input.json")
+                    if configured:
+                        review_input = validate_review_input(review_input)
+                    if (configured or legacy_receipt) and (
+                        review_input.get("review_mode", "combined") != configured_mode
+                        or output.get("review_mode", "combined") != configured_mode
+                    ):
+                        raise ValueError(
+                            "Review mode disagrees with frozen Coordinator request"
+                        )
+                    if output["outcome"] == "completed" and (
+                        configured or legacy_receipt
+                    ):
                         change_source = entry["input_from"].get("change")
                         change_directory = observed["coordinator"] / str(change_source)
                         if (
@@ -2864,7 +2873,7 @@ def normalize_run(observed, include_evidence=True):
                             directory,
                             reader,
                         )
-                    else:
+                    elif configured or legacy_receipt:
                         validate_invocation_receipts(output, directory, reader)
                 except (
                     EvidenceUnavailable,

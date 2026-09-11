@@ -428,7 +428,7 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertFalse(blocked.exists())
 
-    def test_export_rejects_tampered_configured_review_aggregate(self):
+    def test_export_authenticates_pre_field_combined_review_aggregate(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
@@ -440,13 +440,8 @@ class ExportCliTests(unittest.TestCase):
                 "audit": REVIEW_AUDIT,
             }
 
-            for path in (
-                source / "coordinator-request.json",
-                coordinator / "input.json",
-            ):
-                request = json.loads(path.read_text())
-                request["review_mode"] = "combined"
-                path.write_text(json.dumps(request))
+            # Historical requests and outputs omit review_mode; their effective
+            # mode is combined and the root receipt remains authoritative.
             (review_directory / "input.json").write_text(
                 json.dumps(
                     {
@@ -455,7 +450,6 @@ class ExportCliTests(unittest.TestCase):
                         "change_directory": str(coordinator / "03-change"),
                         "validation_directory": str(coordinator / "02-validation"),
                         "timeout_seconds": 60,
-                        "review_mode": "combined",
                     }
                 )
             )
@@ -465,25 +459,7 @@ class ExportCliTests(unittest.TestCase):
             change_path.write_text(json.dumps(change))
             output_path = review_directory / "output.json"
             output = json.loads(output_path.read_text())
-            output.update(
-                review=review,
-                review_mode="combined",
-                review_invocations=[
-                    {
-                        "lens": "combined",
-                        "outcome": "succeeded",
-                        "process": {"exit_code": 0, "signal": None},
-                        "agent": {"status": "completed"},
-                        "review": review,
-                        "artifacts": {
-                            "events": "events.jsonl",
-                            "stderr": "stderr.log",
-                            "inference": "inference",
-                        },
-                    }
-                ],
-                finding_provenance=[],
-            )
+            output.update(review=review)
             output_path.write_text(json.dumps(output))
             inference = review_directory / "inference"
             self.add_inference_receipt(inference)

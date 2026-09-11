@@ -91,6 +91,7 @@ def main() -> int:
     invocation_records = []
     results = []
     observation_error = None
+    evidence_error = None
     after = before
 
     for lens in lenses:
@@ -167,13 +168,32 @@ def main() -> int:
         except (OSError, subprocess.SubprocessError) as error:
             after = None
             observation_error = str(error)
-        if inference_result.outcome != "succeeded" or after != before:
+        if previous is not None:
+            reader = EvidenceReader((result_directory,))
+            try:
+                validate_artifacts(
+                    result_directory,
+                    review_input["work_context"],
+                    evidence["work_context"],
+                    reader,
+                    evidence["change"],
+                )
+            except (OSError, ValueError, EvidenceUnavailable) as error:
+                evidence_error = str(error)
+            finally:
+                reader.close()
+        if (
+            inference_result.outcome != "succeeded"
+            or after != before
+            or evidence_error is not None
+        ):
             break
 
     progress("observing repository after review")
     unchanged = None if after is None else before == after
-    evidence_error = None
-    if previous is not None:
+    # Recheck once after the final invocation so the sealed aggregate remains
+    # bound to the same context that every individual lens was allowed to read.
+    if previous is not None and evidence_error is None:
         reader = EvidenceReader((result_directory,))
         try:
             validate_artifacts(
