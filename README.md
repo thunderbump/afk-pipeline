@@ -519,6 +519,7 @@ schema:
     "example": {
       "repository": "/absolute/path/to/example-repository",
       "base_ref": "main",
+      "review": {"mode": "combined"},
       "validation": {
         "command": ["./scripts/validate"],
         "evidence": "Ruff checks and the complete repository unit-test suite.",
@@ -587,6 +588,15 @@ placeholders, commands without the placeholder, and commands that use the
 Assignment path as their executable are rejected before any run destination is
 created. This lets a configurable worker read the frozen Bead objective while
 keeping Beads lookup in the trusted preparer.
+
+Each project may include `"review":{"mode":"combined"}` or
+`"review":{"mode":"split"}`. Omitting it defaults to `combined`. Run preparation
+validates the object before allocating a Run and writes the effective mode into
+the frozen Coordinator request; repairs, resumes, and exhausted continuations
+therefore retain that mode even if host configuration later changes. Split mode
+can consume three Review inference budgets (each with the configured per-agent
+timeout) where combined mode consumes one. Enabling it is a caller-owned project
+configuration and deployment decision.
 
 Each project validation mapping also retains bounded `evidence` text describing
 what its exact repository-owned command proves. Acceptance Routing uses only the
@@ -946,6 +956,7 @@ Review input is structured JSON:
   "workspace": "/absolute/path/to/prepared/checkout",
   "change_directory": "/absolute/path/to/completed/committed-change",
   "validation_directory": "/absolute/path/to/passed/validation",
+  "review_mode": "combined",
   "timeout_seconds": 900
 }
 ```
@@ -1026,22 +1037,46 @@ reverses a previous judgment. New rejection rules must cite a governing contract
 invariant and preserve supported positive examples; recurrence alone does not
 expand the objective or justify another module's calculation responsibilities.
 
-Review retains `input.json`, `diff.patch`, raw `events.jsonl`, raw `stderr.log`,
-the single read-only inference invocation receipt, and an atomically sealed
-`output.json`. The output also records SHA-256 content identities for the
-Validation input, output, stdout, and stderr evidence supplied to Review, so a
-later role can reject replaced evidence. Review composes five fixed,
-language-neutral instruction packets in this order: common, Behavior, Design,
-Standards, and output contract. The packet constants, declared tuple, pure
-composition function, and exact composed instructions are directly inspectable
-in `afk_review.task`; the coordinator supplies data but no review-policy prose.
-All three lenses run in that one inference call. A completed response contains a
+Review retains `input.json`, `diff.patch`, and an atomically sealed
+`output.json`. In `combined` mode it also retains the existing raw
+`events.jsonl`, `stderr.log`, and one read-only inference receipt. In `split`
+mode it runs Behavior, Design, and Standards sequentially in that fixed order
+and retains each call under `reviewers/<lens>/` with its own raw logs and
+receipt. Every call receives the same objective, candidate, Validation,
+related-work, previous-cycle, and complete-work evidence; no earlier reviewer's
+response is included in a later prompt. All calls use the Run-frozen inference
+policy with `READ_ONLY` capability.
+
+Only after all split calls succeed and repository/evidence checks pass does
+Review concatenate findings in lens and source order, preserving empty results,
+duplicates, and one ordinary finding per observation. The deterministic summary
+labels each lens. `review_invocations` retains each validated raw Review and
+`finding_provenance` maps every aggregate `finding_index` to its lens and
+`source_finding_index`; downstream evidence readers reject missing, duplicate,
+reordered, or tampered mappings. Assessment still consumes one ordinary
+aggregate Review and keeps its existing semantics. The output also records
+SHA-256 identities for Validation evidence.
+
+Review composes five fixed language-neutral packets for combined mode: common,
+Behavior, Design, Standards, and output contract. A split call composes common,
+its one lens, and the same output contract. The packet constants and composition
+function are inspectable in `afk_review.task`; Coordinator supplies data but no
+review-policy prose. A completed aggregate contains a
 summary, a possibly empty findings array, and exactly this ordered audit
 declaration:
 
 ```json
 {"completed":true,"scopes":["objective","acceptance_criteria","reviewed_diff","supplied_evidence"]}
 ```
+
+Standalone and historical Review requests with no `review_mode` mean
+`combined`; retained evidence is not rewritten to add a default. On split
+failure, timeout, interruption, or workspace mutation, Review stops before the
+next lens, retains every created receipt/log/raw result, and publishes neither a
+clean aggregate nor Assessment input. Coordinator's existing whole-stage
+abandonment retry uses a fresh Review directory and reruns all lenses; partial
+lens results are never reused. Sealed failures and exhausted continuations keep
+the existing terminal policy.
 
 The declaration records that the reviewer performed those inspection scopes; it
 is not mechanical proof that every possible defect was found. Missing, extra,

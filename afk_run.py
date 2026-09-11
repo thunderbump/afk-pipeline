@@ -330,6 +330,7 @@ def run(bead_id, config_path):
             "schema_version": 1,
             "assignment_path": str(assignment_path),
             "related_work": related_work,
+            "review_mode": project.get("review", {}).get("mode", "combined"),
             "validation": {
                 "command": project["validation"]["command"],
                 "timeout_seconds": project["validation"]["timeout_seconds"],
@@ -1040,12 +1041,28 @@ def validate_publication(value):
 def validate_project(slug, value):
     if not isinstance(slug, str) or not SAFE_ID.fullmatch(slug):
         raise PreparationError("configuration contains an invalid project slug")
-    if not isinstance(value, dict) or set(value) != {
-        "repository",
-        "base_ref",
-        "validation",
-    }:
+    if not isinstance(value, dict) or set(value) not in (
+        {
+            "repository",
+            "base_ref",
+            "validation",
+        },
+        {
+            "repository",
+            "base_ref",
+            "validation",
+            "review",
+        },
+    ):
         raise PreparationError(f"configuration project:{slug} is malformed")
+    if "review" in value:
+        review = value["review"]
+        if (
+            not isinstance(review, dict)
+            or set(review) != {"mode"}
+            or review.get("mode") not in {"combined", "split"}
+        ):
+            raise PreparationError(f"configuration project:{slug} review is malformed")
     value["repository"] = absolute_path(
         value["repository"], f"project:{slug} repository"
     )

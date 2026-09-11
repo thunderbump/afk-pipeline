@@ -1493,6 +1493,50 @@ def summarize_source(
         )
     inference_components = {"attempt", "review", "assessment", "response"}
     for entry in state["history"]:
+        component = entry["component"]
+        if component == "review":
+            output_path = locate_invocation_file(
+                coordinator, continuation_roots, entry, "output.json"
+            )
+            try:
+                review_output = json.loads(output_path.read_text())
+            except (OSError, json.JSONDecodeError):
+                review_output = {}
+            if review_output.get("review_mode") == "split":
+                for lens in ("behavior", "design", "standards"):
+                    receipt_path = locate_invocation_file(
+                        coordinator,
+                        continuation_roots,
+                        entry,
+                        f"reviewers/{lens}/inference/receipt.json",
+                    )
+                    relative = receipt_path.parent.relative_to(root).as_posix()
+                    aliases = set()
+                    for base in (coordinator, *continuation_roots):
+                        candidate = (
+                            base / entry["directory"] / "reviewers" / lens / "inference"
+                        )
+                        if candidate.exists() or candidate.is_symlink():
+                            aliases.add(candidate.relative_to(root).as_posix())
+                    all_inference_relatives.update(aliases | {relative})
+                    stage_aliases_by_relative.setdefault(relative, set()).update(
+                        aliases
+                    )
+                    expected_inference.append(
+                        (
+                            relative,
+                            "review",
+                            {
+                                "kind": "component_reviewer",
+                                "sequence": entry.get("sequence"),
+                                "component": "review",
+                                "lens": lens,
+                            },
+                        )
+                    )
+                    if entry.get("outcome") == "abandoned":
+                        abandoned_candidates.add(relative)
+                continue
         # Cumulative continuations can retain the same stage under more than one
         # root. Those paths are aliases of one authenticated owner, not orphaned
         # stages and not additional expected invocations.
@@ -1518,7 +1562,6 @@ def summarize_source(
         # changing the key to its target.
         relative = inference_path.relative_to(root).as_posix()
         all_inference_relatives.add(relative)
-        component = entry["component"]
         if component in inference_components and not verified_no_action_response(entry):
             stage_aliases_by_relative.setdefault(relative, set()).update(entry_aliases)
             purpose = {

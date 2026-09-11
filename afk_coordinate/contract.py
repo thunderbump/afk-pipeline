@@ -57,6 +57,8 @@ def validate_request(value):
     }
     if isinstance(value, dict) and "related_work" in value:
         expected.add("related_work")
+    if isinstance(value, dict) and "review_mode" in value:
+        expected.add("review_mode")
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("coordinator input must use schema_version 1")
     if set(value) != expected:
@@ -79,6 +81,8 @@ def validate_request(value):
         raise ValueError("validation command must be a nonempty argv array")
     positive_integer(value["validation"]["timeout_seconds"], "validation timeout")
     positive_integer(value["agent_timeout_seconds"], "agent timeout")
+    if value.get("review_mode", "combined") not in {"combined", "split"}:
+        raise ValueError("review_mode must be combined or split")
     if "related_work" in value:
         validate_reference(value["related_work"])
     limit = value["max_responses"]

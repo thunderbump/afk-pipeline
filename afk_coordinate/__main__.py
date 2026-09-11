@@ -520,6 +520,7 @@ def review_input(request, assignment, state, run_directory):
         assignment["workspace"],
         request["agent_timeout_seconds"],
         related_work=request.get("related_work"),
+        **({"review_mode": request["review_mode"]} if "review_mode" in request else {}),
         **(
             {
                 "work_context": {

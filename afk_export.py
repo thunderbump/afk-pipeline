@@ -810,9 +810,16 @@ def load_continuation_lineage(
             if record["component"] not in inference_components:
                 continue
             for base in all_roots:
-                path = base / record["directory"] / "inference"
-                if path.exists() or path.is_symlink():
-                    retained_inference_paths.add(path)
+                component = base / record["directory"]
+                paths = [component / "inference"]
+                if record["component"] == "review":
+                    paths.extend(
+                        component / "reviewers" / lens / "inference"
+                        for lens in ("behavior", "design", "standards")
+                    )
+                for path in paths:
+                    if path.exists() or path.is_symlink():
+                        retained_inference_paths.add(path)
 
     allowances = [item.input["additional_responses"] for item in observed.sealed]
     if observed.active is not None:
@@ -874,9 +881,15 @@ def discover_component_inference(root, coordinator, continuation_directories):
     relatives = set()
     for base in (coordinator, *continuation_directories):
         for component in base.iterdir():
-            inference = component / "inference"
-            if inference.exists() or inference.is_symlink():
-                relatives.add(inference.relative_to(root).as_posix())
+            candidates = [component / "inference"]
+            reviewers = component / "reviewers"
+            if reviewers.is_dir():
+                candidates.extend(
+                    lens / "inference" for lens in reviewers.iterdir() if lens.is_dir()
+                )
+            for inference in candidates:
+                if inference.exists() or inference.is_symlink():
+                    relatives.add(inference.relative_to(root).as_posix())
     return relatives
 
 
@@ -1528,31 +1541,51 @@ def artifact_candidates(observed):
             # admissible component output, but it can still have a sealed
             # inference invocation consumed by the metrics report. Include
             # that receipt-bound evidence in the normalized checkpoint.
-            evidence_path = locate_invocation_file(
-                observed["coordinator"],
-                observed.get("continuations", []),
-                entry,
-                "inference/receipt.json",
-            )
-            inference_relative = evidence_path.parent.relative_to(root).as_posix()
-            inference_purpose = {
-                "assessment": "finding_assessment",
-                "response": "feedback_response",
-            }.get(entry["component"], entry["component"])
-            evidence_state = checkpoint_inference(
-                inference_relative,
-                f"component:{entry['sequence']}:{entry['component']}",
-            )
-            if evidence_state == "sealed" or (
-                entry["outcome"] != "abandoned" and evidence_state == "unsealed"
-            ):
-                for item in receipt_bound_inference_artifacts(
-                    root,
-                    inference_relative,
-                    inference_purpose,
-                    None,
+            invocation_names = [(None, "inference/receipt.json")]
+            if entry["component"] == "review" and entry["outcome"] != "abandoned":
+                candidate_output = locate_invocation_file(
+                    observed["coordinator"],
+                    observed.get("continuations", []),
+                    entry,
+                    "output.json",
+                )
+                try:
+                    split = read_json(candidate_output).get("review_mode") == "split"
+                except (OSError, ValueError, json.JSONDecodeError):
+                    split = False
+                if split:
+                    invocation_names = [
+                        (lens, f"reviewers/{lens}/inference/receipt.json")
+                        for lens in ("behavior", "design", "standards")
+                    ]
+            for lens, invocation_name in invocation_names:
+                evidence_path = locate_invocation_file(
+                    observed["coordinator"],
+                    observed.get("continuations", []),
+                    entry,
+                    invocation_name,
+                )
+                inference_relative = evidence_path.parent.relative_to(root).as_posix()
+                inference_purpose = {
+                    "assessment": "finding_assessment",
+                    "response": "feedback_response",
+                }.get(entry["component"], entry["component"])
+                owner = f"component:{entry['sequence']}:{entry['component']}"
+                if lens is not None:
+                    owner += f":{lens}"
+                evidence_state = checkpoint_inference(inference_relative, owner)
+                if evidence_state == "sealed" or (
+                    entry["outcome"] != "abandoned"
+                    and evidence_state == "unsealed"
+                    and evidence_path.parent.exists()
                 ):
-                    add(**item)
+                    for item in receipt_bound_inference_artifacts(
+                        root,
+                        inference_relative,
+                        inference_purpose,
+                        None,
+                    ):
+                        add(**item)
             if entry["outcome"] == "abandoned":
                 continue
             output_path = locate_invocation_file(
@@ -2948,23 +2981,50 @@ def normalize_component_output(component, value, redactions):
     return result
 
 
+def normalize_review_value(review, redactions):
+    if not isinstance(review, dict) or not isinstance(review.get("findings"), list):
+        raise ExportError("invalid Review details")
+    try:
+        audit = validate_audit(review.get("audit"))
+    except (TypeError, ValueError) as error:
+        raise ExportError("invalid Review audit") from error
+    return {
+        "summary": bounded_text(review.get("summary"), redactions),
+        "findings": [
+            normalize_finding(item, redactions) for item in review["findings"]
+        ],
+        "audit": audit,
+    }
+
+
 def component_details(component, value, redactions):
     if component == "review":
         review = value.get("review")
-        if not isinstance(review, dict) or not isinstance(review.get("findings"), list):
-            raise ExportError("invalid Review details")
-        try:
-            audit = validate_audit(review.get("audit"))
-        except (TypeError, ValueError) as error:
-            raise ExportError("invalid Review audit") from error
-        return {
-            "kind": "review",
-            "summary": bounded_text(review.get("summary"), redactions),
-            "findings": [
-                normalize_finding(item, redactions) for item in review["findings"]
-            ],
-            "audit": audit,
-        }
+        details = {"kind": "review", **normalize_review_value(review, redactions)}
+        if "review_mode" in value:
+            mode = value.get("review_mode")
+            provenance = value.get("finding_provenance")
+            invocations = value.get("review_invocations")
+            if (
+                mode not in {"combined", "split"}
+                or not isinstance(provenance, list)
+                or not isinstance(invocations, list)
+            ):
+                raise ExportError("invalid Review invocation provenance")
+            details["mode"] = mode
+            details["finding_provenance"] = provenance
+            details["reviewer_invocations"] = [
+                {
+                    "lens": item.get("lens"),
+                    "outcome": item.get("outcome"),
+                    "review": normalize_review_value(item.get("review"), redactions),
+                }
+                for item in invocations
+                if isinstance(item, dict)
+            ]
+            if len(details["reviewer_invocations"]) != len(invocations):
+                raise ExportError("invalid Review invocation provenance")
+        return details
     if component == "assessment":
         assessment = value.get("assessment")
         if not isinstance(assessment, dict) or not isinstance(

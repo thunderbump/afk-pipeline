@@ -17,7 +17,7 @@ from afk_related_work import (
     validate_reference,
     validate_snapshot,
 )
-from afk_review.contract import validate_review
+from afk_review.contract import validate_output_projection
 from afk_runtime import (
     progress,
     repository_state,
@@ -203,7 +203,6 @@ def verify_subject(
         validation_before = subject_state(validation["repository"]["before"])
         validation_state = subject_state(validation["repository"]["after"])
         reviewed_head = review_state["head"]
-        review = review_output["review"]
     except (KeyError, TypeError) as error:
         raise ValueError("invalid Review evidence") from error
     objective = change["objective"]
@@ -259,8 +258,8 @@ def verify_subject(
     if review_state["dirty"] or review_state["status"]:
         raise ValueError("finding assessment requires a clean committed state")
     return (
-        validate_review(
-            review,
+        validate_output_projection(
+            review_output,
             Path(assessment_input["workspace"]),
             reviewed_head,
             related_work_ids,

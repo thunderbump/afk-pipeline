@@ -1,7 +1,11 @@
 import unittest
 from pathlib import Path
 
-from afk_review.contract import REVIEW_AUDIT, validate_review
+from afk_review.contract import (
+    REVIEW_AUDIT,
+    validate_output_projection,
+    validate_review,
+)
 
 
 class ReviewContractTest(unittest.TestCase):
@@ -34,6 +38,43 @@ class ReviewContractTest(unittest.TestCase):
             "summary": "Complete audit found one actionable defect.",
         }
         self.assertIs(validate_review(value, Path("."), "HEAD"), value)
+
+    def test_split_projection_requires_all_ordered_authentic_invocations(self):
+        aggregate = {
+            "summary": (
+                "Behavior: Complete audit found no actionable defects.\n"
+                "Design: Complete audit found no actionable defects.\n"
+                "Standards: Complete audit found no actionable defects."
+            ),
+            "findings": [],
+            "audit": REVIEW_AUDIT,
+        }
+        invocation = lambda lens: {
+            "lens": lens,
+            "outcome": "succeeded",
+            "process": {"exit_code": 0, "signal": None},
+            "agent": {"status": "completed"},
+            "review": self.review(),
+            "artifacts": {
+                "events": f"reviewers/{lens}/events.jsonl",
+                "stderr": f"reviewers/{lens}/stderr.log",
+                "inference": f"reviewers/{lens}/inference",
+            },
+        }
+        output = {
+            "review": aggregate,
+            "review_mode": "split",
+            "review_invocations": [
+                invocation(lens) for lens in ("behavior", "design", "standards")
+            ],
+            "finding_provenance": [],
+        }
+        self.assertIs(
+            validate_output_projection(output, Path("."), "unused"), aggregate
+        )
+        output["review_invocations"].reverse()
+        with self.assertRaisesRegex(ValueError, "projection"):
+            validate_output_projection(output, Path("."), "unused")
 
     def test_rejects_missing_extra_or_malformed_audit(self):
         cases = {

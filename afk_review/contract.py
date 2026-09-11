@@ -37,7 +37,7 @@ def validate_input(value: object) -> dict[str, object]:
         "validation_directory",
         "timeout_seconds",
     }
-    allowed = required | {"related_work", "work_context"}
+    allowed = required | {"related_work", "work_context", "review_mode"}
     if not isinstance(value, dict) or value.get("schema_version") != 1:
         raise ValueError("review must use schema_version 1")
     if "inference" in value:
@@ -50,6 +50,8 @@ def validate_input(value: object) -> dict[str, object]:
         raise ValueError("review input fields are malformed")
     if "work_context" in value:
         validate_context(value["work_context"])
+    if value.get("review_mode", "combined") not in {"combined", "split"}:
+        raise ValueError("review review_mode must be combined or split")
     timeout = value.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("review timeout_seconds must be a positive integer")
@@ -88,6 +90,109 @@ def validate_review(
     for finding in findings:
         validate_finding(finding, workspace, reviewed_head, related_work_ids)
     return value
+
+
+def validate_output_projection(
+    output: object,
+    workspace: Path,
+    reviewed_head: str,
+    related_work_ids: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, object]:
+    """Validate an optional multi-invocation Review-to-aggregate mapping."""
+    if not isinstance(output, dict):
+        raise TypeError("Review output must be an object")
+    aggregate = validate_review(
+        output.get("review"), workspace, reviewed_head, related_work_ids
+    )
+    if "review_mode" not in output:
+        return aggregate
+    mode = output.get("review_mode")
+    invocations = output.get("review_invocations")
+    provenance = output.get("finding_provenance")
+    expected_lenses = (
+        ["combined"]
+        if mode == "combined"
+        else ["behavior", "design", "standards"]
+        if mode == "split"
+        else None
+    )
+    if (
+        expected_lenses is None
+        or not isinstance(invocations, list)
+        or [item.get("lens") for item in invocations if isinstance(item, dict)]
+        != expected_lenses
+        or len(invocations) != len(expected_lenses)
+        or not isinstance(provenance, list)
+    ):
+        raise ValueError("Review invocation projection is malformed")
+    source_reviews = []
+    for invocation, lens in zip(invocations, expected_lenses):
+        expected_artifacts = (
+            {
+                "events": "events.jsonl",
+                "stderr": "stderr.log",
+                "inference": "inference",
+            }
+            if lens == "combined"
+            else {
+                "events": f"reviewers/{lens}/events.jsonl",
+                "stderr": f"reviewers/{lens}/stderr.log",
+                "inference": f"reviewers/{lens}/inference",
+            }
+        )
+        allowed = {"lens", "outcome", "process", "agent", "review", "artifacts"}
+        if (
+            not isinstance(invocation, dict)
+            or set(invocation) != allowed
+            or invocation.get("outcome") != "succeeded"
+            or invocation.get("agent") != {"status": "completed"}
+            or not isinstance(invocation.get("process"), dict)
+            or invocation.get("artifacts") != expected_artifacts
+        ):
+            raise ValueError("Review invocation projection is incomplete")
+        raw = validate_review(
+            invocation.get("review"), workspace, reviewed_head, related_work_ids
+        )
+        if lens != "combined" and any(
+            finding["lens"] != lens for finding in raw["findings"]
+        ):
+            raise ValueError("Review invocation lens is malformed")
+        source_reviews.append(raw)
+    expected_findings = [
+        finding for raw in source_reviews for finding in raw["findings"]
+    ]
+    expected_provenance = []
+    finding_index = 0
+    for lens, raw in zip(expected_lenses, source_reviews):
+        for source_index, _finding in enumerate(raw["findings"]):
+            expected_provenance.append(
+                {
+                    "finding_index": finding_index,
+                    "lens": (
+                        raw["findings"][source_index]["lens"]
+                        if lens == "combined"
+                        else lens
+                    ),
+                    "source_finding_index": source_index,
+                }
+            )
+            finding_index += 1
+    expected_summary = (
+        source_reviews[0]["summary"]
+        if mode == "combined"
+        else "\n".join(
+            f"{lens.capitalize()}: {raw['summary']}"
+            for lens, raw in zip(expected_lenses, source_reviews)
+        )
+    )
+    if (
+        aggregate["findings"] != expected_findings
+        or aggregate["summary"] != expected_summary
+        or aggregate["audit"] != REVIEW_AUDIT
+        or provenance != expected_provenance
+    ):
+        raise ValueError("Review aggregate provenance disagrees")
+    return aggregate
 
 
 def validate_finding(

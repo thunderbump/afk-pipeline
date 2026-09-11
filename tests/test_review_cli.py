@@ -191,6 +191,40 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(invocation["execution_root"], str(self.workspace))
         self.assertFalse((result / "output.json.tmp").exists())
 
+    def test_split_review_runs_three_isolated_lenses_and_seals_provenance(self):
+        input_path, result, environment = self.prepare_review("no-findings")
+        review_input = json.loads(input_path.read_text())
+        review_input["review_mode"] = "split"
+        self.write_json(input_path, review_input)
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["review_mode"], "split")
+        self.assertEqual(
+            [item["lens"] for item in output["review_invocations"]],
+            ["behavior", "design", "standards"],
+        )
+        self.assertEqual(output["finding_provenance"], [])
+        self.assertEqual(
+            output["review"]["summary"],
+            "Behavior: No actionable defects found.\n"
+            "Design: No actionable defects found.\n"
+            "Standards: No actionable defects found.",
+        )
+        self.assertNotIn("process", output)
+        self.assertEqual(output["artifacts"], {"diff": "diff.patch"})
+        for lens in ("behavior", "design", "standards"):
+            directory = result / "reviewers" / lens
+            self.assertTrue((directory / "inference" / "receipt.json").is_file())
+            prompt = json.loads((directory / "inference" / "prompt.json").read_text())[
+                "trusted_task_instructions"
+            ]
+            self.assertIn(f"isolated {lens} lens", prompt)
+            for other in {"behavior", "design", "standards"} - {lens}:
+                self.assertNotIn(f"{other.capitalize()} lens:", prompt)
+
     def test_complete_validation_evidence_is_embedded_for_read_only_review(self):
         result, completed = self.run_review("validation-evidence")
 

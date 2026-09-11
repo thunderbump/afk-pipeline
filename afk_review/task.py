@@ -52,8 +52,11 @@ def build_task(
     diff_path: Path,
     workspace: Path,
     reviewed_head: str,
+    lens: str | None = None,
 ) -> TaskContract:
-    """Build the legacy or complete-work Review prompt and bound validator."""
+    """Build a combined Review or one isolated split-lens Review task."""
+    if lens not in {None, "behavior", "design", "standards"}:
+        raise ValueError("invalid Review lens")
     related = review_input.get("related_work")
     related_records = snapshot_records(related) if related is not None else []
     related_work_ids = {record["id"] for record in related_records}
@@ -80,7 +83,21 @@ def build_task(
     }
 
     read_only_evidence = ()
-    instructions = REVIEW_INSTRUCTIONS
+    if lens is None:
+        instructions = REVIEW_INSTRUCTIONS
+    else:
+        lens_packet = {
+            "behavior": BEHAVIOR_INSTRUCTIONS,
+            "design": DESIGN_INSTRUCTIONS,
+            "standards": STANDARDS_INSTRUCTIONS,
+        }[lens]
+        instructions = compose_review_instructions(
+            (COMMON_INSTRUCTIONS, lens_packet, OUTPUT_CONTRACT_INSTRUCTIONS)
+        )
+        instructions += (
+            f"\n\nThis is the isolated {lens} lens invocation. Report only findings "
+            f'with lens "{lens}".'
+        )
     if "work_context" in evidence:
         context = evidence["work_context"]
         files = {
@@ -118,15 +135,22 @@ def build_task(
         try:
             if not isinstance(value, str):
                 raise TypeError("review response must be JSON text")
-            return validate_review(
+            review = validate_review(
                 json.loads(value), workspace, reviewed_head, related_work_ids
             )
+            if lens is not None and any(
+                finding["lens"] != lens for finding in review["findings"]
+            ):
+                raise ValueError(f"split Review returned a non-{lens} finding")
+            return review
         except (TypeError, ValueError, json.JSONDecodeError) as error:
             raise ResponseRejected(str(error)) from error
 
     return TaskContract(
         purpose="review",
-        contract_version=7 if read_only_evidence else 6,
+        contract_version=(9 if read_only_evidence else 8)
+        if lens
+        else (7 if read_only_evidence else 6),
         trusted_instructions=instructions,
         untrusted_data=data,
         capability=Capability.READ_ONLY,

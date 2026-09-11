@@ -17,7 +17,7 @@ from afk_change.contract import (
 from afk_related_work import validate_snapshot_bytes
 from afk_respond.contract import actionable_findings, validate_response
 from afk_respond.contract import validate_input as validate_response_input
-from afk_review.contract import validate_review
+from afk_review.contract import validate_output_projection
 from afk_runtime import git
 from afk_validate.evidence import (
     evidence_identity,
@@ -183,7 +183,6 @@ def _committed_response(source_directory, visited, lineage):
                 "Feedback Response evidence must identify one source state"
             )
         try:
-            review_value = review_output["review"]
             assessment_value = assessment_output["assessment"]
             response_value = response_output["response"]
         except KeyError as error:
@@ -218,8 +217,8 @@ def _committed_response(source_directory, visited, lineage):
             != subject_state(source_after)
         ):
             raise ValueError("Validation and reviewed Change subjects disagree")
-        reviewed = validate_review(
-            review_value, workspace, before["head"], related_work_ids
+        reviewed = validate_output_projection(
+            review_output, workspace, before["head"], related_work_ids
         )
         assessed = validate_assessment(reviewed, assessment_value, related_work_ids)
         selected = actionable_findings(reviewed, assessed)
