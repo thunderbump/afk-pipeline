@@ -1251,6 +1251,8 @@ class RunPreparerCliTest(unittest.TestCase):
         assignment.pop("work_base", None)
         (source / "assignment.json").write_text(json.dumps(assignment))
         request = json.loads((source / "coordinator-request.json").read_text())
+        request.pop("review_mode", None)
+        (source / "coordinator-request.json").write_text(json.dumps(request))
         state = {
             "schema_version": 1,
             "status": "completed",

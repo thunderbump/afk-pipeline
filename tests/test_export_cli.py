@@ -428,16 +428,98 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertFalse(blocked.exists())
 
+    def test_export_rejects_tampered_configured_review_aggregate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            coordinator = source / "coordinator"
+            review_directory = coordinator / "04-review"
+            review = {
+                "summary": "Complete audit found no actionable defects.",
+                "findings": [],
+                "audit": REVIEW_AUDIT,
+            }
+
+            for path in (
+                source / "coordinator-request.json",
+                coordinator / "input.json",
+            ):
+                request = json.loads(path.read_text())
+                request["review_mode"] = "combined"
+                path.write_text(json.dumps(request))
+            (review_directory / "input.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "workspace": str(root / "workspace"),
+                        "change_directory": str(coordinator / "03-change"),
+                        "validation_directory": str(coordinator / "02-validation"),
+                        "timeout_seconds": 60,
+                        "review_mode": "combined",
+                    }
+                )
+            )
+            change_path = coordinator / "03-change/output.json"
+            change = json.loads(change_path.read_text())
+            change["change"]["repository"] = {"after": {"head": "a" * 40}}
+            change_path.write_text(json.dumps(change))
+            output_path = review_directory / "output.json"
+            output = json.loads(output_path.read_text())
+            output.update(
+                review=review,
+                review_mode="combined",
+                review_invocations=[
+                    {
+                        "lens": "combined",
+                        "outcome": "succeeded",
+                        "process": {"exit_code": 0, "signal": None},
+                        "agent": {"status": "completed"},
+                        "review": review,
+                        "artifacts": {
+                            "events": "events.jsonl",
+                            "stderr": "stderr.log",
+                            "inference": "inference",
+                        },
+                    }
+                ],
+                finding_provenance=[],
+            )
+            output_path.write_text(json.dumps(output))
+            inference = review_directory / "inference"
+            self.add_inference_receipt(inference)
+            terminal_text = json.dumps(review)
+            response_path = inference / "attempts/1/response.json"
+            response_path.write_text(json.dumps(terminal_text))
+            receipt_path = inference / "receipt.json"
+            receipt = json.loads(receipt_path.read_text())
+            receipt["terminal_response"] = terminal_text
+            receipt["attempts"][0]["artifacts"]["response_sha256"] = hashlib.sha256(
+                response_path.read_bytes()
+            ).hexdigest()
+            receipt_path.write_text(json.dumps(receipt) + "\n")
+
+            baseline = self.export(source, root / "baseline")
+            self.assertEqual(baseline.returncode, 0, baseline.stderr)
+
+            output["review"] = {**review, "summary": "Altered after Review."}
+            output_path.write_text(json.dumps(output))
+            destination = root / "tampered"
+            result = self.export(source, destination)
+
+            self.assertEqual(result.returncode, 1)
+            self.assertFalse(destination.exists())
+            self.assertEqual(json.loads(result.stdout)["error"], "invalid_run")
+
     def test_exports_a_sealed_failed_run(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             source = self.sealed_preparer(root)
             coordinator = source / "coordinator"
             history = self.history()[:4]
-            history[-1] = {**history[-1], "outcome": "failed"}
+            history[-1] = {**history[-1], "outcome": "timed_out"}
             terminal = {
                 "failed_component": "review",
-                "component_outcome": "failed",
+                "component_outcome": "timed_out",
                 "exit_code": 1,
             }
             state = {
@@ -462,9 +544,25 @@ class ExportCliTests(unittest.TestCase):
             )
             review_path = coordinator / "04-review" / "output.json"
             review_input_path = review_path.parent / "input.json"
-            review_input = json.loads(review_input_path.read_text())
-            review_input["review_mode"] = "split"
-            review_input_path.write_text(json.dumps(review_input))
+            for path in (
+                source / "coordinator-request.json",
+                coordinator / "input.json",
+            ):
+                request = json.loads(path.read_text())
+                request["review_mode"] = "split"
+                path.write_text(json.dumps(request))
+            review_input_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "workspace": str(root / "workspace"),
+                        "change_directory": str(coordinator / "03-change"),
+                        "validation_directory": str(coordinator / "02-validation"),
+                        "timeout_seconds": 60,
+                        "review_mode": "split",
+                    }
+                )
+            )
             accepted_review = {
                 "summary": "Behavior fixture completed with no findings.",
                 "findings": [],
@@ -482,7 +580,7 @@ class ExportCliTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "outcome": "failed",
+                        "outcome": "timed_out",
                         "agent": None,
                         "review": None,
                         "review_mode": "split",
@@ -494,7 +592,7 @@ class ExportCliTests(unittest.TestCase):
                             },
                             {
                                 "lens": "design",
-                                "outcome": "adapter_failed",
+                                "outcome": "timed_out",
                                 "review": None,
                             },
                         ],
@@ -522,11 +620,11 @@ class ExportCliTests(unittest.TestCase):
             receipt_path = design / "receipt.json"
             receipt = json.loads(receipt_path.read_text())
             receipt["attempts"][0].pop("validation")
-            receipt["attempts"][0]["protocol"] = {"status": "adapter_failed"}
-            receipt["protocol"] = {"status": "adapter_failed"}
+            receipt["attempts"][0]["protocol"] = {"status": "timed_out"}
+            receipt["protocol"] = {"status": "timed_out"}
             receipt["validation"] = {"status": "not_started"}
             receipt["terminal_response"] = None
-            receipt["outcome"] = "adapter_failed"
+            receipt["outcome"] = "timed_out"
             receipt_path.write_text(json.dumps(receipt) + "\n")
             preparation_path = source / "preparation.json"
             preparation = json.loads(preparation_path.read_text())
@@ -544,7 +642,31 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(record["terminal"], terminal)
             failed_output = record["history"][-1]["output"]
             self.assertIsNone(failed_output["agent"])
-            self.assertEqual(failed_output["details"], {"kind": "review"})
+            self.assertEqual(
+                failed_output["details"],
+                {
+                    "kind": "review",
+                    "mode": "split",
+                    "finding_provenance": [],
+                    "reviewer_invocations": [
+                        {
+                            "lens": "behavior",
+                            "outcome": "succeeded",
+                            "review": accepted_review,
+                        },
+                        {
+                            "lens": "design",
+                            "outcome": "timed_out",
+                            "review": None,
+                        },
+                        {
+                            "lens": "standards",
+                            "outcome": "unstarted",
+                            "review": None,
+                        },
+                    ],
+                },
+            )
             sessions = {
                 Path(session["directory"]).parts[-2]: session
                 for session in record["inference_sessions"]
@@ -552,9 +674,7 @@ class ExportCliTests(unittest.TestCase):
             self.assertEqual(set(sessions), {"behavior", "design"})
             self.assertTrue(sessions["behavior"]["attempts"][0]["terminal"])
             session = sessions["design"]
-            self.assertEqual(
-                session["attempts"][0]["protocol_status"], "adapter_failed"
-            )
+            self.assertEqual(session["attempts"][0]["protocol_status"], "timed_out")
             self.assertIsNone(session["attempts"][0]["validation_status"])
             self.assertFalse(session["attempts"][0]["terminal"])
             self.assertEqual(session["validation_status"], "not_started")

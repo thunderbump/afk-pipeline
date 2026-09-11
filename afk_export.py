@@ -2813,12 +2813,70 @@ def normalize_run(observed, include_evidence=True):
             ):
                 raise ExportError("Assignment work base disagrees with initial Attempt")
             if component == "review":
-                from afk_review.contract import validate_invocation_receipts
+                from afk_evidence.access import EvidenceReader, EvidenceUnavailable
+                from afk_review.contract import (
+                    validate_input as validate_review_input,
+                )
+                from afk_review.contract import (
+                    validate_invocation_receipts,
+                    validate_output_projection,
+                )
 
+                reader = EvidenceReader((observed["coordinator"],))
                 try:
-                    validate_invocation_receipts(output, directory)
-                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    configured_mode = observed["request"].get("review_mode")
+                    if configured_mode is not None:
+                        review_input = validate_review_input(
+                            reader.json(directory / "input.json")
+                        )
+                        if (
+                            review_input.get("review_mode") != configured_mode
+                            or output.get("review_mode") != configured_mode
+                        ):
+                            raise ValueError(
+                                "Review mode disagrees with frozen Coordinator request"
+                            )
+                    if output["outcome"] == "completed" and configured_mode is not None:
+                        change_source = entry["input_from"].get("change")
+                        change_directory = observed["coordinator"] / str(change_source)
+                        if (
+                            change_source not in directories
+                            or Path(review_input["change_directory"]).resolve()
+                            != change_directory.resolve()
+                        ):
+                            raise ValueError(
+                                "Review change evidence disagrees with Coordinator history"
+                            )
+                        change = reader.json(change_directory / "output.json")["change"]
+                        related_work_ids = (
+                            {
+                                json.loads(line)["id"]
+                                for line in observed["related_work"]["raw"].splitlines()
+                            }
+                            if observed.get("related_work")
+                            else set()
+                        )
+                        validate_output_projection(
+                            output,
+                            Path(review_input["workspace"]),
+                            change["repository"]["after"]["head"],
+                            related_work_ids,
+                            directory,
+                            reader,
+                        )
+                    else:
+                        validate_invocation_receipts(output, directory, reader)
+                except (
+                    EvidenceUnavailable,
+                    KeyError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    json.JSONDecodeError,
+                ) as error:
                     raise ExportError(str(error)) from error
+                finally:
+                    reader.close()
             if component == "review" and (
                 "work_base" in observed["assignment"] or "work_context" in output
             ):
@@ -2991,9 +3049,63 @@ def normalize_component_output(component, value, redactions):
         result["repository"] = normalize_repository(value["repository"], redactions)
     if value["outcome"] == COMPONENT_TOPOLOGY[component]["success"]:
         result["details"] = component_details(component, value, redactions)
+    elif component == "review" and "review_mode" in value:
+        result["details"] = failed_review_details(value, redactions)
     else:
         result["details"] = {"kind": component}
     return result
+
+
+def failed_review_details(value, redactions):
+    """Project a configured failed Review without hiding unstarted split lenses."""
+    mode = value.get("review_mode")
+    expected_lenses = (
+        ["combined"]
+        if mode == "combined"
+        else ["behavior", "design", "standards"]
+        if mode == "split"
+        else None
+    )
+    invocations = value.get("review_invocations")
+    provenance = value.get("finding_provenance")
+    if (
+        expected_lenses is None
+        or not isinstance(invocations, list)
+        or len(invocations) > len(expected_lenses)
+        or provenance != []
+    ):
+        raise ExportError("invalid Review invocation provenance")
+    projected = []
+    for index, lens in enumerate(expected_lenses):
+        if index >= len(invocations):
+            projected.append({"lens": lens, "outcome": "unstarted", "review": None})
+            continue
+        invocation = invocations[index]
+        if not isinstance(invocation, dict) or invocation.get("lens") != lens:
+            raise ExportError("invalid Review invocation provenance")
+        outcome = invocation.get("outcome")
+        review = invocation.get("review")
+        if not isinstance(outcome, str) or not outcome:
+            raise ExportError("invalid Review invocation provenance")
+        projected.append(
+            {
+                "lens": lens,
+                "outcome": bounded_text(outcome, redactions),
+                "review": (
+                    normalize_review_value(review, redactions)
+                    if outcome == "succeeded"
+                    else None
+                ),
+            }
+        )
+        if outcome != "succeeded" and review is not None:
+            raise ExportError("invalid Review invocation provenance")
+    return {
+        "kind": "review",
+        "mode": mode,
+        "finding_provenance": provenance,
+        "reviewer_invocations": projected,
+    }
 
 
 def normalize_review_value(review, redactions):
