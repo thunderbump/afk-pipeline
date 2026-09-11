@@ -12,6 +12,7 @@ import afk_export
 from afk_metrics.__main__ import _human
 from afk_metrics.publication import (
     PublicationError,
+    _stages,
     build_publication,
     load_publication_request,
     publish,
@@ -280,6 +281,54 @@ class MetricsPublicationTests(unittest.TestCase):
             self.assertEqual(
                 inference_summary["totals"]["usage_coverage"], "unavailable"
             )
+
+    def test_stage_projection_preserves_split_reviewer_ownership(self):
+        invocations = []
+        for index, lens in enumerate(("behavior", "design", "standards")):
+            invocations.append(
+                {
+                    "outcome": "succeeded",
+                    "elapsed": {"seconds": 0 if index == 0 else 1, "kind": "wall"},
+                    "metrics": {},
+                    "_stage_owner": {
+                        "kind": "component_reviewer",
+                        "sequence": 4,
+                        "component": "review",
+                        "lens": lens,
+                    },
+                }
+            )
+        summary = {
+            "_publication_stage_data": {
+                "history": [
+                    {"sequence": 4, "component": "review", "outcome": "completed"}
+                ],
+                "repository_validation": {},
+            },
+            "inference": {"invocations": invocations},
+            "timing": {},
+        }
+
+        rows = _stages(summary, "fixture", "split-run")
+        reviewers = [
+            row for row in rows if row["ownership"]["kind"] == "component_reviewer"
+        ]
+        self.assertEqual(
+            [row["ownership"]["lens"] for row in reviewers],
+            ["behavior", "design", "standards"],
+        )
+        self.assertEqual({row["ownership"]["sequence"] for row in reviewers}, {4})
+        self.assertEqual(reviewers[0]["elapsed_seconds"], 0)
+        self.assertEqual(reviewers[0]["usage_coverage"], "unavailable")
+        self.assertEqual(reviewers[0]["cost"]["status"], "unavailable")
+        logical = [
+            row
+            for row in rows
+            if row["ownership"].get("sequence") == 4
+            and row["ownership"]["kind"] == "component"
+        ]
+        self.assertEqual(len(logical), 1)
+        self.assertIsNone(logical[0]["elapsed_seconds"])
 
     def test_stage_projection_preserves_measured_zero_and_unavailable_metrics(self):
         for duration in (None, 0, 1.5):

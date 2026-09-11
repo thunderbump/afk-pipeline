@@ -341,11 +341,14 @@ def _invocation_metrics(invocation: dict[str, Any]) -> dict[str, Any]:
 def _stages(summary: dict[str, Any], project: str, run_id: str) -> list[dict[str, Any]]:
     private = summary["_publication_stage_data"]
     by_component = {}
+    reviewer_invocations = []
     run_invocations = []
     for invocation in summary["inference"]["invocations"]:
         owner = invocation.get("_stage_owner")
         if owner and owner["kind"] == "component":
             by_component[owner["sequence"]] = invocation
+        elif owner and owner["kind"] == "component_reviewer":
+            reviewer_invocations.append((owner, invocation))
         elif owner:
             run_invocations.append((owner["purpose"], invocation))
     rows = []
@@ -373,6 +376,21 @@ def _stages(summary: dict[str, Any], project: str, run_id: str) -> list[dict[str
                 },
                 "outcome": stage["outcome"],
                 **metrics,
+            }
+        )
+    for owner, invocation in reviewer_invocations:
+        rows.append(
+            {
+                "ownership": {
+                    "kind": "component_reviewer",
+                    "project": project,
+                    "run_id": run_id,
+                    "sequence": owner["sequence"],
+                    "component": owner["component"],
+                    "lens": owner["lens"],
+                },
+                "outcome": invocation.get("outcome"),
+                **_invocation_metrics(invocation),
             }
         )
     for purpose, invocation in run_invocations:

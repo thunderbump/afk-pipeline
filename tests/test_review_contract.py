@@ -3,12 +3,15 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from afk_review.contract import (
     REVIEW_AUDIT,
+    validate_invocation_receipts,
     validate_output_projection,
     validate_review,
 )
+from afk_review.task import build_task
 
 
 class ReviewContractTest(unittest.TestCase):
@@ -160,6 +163,79 @@ class ReviewContractTest(unittest.TestCase):
                 validate_output_projection(
                     output, Path("."), "unused", review_directory=directory
                 )
+
+    def test_prepared_split_tasks_retain_receipt_lens_identity(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            diff = directory / "review.diff"
+            diff.write_text("diff --git a/a b/a\n")
+            context_file = directory / "work.diff"
+            context_file.write_text("complete work\n")
+            evidence = {
+                "change": {
+                    "objective": "Review the complete prepared work.",
+                    "repository": {
+                        "before": {"head": "before"},
+                        "after": {"head": "after"},
+                    },
+                },
+                "change_output": {},
+                "validation_input": {},
+                "validation": {},
+                "validation_stdout": "",
+                "validation_stderr": "",
+                "work_context": {
+                    "work_base": "base",
+                    "files": {
+                        "work_diff": {"path": context_file.name},
+                        "repair_diff": {"path": context_file.name},
+                    },
+                },
+            }
+            review = self.review()
+            invocations = []
+            for lens in ("behavior", "design", "standards"):
+                with mock.patch("afk_review.task.git", return_value="1 file changed"):
+                    task = build_task({}, evidence, diff, directory, "after", lens=lens)
+                inference = directory / "reviewers" / lens / "inference"
+                inference.mkdir(parents=True)
+                invocation = {
+                    "schema_version": 1,
+                    "purpose": task.purpose,
+                    "task_contract_version": task.contract_version,
+                    "prompt": {
+                        "purpose": task.purpose,
+                        "task_contract_version": task.contract_version,
+                        "trusted_task_instructions": task.trusted_instructions,
+                    },
+                    "requested_capability": task.capability.value,
+                }
+                raw = json.dumps(invocation).encode()
+                (inference / "invocation.json").write_bytes(raw)
+                (inference / "receipt.json").write_text(
+                    json.dumps(
+                        {
+                            "outcome": "succeeded",
+                            "protocol": {"status": "accepted"},
+                            "terminal_response": json.dumps(review),
+                            "hashes": {
+                                "invocation_sha256": hashlib.sha256(raw).hexdigest()
+                            },
+                        }
+                    )
+                )
+                invocations.append(
+                    {"lens": lens, "outcome": "succeeded", "review": review}
+                )
+
+            validate_invocation_receipts(
+                {
+                    "outcome": "completed",
+                    "review_mode": "split",
+                    "review_invocations": invocations,
+                },
+                directory,
+            )
 
     def test_receipt_binding_decodes_json_text_and_allows_failed_split_prefix(self):
         with tempfile.TemporaryDirectory() as temporary:
