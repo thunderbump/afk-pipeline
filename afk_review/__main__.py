@@ -94,102 +94,127 @@ def main() -> int:
     evidence_error = None
     after = before
 
+    interrupted = False
     for lens in lenses:
-        invocation_directory = (
-            result_directory if lens is None else result_directory / "reviewers" / lens
-        )
-        if lens is not None:
-            invocation_directory.mkdir(parents=True)
-        events_path = invocation_directory / "events.jsonl"
-        stderr_path = invocation_directory / "stderr.log"
-        label = "review" if lens is None else f"{lens} review"
-        progress(
-            f"starting {label} agent "
-            f"(timeout={review_input['timeout_seconds']}s; "
-            f"artifacts: events={events_path}, stderr={stderr_path})"
-        )
-        task = build_task(
-            review_input, evidence, diff_path, workspace, reviewed_head, lens=lens
-        )
-        inference_result = invoke(
-            purpose=task.purpose,
-            task_contract_version=task.contract_version,
-            trusted_task_instructions=task.trusted_instructions,
-            untrusted_task_data=task.untrusted_data,
-            requested_capability=task.capability,
-            execution_root=workspace,
-            timeout_seconds=review_input["timeout_seconds"],
-            evidence_directory=invocation_directory / "inference",
-            validator=task.validator,
-            read_only_evidence=task.read_only_evidence,
-        )
-        publish_runtime_logs(invocation_directory, inference_result.receipt)
-        progress(f"{label} agent completed")
-        results.append(inference_result)
-        terminal = inference_result.receipt["terminal_response"]
-        invocation_agent = (
-            {"status": "completed"}
-            if terminal is not None
-            and inference_result.receipt["protocol"].get("status") == "accepted"
-            else None
-        )
-        validation = inference_result.receipt["validation"]
-        invocation_records.append(
-            {
-                "lens": lens or "combined",
-                "outcome": inference_result.outcome,
-                "process": runtime_process(inference_result.receipt),
-                "agent": invocation_agent,
-                "review": (
-                    inference_result.value
-                    if inference_result.outcome == "succeeded"
-                    else None
-                ),
-                **(
-                    {"review_error": validation.get("error")}
-                    if inference_result.outcome
-                    in {"response_rejected", "validator_failed"}
-                    and validation.get("error")
-                    else {}
-                ),
-                "artifacts": {
-                    "events": str(events_path.relative_to(result_directory)),
-                    "stderr": str(stderr_path.relative_to(result_directory)),
-                    "inference": str(
-                        (invocation_directory / "inference").relative_to(
-                            result_directory
-                        )
-                    ),
-                },
-            }
-        )
+        inference_result = None
+        invocation_directory = None
         try:
-            after = repository_state(workspace)
-        except (OSError, subprocess.SubprocessError) as error:
-            after = None
-            observation_error = str(error)
-        if previous is not None:
-            reader = EvidenceReader((result_directory,))
+            invocation_directory = (
+                result_directory
+                if lens is None
+                else result_directory / "reviewers" / lens
+            )
+            if lens is not None:
+                invocation_directory.mkdir(parents=True)
+            events_path = invocation_directory / "events.jsonl"
+            stderr_path = invocation_directory / "stderr.log"
+            label = "review" if lens is None else f"{lens} review"
+            progress(
+                f"starting {label} agent "
+                f"(timeout={review_input['timeout_seconds']}s; "
+                f"artifacts: events={events_path}, stderr={stderr_path})"
+            )
+            task = build_task(
+                review_input, evidence, diff_path, workspace, reviewed_head, lens=lens
+            )
+            inference_result = invoke(
+                purpose=task.purpose,
+                task_contract_version=task.contract_version,
+                trusted_task_instructions=task.trusted_instructions,
+                untrusted_task_data=task.untrusted_data,
+                requested_capability=task.capability,
+                execution_root=workspace,
+                timeout_seconds=review_input["timeout_seconds"],
+                evidence_directory=invocation_directory / "inference",
+                validator=task.validator,
+                read_only_evidence=task.read_only_evidence,
+            )
+            results.append(inference_result)
+            terminal = inference_result.receipt["terminal_response"]
+            invocation_agent = (
+                {"status": "completed"}
+                if terminal is not None
+                and inference_result.receipt["protocol"].get("status") == "accepted"
+                else None
+            )
+            validation = inference_result.receipt["validation"]
+            invocation_records.append(
+                {
+                    "lens": lens or "combined",
+                    "outcome": inference_result.outcome,
+                    "process": runtime_process(inference_result.receipt),
+                    "agent": invocation_agent,
+                    "review": (
+                        inference_result.value
+                        if inference_result.outcome == "succeeded"
+                        else None
+                    ),
+                    **(
+                        {"review_error": validation.get("error")}
+                        if inference_result.outcome
+                        in {"response_rejected", "validator_failed"}
+                        and validation.get("error")
+                        else {}
+                    ),
+                    "artifacts": {
+                        "events": str(events_path.relative_to(result_directory)),
+                        "stderr": str(stderr_path.relative_to(result_directory)),
+                        "inference": str(
+                            (invocation_directory / "inference").relative_to(
+                                result_directory
+                            )
+                        ),
+                    },
+                }
+            )
+            publish_runtime_logs(invocation_directory, inference_result.receipt)
+            progress(f"{label} agent completed")
             try:
-                validate_artifacts(
-                    result_directory,
-                    review_input["work_context"],
-                    evidence["work_context"],
-                    reader,
-                    evidence["change"],
-                )
-            except (OSError, ValueError, EvidenceUnavailable) as error:
-                evidence_error = str(error)
-            finally:
-                reader.close()
-        if (
-            inference_result.outcome != "succeeded"
-            or after != before
-            or evidence_error is not None
-        ):
+                after = repository_state(workspace)
+            except (OSError, subprocess.SubprocessError) as error:
+                after = None
+                observation_error = str(error)
+            if previous is not None:
+                reader = EvidenceReader((result_directory,))
+                try:
+                    validate_artifacts(
+                        result_directory,
+                        review_input["work_context"],
+                        evidence["work_context"],
+                        reader,
+                        evidence["change"],
+                    )
+                except (OSError, ValueError, EvidenceUnavailable) as error:
+                    evidence_error = str(error)
+                finally:
+                    reader.close()
+            if (
+                inference_result.outcome != "succeeded"
+                or after != before
+                or evidence_error is not None
+            ):
+                break
+        except KeyboardInterrupt:
+            # Once Review owns the result directory, an operator interruption is
+            # a stage outcome, not permission to leave prior lens evidence
+            # unsealed or to omit output.json. If invoke already sealed a receipt,
+            # finish projecting its logs before sealing the stage outcome.
+            interrupted = True
+            if inference_result is not None and invocation_directory is not None:
+                try:
+                    publish_runtime_logs(invocation_directory, inference_result.receipt)
+                except KeyboardInterrupt:
+                    pass
             break
 
     progress("observing repository after review")
+    try:
+        after = repository_state(workspace)
+    except KeyboardInterrupt:
+        interrupted = True
+    except (OSError, subprocess.SubprocessError) as error:
+        after = None
+        observation_error = str(error)
     unchanged = None if after is None else before == after
     # Recheck once after the final invocation so the sealed aggregate remains
     # bound to the same context that every individual lens was allowed to read.
@@ -203,6 +228,8 @@ def main() -> int:
                 reader,
                 evidence["change"],
             )
+        except KeyboardInterrupt:
+            interrupted = True
         except (OSError, ValueError, EvidenceUnavailable) as error:
             evidence_error = str(error)
         finally:
@@ -215,7 +242,8 @@ def main() -> int:
         result.outcome == "succeeded" for result in results
     )
     all_succeeded = (
-        invocations_succeeded
+        not interrupted
+        and invocations_succeeded
         and unchanged is True
         and observation_error is None
         and evidence_error is None
@@ -266,7 +294,8 @@ def main() -> int:
     )
     outcome = (
         "interrupted"
-        if failed_result is not None and failed_result.outcome == "interrupted"
+        if interrupted
+        or (failed_result is not None and failed_result.outcome == "interrupted")
         else "timed_out"
         if failed_result is not None and failed_result.outcome == "timed_out"
         else "completed"
@@ -288,7 +317,15 @@ def main() -> int:
         "started_at": started_at,
         "finished_at": timestamp(),
         "duration_seconds": round(time.monotonic() - started, 3),
-        **({"process": invocation_records[0]["process"]} if mode == "combined" else {}),
+        **(
+            {
+                "process": invocation_records[0]["process"]
+                if invocation_records
+                else None
+            }
+            if mode == "combined"
+            else {}
+        ),
         "agent": agent,
         "review": review,
         **({"review_error": review_error} if review_error else {}),

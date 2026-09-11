@@ -8,6 +8,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from afk_related_work import build_snapshot, reference
 from tests.inference_cli_fixture import install_pi
@@ -396,6 +397,43 @@ class ReviewCliTest(unittest.TestCase):
         self.assertEqual(output["outcome"], "failed")
         self.assertFalse(output["repository"]["unchanged"])
         self.assertTrue(output["repository"]["after"]["dirty"])
+
+    def test_interrupt_between_split_lenses_seals_partial_stage_evidence(self):
+        input_path, result, environment = self.prepare_review("no-findings")
+        review_input = json.loads(input_path.read_text())
+        review_input["review_mode"] = "split"
+        self.write_json(input_path, review_input)
+
+        from afk_review import __main__ as review_main
+
+        actual_build_task = review_main.build_task
+
+        def interrupt_design(*args, **kwargs):
+            if kwargs.get("lens") == "design":
+                raise KeyboardInterrupt
+            return actual_build_task(*args, **kwargs)
+
+        with (
+            mock.patch.object(review_main, "build_task", side_effect=interrupt_design),
+            mock.patch.object(
+                sys, "argv", ["afk_review", str(input_path), str(result)]
+            ),
+            mock.patch.dict(os.environ, environment, clear=True),
+        ):
+            returncode = review_main.main()
+
+        self.assertEqual(returncode, 1)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "interrupted")
+        self.assertIsNone(output["review"])
+        self.assertEqual(
+            [item["lens"] for item in output["review_invocations"]], ["behavior"]
+        )
+        self.assertEqual(output["review_invocations"][0]["outcome"], "succeeded")
+        self.assertTrue(
+            (result / "reviewers/behavior/inference/receipt.json").is_file()
+        )
+        self.assertTrue(output["repository"]["unchanged"])
 
     def test_final_split_lens_mutation_never_publishes_an_aggregate(self):
         input_path, result, environment = self.prepare_review("mutate-final-lens")

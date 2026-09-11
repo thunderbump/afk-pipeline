@@ -359,6 +359,16 @@ def _stages(summary: dict[str, Any], project: str, run_id: str) -> list[dict[str
             if stage["sequence"] in by_component
             else _empty_metrics()
         )
+        component_elapsed = private.get("component_elapsed", {}).get(
+            stage["sequence"],
+            private.get("component_elapsed", {}).get(str(stage["sequence"])),
+        )
+        if (
+            component_elapsed is not None
+            and component_elapsed["coverage"] == "complete"
+        ):
+            metrics["elapsed_seconds"] = component_elapsed["seconds"]
+            metrics["elapsed_kind"] = "component_wall"
         measured = validation.get(
             stage["sequence"], validation.get(str(stage["sequence"]))
         )

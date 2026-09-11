@@ -1721,6 +1721,51 @@ def summarize_source(
         ExportError,
     ) as error:
         return _invalid_source(source, error, identity, assignment)
+    component_elapsed_measurements: dict[int, dict[str, Any]] = {}
+    try:
+        for entry in state["history"]:
+            if (
+                entry.get("component") != "review"
+                or entry.get("outcome") == "abandoned"
+            ):
+                continue
+            output_path = locate_invocation_file(
+                coordinator, continuation_roots, entry, "output.json"
+            )
+            component_relative = relative_evidence(output_path.parent)
+            output_relative = f"{component_relative}/output.json"
+            if (
+                checkpoint_evidence is not None
+                and output_relative not in checkpoint_evidence
+            ):
+                raise ValueError("metrics evidence was not authenticated")
+            output = _safe_evidence_json(
+                root,
+                component_relative,
+                "output.json",
+                checkpoint_evidence.get(output_relative)
+                if checkpoint_evidence is not None
+                else None,
+            )
+            if validate_component_output("review", output) != entry.get("outcome"):
+                raise ValueError("Review output disagrees with history")
+            # The component output measures logical Review wall time. It is
+            # intentionally distinct from the sum of reviewer receipts.
+            normalized = normalize_component_output("review", output, [])
+            duration = _number(normalized.get("duration_seconds"))
+            component_elapsed_measurements[entry["sequence"]] = {
+                "seconds": duration,
+                "coverage": "complete" if duration is not None else "unavailable",
+            }
+    except (
+        OSError,
+        ValueError,
+        TypeError,
+        KeyError,
+        json.JSONDecodeError,
+        ExportError,
+    ) as error:
+        return _invalid_source(source, error, identity, assignment)
     validation_durations = []
     validation_stage_measurements: dict[int, dict[str, Any]] = {}
     validation_intervals: list[tuple[str, str]] = []
@@ -2089,6 +2134,7 @@ def summarize_source(
                 for entry in state["history"]
             ],
             "repository_validation": validation_stage_measurements,
+            "component_elapsed": component_elapsed_measurements,
         }
     return result
 

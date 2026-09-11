@@ -304,6 +304,7 @@ class MetricsPublicationTests(unittest.TestCase):
                     {"sequence": 4, "component": "review", "outcome": "completed"}
                 ],
                 "repository_validation": {},
+                "component_elapsed": {4: {"seconds": 2.5, "coverage": "complete"}},
             },
             "inference": {"invocations": invocations},
             "timing": {},
@@ -328,7 +329,9 @@ class MetricsPublicationTests(unittest.TestCase):
             and row["ownership"]["kind"] == "component"
         ]
         self.assertEqual(len(logical), 1)
-        self.assertIsNone(logical[0]["elapsed_seconds"])
+        self.assertEqual(logical[0]["elapsed_seconds"], 2.5)
+        self.assertEqual(logical[0]["elapsed_kind"], "component_wall")
+        self.assertEqual([row["elapsed_seconds"] for row in reviewers], [0, 1, 1])
 
     def test_stage_projection_preserves_measured_zero_and_unavailable_metrics(self):
         for duration in (None, 0, 1.5):
@@ -343,6 +346,10 @@ class MetricsPublicationTests(unittest.TestCase):
                 if duration is not None:
                     validation["duration_seconds"] = duration
                 validation_path.write_text(json.dumps(validation))
+                review_path = source / "coordinator/04-review/output.json"
+                review = json.loads(review_path.read_text())
+                review["duration_seconds"] = 4.25
+                review_path.write_text(json.dumps(review))
                 inference = source / "coordinator/04-review/inference"
                 test_export_cli.ExportCliTests().add_inference_receipt(inference)
                 # This authenticated Pi stream has only agent_end, without a
@@ -373,7 +380,8 @@ class MetricsPublicationTests(unittest.TestCase):
                     "unavailable" if duration is None else "complete",
                 )
                 self.assertIsNone(rows[1]["elapsed_seconds"])
-                self.assertEqual(rows[4]["elapsed_seconds"], 1)
+                self.assertEqual(rows[4]["elapsed_seconds"], 4.25)
+                self.assertEqual(rows[4]["elapsed_kind"], "component_wall")
                 self.assertEqual(rows[4]["usage"], {})
                 self.assertEqual(rows[4]["usage_coverage"], "unavailable")
                 self.assertIsNone(rows[4]["cost"]["amount"])
