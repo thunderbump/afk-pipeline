@@ -1,13 +1,15 @@
 import json
+import os
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
 from afk_assess.contract import subject_state, validate_assessment
 from afk_change.contract import validate_change_output
 from afk_change.evidence import verify_source
-from afk_evidence.access import EvidenceUnavailable
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_inference import invoke
 from afk_inference.component import publish_runtime_logs, runtime_process
 from afk_related_work import snapshot_ids
@@ -57,7 +59,7 @@ def main() -> int:
     before = repository_state(workspace)
     if repair:
         progress("loading failed Validation evidence")
-        verify_validation_subject(response_input, before)
+        verify_validation_subject(response_input, before, input_path)
         selected = []
         objective = response_input["objective"]
     else:
@@ -213,13 +215,26 @@ def main() -> int:
     return 0 if outcome == "completed" else 1
 
 
-def verify_validation_subject(response_input, before):
+def verify_validation_subject(response_input, before, input_path):
     validation_directory = Path(response_input["validation_directory"])
     _validation_input, validation_output = validate_repairable_failure(
         validation_directory, Path(response_input["workspace"]), before
     )
     source = response_input["source"]
-    lineage = verify_source(source["kind"], Path(source["directory"]))
+    # Match the caller-owned authority used by Committed Change. References in
+    # retained evidence must never expand these roots themselves.
+    roots = (Path(input_path).absolute().parent, Path(source["directory"]))
+    configured = os.environ.get("AFK_STAGE_EVIDENCE_ROOTS")
+    if configured is not None:
+        roots = json.loads(configured)
+        if not isinstance(roots, list) or not all(
+            isinstance(root, str) and Path(root).is_absolute() for root in roots
+        ):
+            raise ValueError("invalid configured stage evidence roots")
+    with closing(EvidenceReader(roots)) as reader:
+        lineage = verify_source(
+            source["kind"], Path(source["directory"]), reader=reader
+        )
     if (
         subject_state(lineage.after)
         != subject_state(validation_output["repository"]["before"])
