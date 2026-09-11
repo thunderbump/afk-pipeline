@@ -1,9 +1,12 @@
 """Validate structured Review results against the exact reviewed Git object."""
 
+import hashlib
 import json
 import re
 import subprocess
 from pathlib import Path
+
+_MAX_INVOCATION_BYTES = 1024 * 1024
 
 REVIEW_AUDIT = {
     "completed": True,
@@ -93,6 +96,57 @@ def validate_review(
     return value
 
 
+def _validate_split_invocation_lens(
+    receipt: dict[str, object],
+    inference_directory: Path,
+    lens: str,
+    reader=None,
+) -> None:
+    """Bind a projected split lens to the receipt-authenticated task."""
+    invocation_path = inference_directory / "invocation.json"
+    raw = (
+        reader.bytes(invocation_path, _MAX_INVOCATION_BYTES)
+        if reader is not None
+        else invocation_path.read_bytes()
+    )
+    if len(raw) > _MAX_INVOCATION_BYTES:
+        raise ValueError("Review invocation lens disagrees with authenticated task")
+    try:
+        invocation = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "Review invocation lens disagrees with authenticated task"
+        ) from error
+    hashes = receipt.get("hashes")
+    invocation_hash = (
+        hashes.get("invocation_sha256") if isinstance(hashes, dict) else None
+    )
+    prompt = invocation.get("prompt") if isinstance(invocation, dict) else None
+    version = (
+        invocation.get("task_contract_version")
+        if isinstance(invocation, dict)
+        else None
+    )
+    marker = (
+        f"This is the isolated {lens} lens invocation. Report only findings "
+        f'with lens "{lens}".'
+    )
+    if (
+        not isinstance(invocation_hash, str)
+        or hashlib.sha256(raw).hexdigest() != invocation_hash
+        or not isinstance(invocation, dict)
+        or invocation.get("purpose") != "review"
+        or version not in {8, 9}
+        or invocation.get("requested_capability") != "READ_ONLY"
+        or not isinstance(prompt, dict)
+        or prompt.get("purpose") != "review"
+        or prompt.get("task_contract_version") != version
+        or not isinstance(prompt.get("trusted_task_instructions"), str)
+        or not prompt["trusted_task_instructions"].endswith(marker)
+    ):
+        raise ValueError("Review invocation lens disagrees with authenticated task")
+
+
 def validate_invocation_receipts(
     output: dict[str, object],
     review_directory: Path,
@@ -164,6 +218,8 @@ def validate_invocation_receipts(
             if reader is not None
             else json.loads(receipt_path.read_text())
         )
+        if mode == "split" and isinstance(receipt, dict):
+            _validate_split_invocation_lens(receipt, receipt_path.parent, lens, reader)
         succeeded = invocation.get("outcome") == "succeeded"
         terminal = (
             receipt.get("terminal_response") if isinstance(receipt, dict) else None

@@ -580,6 +580,7 @@ class ExportCliTests(unittest.TestCase):
             behavior = review_path.parent / "reviewers/behavior/inference"
             behavior.parent.mkdir(parents=True)
             self.add_inference_receipt(behavior)
+            self.bind_split_review_lens(behavior, "behavior")
             response_path = behavior / "attempts/1/response.json"
             terminal_text = json.dumps(accepted_review)
             response_path.write_text(json.dumps(terminal_text))
@@ -593,6 +594,7 @@ class ExportCliTests(unittest.TestCase):
             design = review_path.parent / "reviewers/design/inference"
             design.parent.mkdir(parents=True)
             self.add_inference_receipt(design)
+            self.bind_split_review_lens(design, "design")
             receipt_path = design / "receipt.json"
             receipt = json.loads(receipt_path.read_text())
             receipt["attempts"][0].pop("validation")
@@ -664,6 +666,14 @@ class ExportCliTests(unittest.TestCase):
                 artifact_sources,
             )
             self.assertFalse(any("standards" in path for path in artifact_sources))
+
+            # A receipt copied from a different lens remains internally
+            # self-consistent, but must not authorize the projected outer lens.
+            self.bind_split_review_lens(behavior, "design")
+            tampered = self.export(source, root / "tampered-lens")
+            self.assertEqual(tampered.returncode, 1)
+            self.assertFalse((root / "tampered-lens").exists())
+            self.assertEqual(json.loads(tampered.stdout)["error"], "invalid_run")
 
     def test_rejects_null_agent_for_successful_component(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -3343,6 +3353,33 @@ class ExportCliTests(unittest.TestCase):
         (invocation / "output.json").write_text(json.dumps(preflight_output))
         (invocation / "events.jsonl").write_text('{"type":"message_end"}\n')
         (invocation / "stderr.log").write_text("")
+
+    def bind_split_review_lens(self, inference, lens):
+        marker = (
+            f"This is the isolated {lens} lens invocation. Report only findings "
+            f'with lens "{lens}".'
+        )
+        prompt_path = inference / "prompt.json"
+        prompt = json.loads(prompt_path.read_text())
+        prompt.update(
+            purpose="review",
+            task_contract_version=8,
+            trusted_task_instructions=marker,
+        )
+        prompt_path.write_text(json.dumps(prompt) + "\n")
+        invocation_path = inference / "invocation.json"
+        invocation = json.loads(invocation_path.read_text())
+        invocation.update(task_contract_version=8, prompt=prompt)
+        invocation_path.write_text(json.dumps(invocation) + "\n")
+        receipt_path = inference / "receipt.json"
+        receipt = json.loads(receipt_path.read_text())
+        receipt["hashes"]["prompt_sha256"] = hashlib.sha256(
+            prompt_path.read_bytes()
+        ).hexdigest()
+        receipt["hashes"]["invocation_sha256"] = hashlib.sha256(
+            invocation_path.read_bytes()
+        ).hexdigest()
+        receipt_path.write_text(json.dumps(receipt) + "\n")
 
     def add_inference_receipt(self, inference):
         inference.mkdir()

@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import unittest
@@ -17,6 +18,26 @@ class ReviewContractTest(unittest.TestCase):
             "findings": [],
             **({"audit": REVIEW_AUDIT} if audit is None else {"audit": audit}),
         }
+
+    def write_split_invocation(self, inference, lens):
+        marker = (
+            f"This is the isolated {lens} lens invocation. Report only findings "
+            f'with lens "{lens}".'
+        )
+        invocation = {
+            "schema_version": 1,
+            "purpose": "review",
+            "task_contract_version": 8,
+            "prompt": {
+                "purpose": "review",
+                "task_contract_version": 8,
+                "trusted_task_instructions": marker,
+            },
+            "requested_capability": "READ_ONLY",
+        }
+        raw = json.dumps(invocation).encode()
+        (inference / "invocation.json").write_bytes(raw)
+        return hashlib.sha256(raw).hexdigest()
 
     def test_accepts_the_exact_declared_audit(self):
         value = self.review()
@@ -94,12 +115,14 @@ class ReviewContractTest(unittest.TestCase):
                 review = self.review()
                 inference = directory / "reviewers" / lens / "inference"
                 inference.mkdir(parents=True)
+                invocation_hash = self.write_split_invocation(inference, lens)
                 (inference / "receipt.json").write_text(
                     json.dumps(
                         {
                             "outcome": "succeeded",
                             "protocol": {"status": "accepted"},
                             "terminal_response": json.dumps(review),
+                            "hashes": {"invocation_sha256": invocation_hash},
                         }
                     )
                 )
@@ -149,6 +172,7 @@ class ReviewContractTest(unittest.TestCase):
             for lens, outcome, review in cases:
                 inference = directory / "reviewers" / lens / "inference"
                 inference.mkdir(parents=True)
+                invocation_hash = self.write_split_invocation(inference, lens)
                 receipt = {
                     "outcome": outcome,
                     "protocol": {
@@ -159,6 +183,7 @@ class ReviewContractTest(unittest.TestCase):
                         if review is not None
                         else None
                     ),
+                    "hashes": {"invocation_sha256": invocation_hash},
                 }
                 (inference / "receipt.json").write_text(json.dumps(receipt))
                 invocations.append({"lens": lens, "outcome": outcome, "review": review})
