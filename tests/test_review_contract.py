@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from afk_evidence.access import MAX_VALIDATION_LOG_BYTES
+from afk_inference.runtime import PiAdapter
 from afk_review.contract import (
     REVIEW_AUDIT,
     validate_invocation_receipts,
@@ -237,49 +239,72 @@ class ReviewContractTest(unittest.TestCase):
                 directory,
             )
 
-    def test_receipt_binding_accepts_large_authentic_split_invocations(self):
+    def test_receipt_binding_accepts_supported_boundary_pi_split_invocation(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)
-            review = self.review()
-            invocations = []
-            for lens in ("behavior", "design", "standards"):
-                inference = directory / "reviewers" / lens / "inference"
-                inference.mkdir(parents=True)
-                marker = (
-                    f"This is the isolated {lens} lens invocation. Report only findings "
-                    f'with lens "{lens}".'
-                )
-                # Review carries full Validation logs in task data and Pi's
-                # rendered prompt. Even modest authentic logs exceed the old
-                # generic 1 MiB JSON cap once both representations are retained.
-                retained_log = "validation output\n" * 70_000
-                invocation = {
-                    "schema_version": 1,
+            inference = directory / "reviewers" / "behavior" / "inference"
+            inference.mkdir(parents=True)
+            marker = (
+                "This is the isolated behavior lens invocation. Report only findings "
+                'with lens "behavior".'
+            )
+            # Exercise Pi's real rendering: JSON escaping doubles each retained
+            # newline-filled log, then the rendered prompt base64-encodes that
+            # structured task data. Both logs are at the producer's supported
+            # boundary rather than at a small proxy size.
+            retained_log = "\n" * MAX_VALIDATION_LOG_BYTES
+            prompt = PiAdapter(model="test-model", thinking="high").render(
+                {
+                    "system": "Review system instructions.",
                     "purpose": "review",
                     "task_contract_version": 8,
-                    "prompt": {
-                        "purpose": "review",
-                        "task_contract_version": 8,
-                        "trusted_task_instructions": marker,
-                        "untrusted_task_data": {
-                            "validation": {"stdout": retained_log, "stderr": ""}
-                        },
-                        "task_prompt": retained_log,
+                    "trusted_task_instructions": marker,
+                    "untrusted_task_data": {
+                        "validation": {
+                            "stdout": retained_log,
+                            "stderr": retained_log,
+                        }
                     },
-                    "requested_capability": "READ_ONLY",
                 }
-                raw = json.dumps(invocation).encode()
-                self.assertGreater(len(raw), 1024 * 1024)
-                (inference / "invocation.json").write_bytes(raw)
-                (inference / "receipt.json").write_text(
+            )
+            invocation = {
+                "schema_version": 1,
+                "purpose": "review",
+                "task_contract_version": 8,
+                "prompt": prompt,
+                "requested_capability": "READ_ONLY",
+            }
+            raw = json.dumps(invocation).encode()
+            self.assertGreater(len(raw), 128 * 1024 * 1024)
+            (inference / "invocation.json").write_bytes(raw)
+            review = self.review()
+            (inference / "receipt.json").write_text(
+                json.dumps(
+                    {
+                        "outcome": "succeeded",
+                        "protocol": {"status": "accepted"},
+                        "terminal_response": json.dumps(review),
+                        "hashes": {
+                            "invocation_sha256": hashlib.sha256(raw).hexdigest()
+                        },
+                    }
+                )
+            )
+
+            invocations = [
+                {"lens": "behavior", "outcome": "succeeded", "review": review}
+            ]
+            for lens in ("design", "standards"):
+                lens_inference = directory / "reviewers" / lens / "inference"
+                lens_inference.mkdir(parents=True)
+                invocation_hash = self.write_split_invocation(lens_inference, lens)
+                (lens_inference / "receipt.json").write_text(
                     json.dumps(
                         {
                             "outcome": "succeeded",
                             "protocol": {"status": "accepted"},
                             "terminal_response": json.dumps(review),
-                            "hashes": {
-                                "invocation_sha256": hashlib.sha256(raw).hexdigest()
-                            },
+                            "hashes": {"invocation_sha256": invocation_hash},
                         }
                     )
                 )
