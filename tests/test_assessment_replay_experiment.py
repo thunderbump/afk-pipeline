@@ -146,3 +146,66 @@ class AssessmentReplayTests(unittest.TestCase):
         self.assertEqual(result["assessment"], output)
         self.assertTrue(result["workspace_unchanged"])
         self.assertTrue(result["packet_unchanged"])
+
+    def test_comparison_changes_only_instructions(self):
+        output = {
+            "summary": "Reviewed",
+            "decisions": [
+                {
+                    "finding_index": i,
+                    "defect_decision": "confirmed",
+                    "rationale": "Required behavior is absent.",
+                    "scope": {
+                        "kind": "current",
+                        "rationale": "Current objective owns it.",
+                    },
+                }
+                for i in range(2)
+            ],
+        }
+        packets = []
+        for variant in ("baseline", "evidence-first"):
+            directory = self.root / variant
+            result = run_call(
+                prepare(self.item),
+                directory,
+                self.repo,
+                FixtureAdapter((ScriptedResult(response=json.dumps(output)),)),
+                30,
+                variant,
+                2,
+            )
+            self.assertEqual(result["outcome"], "succeeded")
+            self.assertEqual(result["variant"], variant)
+            packets.append(
+                json.loads((directory / "inference/invocation.json").read_text())
+            )
+        self.assertEqual(
+            packets[0]["prompt"]["untrusted_task_data"],
+            packets[1]["prompt"]["untrusted_task_data"],
+        )
+        self.assertTrue(
+            packets[1]["prompt"]["trusted_task_instructions"].endswith(
+                packets[0]["prompt"]["trusted_task_instructions"]
+            )
+        )
+
+    def test_retained_assessment_uses_original_review(self):
+        path = Path(self.item["invocation"])
+        invocation = json.loads(path.read_text())
+        data = invocation["prompt"]["untrusted_task_data"]
+        data["review"] = {
+            "summary": "Original review",
+            "findings": [self.finding],
+            "audit": REVIEW_AUDIT,
+        }
+        data["findings"] = [self.finding]
+        path.write_text(json.dumps(invocation))
+        self.item.update(
+            source_kind="retained_assessment",
+            reviews=[],
+            hashes={str(path): hashlib.sha256(path.read_bytes()).hexdigest()},
+        )
+        case = prepare(self.item)
+        self.assertEqual(case["data"]["review"], data["review"])
+        self.assertEqual(case["observations"][0]["source"], str(path))

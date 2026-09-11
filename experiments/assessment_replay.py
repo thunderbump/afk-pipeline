@@ -84,6 +84,25 @@ def prepare(item):
                 }
             )
             findings.append(copy.deepcopy(finding))
+    if item.get("source_kind") == "retained_assessment":
+        if item["reviews"]:
+            raise ValueError("retained Assessment case cannot replace findings")
+        review = validate_review(
+            data["review"], repo, head, {r["id"] for r in data["related_work"]}
+        )
+        if data["findings"] != review["findings"]:
+            raise ValueError("retained finding copies disagree")
+        findings = copy.deepcopy(review["findings"])
+        summaries = [review["summary"]]
+        observations = [
+            {
+                "finding_index": i,
+                "source": item["invocation"],
+                "source_finding_index": i,
+                "reviewer": "retained-review",
+            }
+            for i in range(len(findings))
+        ]
     if not findings:
         raise ValueError("empty finding sets do not need live replay")
     review = {
@@ -128,12 +147,29 @@ def materialize(case, directory, workspace):
     return data, packet
 
 
-def run_call(case, directory, workspace, adapter, timeout):
+def run_call(
+    case, directory, workspace, adapter, timeout, variant="baseline", repetition=1
+):
+    if variant not in {"baseline", "evidence-first"}:
+        raise ValueError("unknown prompt variant")
+    instructions = ASSESSMENT_INSTRUCTIONS
+    if variant == "evidence-first":
+        instructions = (
+            Path(__file__).with_name("assessment_evidence_first.txt").read_text()
+            + "\n\n"
+            + instructions
+        )
     directory.mkdir()
     data, packet = materialize(case, directory, workspace)
     before = workspace_state(workspace)
     started = time.monotonic()
-    record = {"case": case["id"], "before": before, "started_at_unix": time.time()}
+    record = {
+        "case": case["id"],
+        "variant": variant,
+        "repetition": repetition,
+        "before": before,
+        "started_at_unix": time.time(),
+    }
     ids = {item["id"] for item in data["related_work"]}
 
     def validate(text):
@@ -146,7 +182,7 @@ def run_call(case, directory, workspace, adapter, timeout):
         result = InferenceRuntime().invoke(
             purpose="assessment_replay",
             task_contract_version=5,
-            trusted_task_instructions=ASSESSMENT_INSTRUCTIONS + "\n\n" + CONTEXT_NOTE,
+            trusted_task_instructions=instructions + "\n\n" + CONTEXT_NOTE,
             untrusted_task_data=data,
             requested_capability=Capability.READ_ONLY,
             execution_root=workspace,
@@ -177,6 +213,11 @@ def main():
     parser.add_argument("manifest", type=Path)
     parser.add_argument("destination", type=Path)
     parser.add_argument("--run", action="store_true")
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="both frozen prompts, two repetitions per case",
+    )
     args = parser.parse_args()
     manifest, manifest_hash = read_json(args.manifest)
     if not isinstance(manifest, list) or not 1 <= len(manifest) <= 12:
@@ -204,7 +245,18 @@ def main():
     write_json(
         destination / "experiment.json",
         {
-            "kind": "assessment-replay",
+            "kind": "assessment-prompt-comparison"
+            if args.compare
+            else "assessment-replay",
+            "candidate_instructions": Path(__file__)
+            .with_name("assessment_evidence_first.txt")
+            .read_text()
+            if args.compare
+            else None,
+            "repetitions": 2 if args.compare else 1,
+            "variants": ["baseline", "evidence-first"]
+            if args.compare
+            else ["baseline"],
             "manifest_sha256": manifest_hash,
             "runtime_revision": git(
                 Path(__file__).resolve().parent.parent, "rev-parse", "HEAD"
@@ -235,17 +287,31 @@ def main():
     (destination / "workspaces").mkdir()
     (destination / "calls").mkdir()
     jobs = []
-    for case in cases:
-        workspace = destination / "workspaces" / case["id"]
-        workspace.mkdir()
-        git(workspace, "init", "-q")
-        git(workspace, "fetch", "--no-tags", str(case["repo"]), case["head"])
-        git(workspace, "checkout", "--detach", "FETCH_HEAD")
-        jobs.append((case, destination / "calls" / case["id"], workspace))
+    for repetition in range(1, 3 if args.compare else 2):
+        for index, case in enumerate(cases):
+            variants = ["baseline", "evidence-first"] if args.compare else ["baseline"]
+            if args.compare and (index + repetition) % 2 == 0:
+                variants.reverse()
+            for variant in variants:
+                slot = (
+                    f"{case['id']}-{variant}-{repetition}"
+                    if args.compare
+                    else case["id"]
+                )
+                workspace = destination / "workspaces" / slot
+                workspace.mkdir()
+                git(workspace, "init", "-q")
+                git(workspace, "fetch", "--no-tags", str(case["repo"]), case["head"])
+                git(workspace, "checkout", "--detach", "FETCH_HEAD")
+                jobs.append(
+                    (case, destination / "calls" / slot, workspace, variant, repetition)
+                )
     adapter = PiAdapter(model="gpt-5.6-sol", thinking="medium")
     results = []
     with ThreadPoolExecutor(max_workers=3) as pool:
-        futures = [pool.submit(run_call, *job, adapter, 1800) for job in jobs]
+        futures = [
+            pool.submit(run_call, *job[:3], adapter, 1800, *job[3:]) for job in jobs
+        ]
         for future in as_completed(futures):
             result = future.result()
             results.append(result)
@@ -253,7 +319,7 @@ def main():
                 destination / "summary.json", {"complete": False, "calls": results}
             )
             print(
-                f"{len(results)}/{len(jobs)} {result['case']}: {result['outcome']}",
+                f"{len(results)}/{len(jobs)} {result['case']} {result['variant']} r{result['repetition']}: {result['outcome']}",
                 flush=True,
             )
     unchanged = all(
