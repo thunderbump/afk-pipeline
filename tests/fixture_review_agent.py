@@ -57,15 +57,33 @@ elif scenario in ("null-content", "object-content", "invalid-text-part"):
     )
     print(json.dumps({"type": "agent_end"}), flush=True)
     raise SystemExit
-elif scenario in ("mutate-workspace", "damage-git"):
+elif scenario in (
+    "mutate-workspace",
+    "mutate-final-lens",
+    "mutate-context",
+    "damage-git",
+):
     review = {
         "summary": "No actionable defects found.",
         "findings": [],
         "audit": AUDIT,
     }
-    if scenario == "mutate-workspace":
+    if scenario == "mutate-workspace" or (
+        scenario == "mutate-final-lens"
+        and "isolated standards lens invocation" in task_prompt()
+    ):
         Path("reviewer-change.txt").write_text("reviewer changed the workspace\n")
-    else:
+    elif scenario == "mutate-context":
+        encoded = (
+            task_prompt()
+            .split('<AFK_UNTRUSTED_TASK_DATA encoding="base64-json">\n', 1)[1]
+            .splitlines()[0]
+        )
+        task = json.loads(base64.b64decode(encoded))
+        Path(task["work_context"]["files"]["work_diff"]["path"]).write_text(
+            "corrupted during review\n"
+        )
+    elif scenario == "damage-git":
         Path(".git").rename(".git-damaged")
 elif scenario in (
     "no-findings",

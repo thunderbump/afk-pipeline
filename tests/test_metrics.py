@@ -1075,6 +1075,44 @@ class MetricsReportTests(unittest.TestCase):
             },
         )
 
+    def test_abandoned_split_review_uses_frozen_input_for_three_allowances(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            coordinator = root / "coordinator"
+            review = coordinator / "01-review"
+            review.mkdir(parents=True)
+            (review / "input.json").write_text(json.dumps({"review_mode": "split"}))
+            observed = {
+                "identity": {"run_id": "run-1"},
+                "assignment": {"objective": "objective"},
+                "state": {
+                    "history": [
+                        {
+                            "sequence": 1,
+                            "component": "review",
+                            "directory": "01-review",
+                            "outcome": "abandoned",
+                        }
+                    ],
+                    "status": "failed",
+                },
+                "coordinator": coordinator,
+                "preparation": {"timestamps": {}, "repository": {}},
+                "terminal_directory": coordinator,
+                "output": {"outcome": "failed"},
+                "request": {"validation": {}},
+                "bead_id": None,
+            }
+            with mock.patch("afk_metrics.report.load_source", return_value=observed):
+                report = summarize_source(root)
+        coverage = report["inference"]["evidence_coverage"]
+        self.assertEqual(coverage["expected"], 3)
+        self.assertEqual(coverage["measured"], 0)
+        self.assertEqual(
+            [item["ownership"]["lens"] for item in coverage["missing"]],
+            ["behavior", "design", "standards"],
+        )
+
     def test_continuation_alias_rejects_a_distinct_authenticated_receipt(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -1084,6 +1122,8 @@ class MetricsReportTests(unittest.TestCase):
             retained = continuation / "01-review/inference"
             original.parent.mkdir(parents=True)
             retained.parent.mkdir(parents=True)
+            (original.parent / "input.json").write_text("{}")
+            (retained.parent / "input.json").write_text("{}")
             helper = test_export_cli.ExportCliTests()
             helper.add_inference_receipt(original)
             helper.add_inference_receipt(retained)
@@ -1123,6 +1163,7 @@ class MetricsReportTests(unittest.TestCase):
             coordinator = root / "coordinator"
             original = coordinator / "01-review/inference"
             original.parent.mkdir(parents=True)
+            (original.parent / "input.json").write_text("{}")
             InferenceRuntime().invoke(
                 purpose="review",
                 trusted_task_instructions="Return the value.",
@@ -1137,6 +1178,7 @@ class MetricsReportTests(unittest.TestCase):
             # Preserve the byte-identical invocation identity while assigning
             # the copied evidence to a different stage directory.
             shutil.copytree(original, coordinator / "02-review/inference")
+            (coordinator / "02-review/input.json").write_text("{}")
             history = [
                 {
                     "sequence": sequence,

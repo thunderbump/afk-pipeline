@@ -1569,6 +1569,41 @@ class CoordinatorCliTest(unittest.TestCase):
                 run_id="missing-context",
             )
 
+    def test_context_corruption_during_review_seals_truthful_failed_stage(self):
+        assignment_path, request_path = self.prepare_run(
+            max_responses=1, full_review=True
+        )
+        assignment = json.loads(assignment_path.read_text())
+        assignment["work_base"] = self.git("rev-parse", "HEAD")
+        self.write_json(assignment_path, assignment)
+        request = json.loads(request_path.read_text())
+        request["validation"]["command"] = [
+            sys.executable,
+            "-c",
+            "from pathlib import Path; raise SystemExit(0 if 'response applied' in Path('README.md').read_text() else 7)",
+        ]
+        self.write_json(request_path, request)
+        run = self.root / "corrupt-context-run"
+
+        completed = self.invoke(
+            request_path,
+            run,
+            response_scenario="validation-repair",
+            review_scenario="mutate-context",
+        )
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((run / "output.json").read_text())
+        self.assertEqual(output["failed_component"], "review")
+        review_output = json.loads((run / "06-review/output.json").read_text())
+        self.assertEqual(review_output["outcome"], "failed")
+        self.assertIsNone(review_output["review"])
+        self.assertIsNone(review_output["agent"])
+        self.assertIn("hash disagrees", review_output["review_error"])
+        self.assertEqual(review_output["process"]["exit_code"], 0)
+        self.assertTrue((run / "06-review/inference/receipt.json").is_file())
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
     def test_large_complete_work_diff_stays_in_readable_evidence_files(self):
         assignment_path, request_path = self.prepare_run(
             max_responses=0, full_review=True

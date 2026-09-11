@@ -218,7 +218,12 @@ def _committed_response(source_directory, visited, lineage):
         ):
             raise ValueError("Validation and reviewed Change subjects disagree")
         reviewed = validate_output_projection(
-            review_output, workspace, before["head"], related_work_ids
+            review_output,
+            workspace,
+            before["head"],
+            related_work_ids,
+            review_directory,
+            lineage.reader,
         )
         assessed = validate_assessment(reviewed, assessment_value, related_work_ids)
         selected = actionable_findings(reviewed, assessed)

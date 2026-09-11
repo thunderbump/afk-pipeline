@@ -128,9 +128,93 @@ def append_response_cycle(source, *, no_action):
     return history
 
 
+def review_variant_matrix():
+    """Return portable producer-contract cases that require no live inference."""
+    duplicate = {
+        "lens": "behavior",
+        "title": "Synthetic duplicate",
+        "details": "The same authentic observation is intentionally retained twice.",
+        "locations": [{"path": "README.md", "line": 1}],
+        "scope_claim": {
+            "kind": "current",
+            "rationale": "The synthetic objective owns README.md.",
+        },
+    }
+    return {
+        "schema_version": 1,
+        "cases": [
+            {
+                "name": "combined-default",
+                "request": {},
+                "effective_mode": "combined",
+                "invocations": [{"lens": "combined", "findings": []}],
+                "aggregate": {"findings": []},
+                "assessment_started": True,
+            },
+            {
+                "name": "split-empty-and-duplicates",
+                "request": {"review_mode": "split"},
+                "effective_mode": "split",
+                "invocations": [
+                    {"lens": "behavior", "findings": [duplicate, duplicate]},
+                    {"lens": "design", "findings": []},
+                    {"lens": "standards", "findings": []},
+                ],
+                "aggregate": {
+                    "findings": [duplicate, duplicate],
+                    "provenance": [
+                        {
+                            "finding_index": 0,
+                            "lens": "behavior",
+                            "source_finding_index": 0,
+                        },
+                        {
+                            "finding_index": 1,
+                            "lens": "behavior",
+                            "source_finding_index": 1,
+                        },
+                    ],
+                },
+                "assessment_started": True,
+            },
+            {
+                "name": "split-partial-failure",
+                "request": {"review_mode": "split"},
+                "effective_mode": "split",
+                "invocations": [
+                    {"lens": "behavior", "outcome": "succeeded"},
+                    {"lens": "design", "outcome": "timed_out"},
+                    {"lens": "standards", "outcome": "not_started"},
+                ],
+                "aggregate": None,
+                "assessment_started": False,
+            },
+            {
+                "name": "split-abandoned-continuation",
+                "request": {"review_mode": "split"},
+                "effective_mode": "split",
+                "invocations": [
+                    {"lens": "behavior", "outcome": "abandoned"},
+                    {"lens": "design", "outcome": "not_started"},
+                    {"lens": "standards", "outcome": "not_started"},
+                ],
+                "aggregate": None,
+                "assessment_started": False,
+                "continuation": {
+                    "repair": "split",
+                    "resume": "split",
+                    "exhausted": "split",
+                    "reuse_partial_invocations": False,
+                },
+            },
+        ],
+    }
+
+
 def generate(destination):
     """Write only to a new directory; preserve the original upstream baselines."""
     destination.mkdir()
+    write_json(destination / "review-variants.json", review_variant_matrix())
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         requests = []

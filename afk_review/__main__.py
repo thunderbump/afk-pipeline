@@ -172,8 +172,33 @@ def main() -> int:
 
     progress("observing repository after review")
     unchanged = None if after is None else before == after
-    all_succeeded = len(results) == len(lenses) and all(
+    evidence_error = None
+    if previous is not None:
+        reader = EvidenceReader((result_directory,))
+        try:
+            validate_artifacts(
+                result_directory,
+                review_input["work_context"],
+                evidence["work_context"],
+                reader,
+                evidence["change"],
+            )
+        except (OSError, ValueError, EvidenceUnavailable) as error:
+            evidence_error = str(error)
+        finally:
+            reader.close()
+
+    # A clean aggregate is admissible only after both the final repository
+    # observation and retained-evidence checks pass. In particular, success of
+    # the last split invocation cannot outrank a mutation it made.
+    invocations_succeeded = len(results) == len(lenses) and all(
         result.outcome == "succeeded" for result in results
+    )
+    all_succeeded = (
+        invocations_succeeded
+        and unchanged is True
+        and observation_error is None
+        and evidence_error is None
     )
     if all_succeeded and mode == "split":
         findings = []
@@ -225,23 +250,11 @@ def main() -> int:
         else "timed_out"
         if failed_result is not None and failed_result.outcome == "timed_out"
         else "completed"
-        if all_succeeded and unchanged is True and observation_error is None
+        if all_succeeded
         else "failed"
     )
     agent = {"status": "completed"} if all_succeeded else None
-    if previous is not None:
-        reader = EvidenceReader((result_directory,))
-        try:
-            validate_artifacts(
-                result_directory,
-                review_input["work_context"],
-                evidence["work_context"],
-                reader,
-                evidence["change"],
-            )
-        finally:
-            reader.close()
-    review_error = next(
+    review_error = evidence_error or next(
         (
             record["review_error"]
             for record in invocation_records

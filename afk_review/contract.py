@@ -1,5 +1,6 @@
 """Validate structured Review results against the exact reviewed Git object."""
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -92,13 +93,60 @@ def validate_review(
     return value
 
 
+def validate_invocation_receipts(
+    output: dict[str, object],
+    review_directory: Path,
+    reader=None,
+) -> None:
+    """Bind projected invocation Reviews to retained accepted receipts."""
+    mode = output.get("review_mode")
+    if mode not in {"combined", "split"}:
+        return
+    expected_lenses = (
+        ["combined"] if mode == "combined" else ["behavior", "design", "standards"]
+    )
+    invocations = output.get("review_invocations")
+    if not isinstance(invocations, list) or len(invocations) != len(expected_lenses):
+        raise ValueError("Review invocation projection is malformed")
+    for invocation, lens in zip(invocations, expected_lenses):
+        if not isinstance(invocation, dict) or invocation.get("lens") != lens:
+            raise ValueError("Review invocation projection is malformed")
+        relative = (
+            Path("inference")
+            if lens == "combined"
+            else Path("reviewers") / lens / "inference"
+        )
+        receipt_path = review_directory / relative / "receipt.json"
+        receipt = (
+            reader.json(receipt_path)
+            if reader is not None
+            else json.loads(receipt_path.read_text())
+        )
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("outcome") != "succeeded"
+            or not isinstance(receipt.get("protocol"), dict)
+            or receipt["protocol"].get("status") != "accepted"
+            or receipt.get("terminal_response") != invocation.get("review")
+        ):
+            raise ValueError("Review invocation receipt disagrees with projection")
+
+
 def validate_output_projection(
     output: object,
     workspace: Path,
     reviewed_head: str,
     related_work_ids: set[str] | frozenset[str] = frozenset(),
+    review_directory: Path | None = None,
+    reader=None,
 ) -> dict[str, object]:
-    """Validate an optional multi-invocation Review-to-aggregate mapping."""
+    """Validate an optional multi-invocation Review-to-aggregate mapping.
+
+    When retained evidence is being consumed, ``review_directory`` binds each
+    projected raw Review to the accepted terminal response in its invocation
+    receipt. The receipt, rather than the mutable copy in output.json, is the
+    authoritative per-invocation result.
+    """
     if not isinstance(output, dict):
         raise TypeError("Review output must be an object")
     aggregate = validate_review(
@@ -125,6 +173,8 @@ def validate_output_projection(
         or not isinstance(provenance, list)
     ):
         raise ValueError("Review invocation projection is malformed")
+    if review_directory is not None:
+        validate_invocation_receipts(output, review_directory, reader)
     source_reviews = []
     for invocation, lens in zip(invocations, expected_lenses):
         expected_artifacts = (

@@ -1495,14 +1495,21 @@ def summarize_source(
     for entry in state["history"]:
         component = entry["component"]
         if component == "review":
-            output_path = locate_invocation_file(
-                coordinator, continuation_roots, entry, "output.json"
+            input_path = locate_invocation_file(
+                coordinator, continuation_roots, entry, "input.json"
             )
             try:
-                review_output = json.loads(output_path.read_text())
-            except (OSError, json.JSONDecodeError):
-                review_output = {}
-            if review_output.get("review_mode") == "split":
+                review_input = json.loads(input_path.read_text())
+                review_mode = review_input.get("review_mode", "combined")
+            except FileNotFoundError:
+                # Historical synthetic evidence without a component request
+                # predates split Review and is necessarily combined.
+                review_mode = "combined"
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError("invalid retained Review input") from error
+            if review_mode not in {"combined", "split"}:
+                raise ValueError("invalid retained Review mode")
+            if review_mode == "split":
                 for lens in ("behavior", "design", "standards"):
                     receipt_path = locate_invocation_file(
                         coordinator,

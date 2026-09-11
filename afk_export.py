@@ -1542,18 +1542,26 @@ def artifact_candidates(observed):
             # inference invocation consumed by the metrics report. Include
             # that receipt-bound evidence in the normalized checkpoint.
             invocation_names = [(None, "inference/receipt.json")]
-            if entry["component"] == "review" and entry["outcome"] != "abandoned":
-                candidate_output = locate_invocation_file(
+            if entry["component"] == "review":
+                candidate_input = locate_invocation_file(
                     observed["coordinator"],
                     observed.get("continuations", []),
                     entry,
-                    "output.json",
+                    "input.json",
                 )
                 try:
-                    split = read_json(candidate_output).get("review_mode") == "split"
-                except (OSError, ValueError, json.JSONDecodeError):
-                    split = False
-                if split:
+                    review_mode = read_json(candidate_input).get(
+                        "review_mode", "combined"
+                    )
+                except FileNotFoundError:
+                    # Pre-contract synthetic/legacy evidence had no retained
+                    # component input and therefore can only denote combined.
+                    review_mode = "combined"
+                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    raise ExportError("invalid retained Review input") from error
+                if review_mode not in {"combined", "split"}:
+                    raise ExportError("invalid retained Review mode")
+                if review_mode == "split":
                     invocation_names = [
                         (lens, f"reviewers/{lens}/inference/receipt.json")
                         for lens in ("behavior", "design", "standards")
@@ -2804,6 +2812,13 @@ def normalize_run(observed, include_evidence=True):
                 != observed["assignment"]["work_base"]
             ):
                 raise ExportError("Assignment work base disagrees with initial Attempt")
+            if component == "review":
+                from afk_review.contract import validate_invocation_receipts
+
+                try:
+                    validate_invocation_receipts(output, directory)
+                except (OSError, ValueError, json.JSONDecodeError) as error:
+                    raise ExportError(str(error)) from error
             if component == "review" and (
                 "work_base" in observed["assignment"] or "work_context" in output
             ):

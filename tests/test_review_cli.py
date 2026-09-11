@@ -360,6 +360,26 @@ class ReviewCliTest(unittest.TestCase):
         self.assertFalse(output["repository"]["unchanged"])
         self.assertTrue(output["repository"]["after"]["dirty"])
 
+    def test_final_split_lens_mutation_never_publishes_an_aggregate(self):
+        input_path, result, environment = self.prepare_review("mutate-final-lens")
+        review_input = json.loads(input_path.read_text())
+        review_input["review_mode"] = "split"
+        self.write_json(input_path, review_input)
+
+        completed = self.invoke(input_path, result, environment)
+
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((result / "output.json").read_text())
+        self.assertEqual(output["outcome"], "failed")
+        self.assertIsNone(output["review"])
+        self.assertIsNone(output["agent"])
+        self.assertFalse(output["repository"]["unchanged"])
+        self.assertEqual(len(output["review_invocations"]), 3)
+        self.assertTrue(
+            all(item["outcome"] == "succeeded" for item in output["review_invocations"])
+        )
+        self.assertEqual(output["finding_provenance"], [])
+
     def test_agent_protocol_and_post_review_observation_failures_are_sealed(self):
         result, completed = self.run_review("invalid-events")
 

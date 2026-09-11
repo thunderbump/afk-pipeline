@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tests.metrics_publication_fixtures import FIXTURES, generate
+from tests.metrics_publication_fixtures import FIXTURES, generate, review_variant_matrix
 
 
 class PopulatedPublicationTests(unittest.TestCase):
@@ -133,6 +133,30 @@ class PopulatedPublicationTests(unittest.TestCase):
         )
         self.assertNotIn("observed_identities", abandoned)
 
+    def test_generated_review_variant_matrix_preserves_failure_and_provenance(self):
+        committed = json.loads((FIXTURES / "review-variants.json").read_text())
+        self.assertEqual(committed, review_variant_matrix())
+        cases = {case["name"]: case for case in committed["cases"]}
+        self.assertEqual(cases["combined-default"]["effective_mode"], "combined")
+        split = cases["split-empty-and-duplicates"]
+        self.assertEqual(
+            [len(row["findings"]) for row in split["invocations"]], [2, 0, 0]
+        )
+        self.assertEqual(len(split["aggregate"]["findings"]), 2)
+        self.assertEqual(
+            [row["source_finding_index"] for row in split["aggregate"]["provenance"]],
+            [0, 1],
+        )
+        partial = cases["split-partial-failure"]
+        self.assertIsNone(partial["aggregate"])
+        self.assertFalse(partial["assessment_started"])
+        continuation = cases["split-abandoned-continuation"]["continuation"]
+        self.assertEqual(
+            {continuation[key] for key in ("repair", "resume", "exhausted")},
+            {"split"},
+        )
+        self.assertFalse(continuation["reuse_partial_invocations"])
+
     def test_committed_and_regenerated_cases_have_bound_measured_variants(self):
         self.assert_cases(
             FIXTURES, json.loads((FIXTURES / "valid-publication.json").read_text())
@@ -141,6 +165,10 @@ class PopulatedPublicationTests(unittest.TestCase):
             destination = Path(temporary) / "cases"
             publication = generate(destination)
             self.assert_cases(destination, publication)
+            self.assertEqual(
+                json.loads((destination / "review-variants.json").read_text()),
+                review_variant_matrix(),
+            )
             committed_coverage = json.loads(
                 (FIXTURES / "evidence-coverage-variants.json").read_text()
             )

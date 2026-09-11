@@ -263,6 +263,7 @@ def verify_subject(
             Path(assessment_input["workspace"]),
             reviewed_head,
             related_work_ids,
+            Path(assessment_input["review_directory"]),
         ),
         objective,
     )

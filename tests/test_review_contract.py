@@ -1,3 +1,5 @@
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -75,6 +77,66 @@ class ReviewContractTest(unittest.TestCase):
         output["review_invocations"].reverse()
         with self.assertRaisesRegex(ValueError, "projection"):
             validate_output_projection(output, Path("."), "unused")
+
+    def test_split_projection_is_bound_to_each_accepted_invocation_receipt(self):
+        aggregate = {
+            "summary": "\n".join(
+                f"{lens.capitalize()}: Complete audit found no actionable defects."
+                for lens in ("behavior", "design", "standards")
+            ),
+            "findings": [],
+            "audit": REVIEW_AUDIT,
+        }
+        invocations = []
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            for lens in ("behavior", "design", "standards"):
+                review = self.review()
+                inference = directory / "reviewers" / lens / "inference"
+                inference.mkdir(parents=True)
+                (inference / "receipt.json").write_text(
+                    json.dumps(
+                        {
+                            "outcome": "succeeded",
+                            "protocol": {"status": "accepted"},
+                            "terminal_response": review,
+                        }
+                    )
+                )
+                invocations.append(
+                    {
+                        "lens": lens,
+                        "outcome": "succeeded",
+                        "process": {"exit_code": 0, "signal": None},
+                        "agent": {"status": "completed"},
+                        "review": review,
+                        "artifacts": {
+                            "events": f"reviewers/{lens}/events.jsonl",
+                            "stderr": f"reviewers/{lens}/stderr.log",
+                            "inference": f"reviewers/{lens}/inference",
+                        },
+                    }
+                )
+            output = {
+                "review": aggregate,
+                "review_mode": "split",
+                "review_invocations": invocations,
+                "finding_provenance": [],
+            }
+            self.assertIs(
+                validate_output_projection(
+                    output, Path("."), "unused", review_directory=directory
+                ),
+                aggregate,
+            )
+            output["review_invocations"][1]["review"] = {
+                **self.review(),
+                "summary": "Altered after the invocation.",
+            }
+            with self.assertRaisesRegex(ValueError, "receipt disagrees"):
+                validate_output_projection(
+                    output, Path("."), "unused", review_directory=directory
+                )
 
     def test_rejects_missing_extra_or_malformed_audit(self):
         cases = {

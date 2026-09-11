@@ -21,7 +21,7 @@ from afk_coordinate.contract import (
 )
 from afk_related_work import validate_snapshot_bytes
 from afk_review.contract import validate_input as validate_review_input
-from afk_review.contract import validate_review
+from afk_review.contract import validate_output_projection
 from afk_validate.evidence import (
     evidence_identity,
     load_passed_evidence,
@@ -662,11 +662,13 @@ def _review_local_facts(
     related = review_input.get("related_work")
     if assignment.get("related_work") != related:
         raise RunValidationError("stage related-work evidence must match Assignment")
-    review = validate_review(
-        review_output.get("review"),
+    review = validate_output_projection(
+        review_output,
         Path(workspace),
         subject["head"],
         _related_ids(reader, related),
+        review_dir,
+        reader,
     )
     return review_dir, review_input, review_output, review, subject
 
