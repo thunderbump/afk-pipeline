@@ -772,6 +772,99 @@ class CoordinatorCliTest(unittest.TestCase):
         self.assertIn("continuation lineage", resumed.stderr)
         self.assertEqual(state_path.read_bytes(), before)
 
+    def test_prepared_crash_resume_exhaustion_and_public_continuation(self):
+        import shutil
+        from unittest import mock
+
+        import afk_coordinate.__main__ as coordinator_cli
+        import afk_run
+        from afk_export import export_run, load_source
+        from tests.test_export_cli import ExportCliTests
+
+        assignment_path, request_path = self.prepare_run(
+            max_responses=0, full_review=True
+        )
+        assignment = json.loads(assignment_path.read_text())
+        assignment["source"] = {"kind": "bead", "id": "central-example"}
+        self.write_json(assignment_path, assignment)
+        prepared = ExportCliTests().sealed_preparer(self.root / "recovery")
+        run = prepared / "coordinator"
+        shutil.rmtree(run)
+        real_run = subprocess.run
+
+        def crash_review(command, *args, **kwargs):
+            if command[:3] == [sys.executable, "-m", "afk_review"]:
+                return subprocess.CompletedProcess(command, 2)
+            return real_run(command, *args, **kwargs)
+
+        with (
+            mock.patch.dict(os.environ, self.environment("findings", "address")),
+            mock.patch.object(
+                sys, "argv", ["afk_coordinate", str(request_path), str(run)]
+            ),
+            mock.patch(
+                "afk_coordinate.__main__.subprocess.run", side_effect=crash_review
+            ),
+        ):
+            self.assertEqual(coordinator_cli.main(), 1)
+        self.assertFalse((run / "output.json").exists())
+        for name, target in (
+            ("assignment.json", "assignment.json"),
+            ("input.json", "coordinator-request.json"),
+        ):
+            shutil.copyfile(run / name, prepared / target)
+        path = prepared / "preparation.json"
+        preparation = json.loads(path.read_text())
+        preparation["repository"]["worktree"] = str(self.workspace)
+        preparation["repository"]["base_commit"] = assignment["work_base"]
+        preparation["coordinator"].update(
+            status="failed", exit_code=1, outcome=None, decision=None
+        )
+        path.write_text(json.dumps(preparation))
+        original_preparation = path.read_bytes()
+        resumed = self.invoke(
+            request_path,
+            run,
+            "--abandon-active",
+            review_scenario="findings",
+            assessment_scenario="address",
+        )
+        self.assertEqual(resumed.returncode, 0, resumed.stderr)
+        self.assertEqual(
+            load_source(prepared, None, None, None)["output"]["decision"], "exhausted"
+        )
+        original_state = (run / "state.json").read_bytes()
+        original_output = (run / "output.json").read_bytes()
+        published = []
+
+        def publish(source, config, evidence_directory):
+            bundle = self.root / "continued-bundle"
+            export_run(source, bundle, terminal_continuation=evidence_directory.name)
+            published.append(json.loads((bundle / "workflow-run.json").read_text()))
+            return {"status": "succeeded"}
+
+        config = {
+            "publication": {"command": ["fixture"], "timeout_seconds": 5},
+            "projects": {
+                "operations-webui": {
+                    "repository": Path(preparation["repository"]["path"])
+                }
+            },
+        }
+        with (
+            mock.patch.dict(os.environ, self.environment()),
+            mock.patch("afk_run.load_config", return_value=config),
+            mock.patch("afk_run.publish_terminal_run", side_effect=publish),
+        ):
+            self.assertEqual(
+                afk_run.continue_run(prepared, 1, self.root / "config.json"), 0
+            )
+        self.assertEqual(published[0]["terminal"], {"decision": "stop"})
+        self.assertEqual(published[0]["continuation_allowances"], [1])
+        self.assertEqual(path.read_bytes(), original_preparation)
+        self.assertEqual((run / "state.json").read_bytes(), original_state)
+        self.assertEqual((run / "output.json").read_bytes(), original_output)
+
     def test_current_inference_attempt_exports_bound_metrics_once(self):
         import shutil
 

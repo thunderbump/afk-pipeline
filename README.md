@@ -1370,6 +1370,13 @@ zero-padded directories. It atomically replaces `state.json` before and after
 each invocation. The checkpoint exposes run status, next sequence and module,
 an optional active invocation, ordered history, and terminal facts.
 
+For a prepared Run whose original Coordinator process exited nonzero without a
+terminal result, a later direct resume may seal the result. `afk continue` and
+export recognize that recovered terminal after checking the frozen inputs and
+matching Coordinator checkpoint/output. The original failed process observation
+in `preparation.json` remains unchanged. A recorded terminal that contradicts the
+Coordinator, or a missing/inconsistent Coordinator terminal, is still rejected.
+
 The same command resumes an existing run. If an active module has sealed its
 `output.json`, the coordinator consumes it and continues without repeating the
 module. If no sealed output exists, the coordinator exits `1` without changing

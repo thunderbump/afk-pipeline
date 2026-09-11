@@ -22,6 +22,52 @@ ROOT = Path(__file__).parents[1]
 
 
 class ExportCliTests(unittest.TestCase):
+    def test_recovered_terminal_preserves_failed_launch_and_rejects_bad_evidence(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = self.sealed_preparer(root)
+            path = source / "preparation.json"
+            preparation = json.loads(path.read_text())
+            preparation["coordinator"].update(
+                status="failed", exit_code=1, outcome=None, decision=None
+            )
+            path.write_text(json.dumps(preparation))
+            original = path.read_bytes()
+            result = self.export(source, root / "recovered")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(path.read_bytes(), original)
+            for field, value in (
+                ("status", "running"),
+                ("status", "completed"),
+                ("exit_code", None),
+                ("exit_code", 0),
+                ("exit_code", True),
+                ("decision", "stop"),
+                ("outcome", "failed"),
+            ):
+                with self.subTest(field=field, value=value):
+                    changed = json.loads(original)
+                    changed["coordinator"][field] = value
+                    path.write_text(json.dumps(changed))
+                    with self.assertRaises(afk_export.ExportError):
+                        afk_export.load_source(source, None, None, None)
+            path.write_bytes(original)
+            for name in ("state.json", "output.json"):
+                terminal = source / "coordinator" / name
+                raw = terminal.read_bytes()
+                terminal.unlink()
+                with self.assertRaises((afk_export.ExportError, OSError)):
+                    afk_export.load_source(source, None, None, None)
+                terminal.write_bytes(raw)
+            state_path = source / "coordinator/state.json"
+            state = json.loads(state_path.read_text())
+            state["terminal"]["decision"] = "exhausted"
+            state_path.write_text(json.dumps(state))
+            with self.assertRaisesRegex(
+                afk_export.ExportError, "terminal evidence disagrees"
+            ):
+                afk_export.load_source(source, None, None, None)
+
     def test_export_defaults_to_publication_bundle_v3(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

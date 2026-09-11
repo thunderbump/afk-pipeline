@@ -1269,6 +1269,14 @@ class RunPreparerCliTest(unittest.TestCase):
             coordinator / "output.json": output,
         }.items():
             path.write_text(json.dumps(value))
+        review_directory = coordinator / "04-review"
+        # Even sparse pre-mode evidence retains the explicit Review input.
+        review_input = {
+            "schema_version": 1,
+            "workspace": assignment["workspace"],
+            "change_directory": str(coordinator / "03-change"),
+            "validation_directory": str(coordinator / "02-validation"),
+        }
         outputs = {
             "01-attempt": {
                 "schema_version": 1,
@@ -1338,6 +1346,8 @@ class RunPreparerCliTest(unittest.TestCase):
                 elif kind == "diff":
                     content = "diff --git a/README.md b/README.md\n"
                 (result / artifact).write_text(content)
+
+        (review_directory / "input.json").write_text(json.dumps(review_input))
 
     def write_config(self):
         value = {

@@ -452,6 +452,38 @@ class ResponseCliTest(unittest.TestCase):
             "not an accepted Review finding", prompt["trusted_task_instructions"]
         )
 
+        # A later failure must traverse the committed Response and its sibling
+        # Validation/Attempt evidence using authority supplied by the caller.
+        later = self.root / "later-validation"
+        later.mkdir()
+        self.write_json(
+            later / "input.json", json.loads((validation / "input.json").read_text())
+        )
+        failed = json.loads((validation / "output.json").read_text())
+        state = self.state()
+        failed["repository"] = {"before": state, "after": state, "head_changed": False}
+        self.write_json(later / "output.json", failed)
+        (later / "stdout.log").write_text("another failure\n")
+        (later / "stderr.log").write_text("")
+        response_input["validation_directory"] = str(later)
+        response_input["source"] = {
+            "kind": "feedback_response",
+            "directory": str(result),
+        }
+        self.write_json(input_path, response_input)
+        second = self.root / "second-response"
+        environment["AFK_STAGE_EVIDENCE_ROOTS"] = json.dumps([str(result), str(later)])
+        denied = self.invoke(input_path, second, environment)
+        self.assertNotEqual(denied.returncode, 0)
+        self.assertIn("escapes trusted roots", denied.stderr)
+        self.assertFalse(second.exists())
+        environment["AFK_STAGE_EVIDENCE_ROOTS"] = json.dumps([str(self.root)])
+        completed = self.invoke(input_path, second, environment)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(
+            json.loads((second / "output.json").read_text())["outcome"], "completed"
+        )
+
     def test_validation_repair_refuses_launch_error_and_repository_drift_evidence(self):
         from afk_validate.evidence import validate_repairable_failure
 
