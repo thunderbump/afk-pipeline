@@ -924,7 +924,10 @@ def validate_preparation(source, value):
         not isinstance(coordinator, dict)
         or coordinator.get("directory") != "coordinator"
         or coordinator.get("result") != "coordinator/output.json"
-        or coordinator.get("outcome") not in {"completed", "failed"}
+        or (
+            coordinator.get("outcome") not in {"completed", "failed"}
+            and not unsealed_coordinator_failure(coordinator)
+        )
         or coordinator.get("status") not in {"completed", "failed"}
         or not isinstance(coordinator.get("exit_code"), int)
         or isinstance(coordinator.get("exit_code"), bool)
@@ -1036,8 +1039,28 @@ def validate_prepared_routing(source, prepared, source_descriptor=None):
     }
 
 
+def unsealed_coordinator_failure(coordinator):
+    """Identify a failed launch observation with no terminal result to contradict."""
+    code = coordinator.get("exit_code")
+    return (
+        coordinator.get("status") == "failed"
+        and isinstance(code, int)
+        and not isinstance(code, bool)
+        and code > 0
+        and "outcome" in coordinator
+        and coordinator["outcome"] is None
+        and "decision" in coordinator
+        and coordinator["decision"] is None
+    )
+
+
 def validate_preparer_terminal(preparation, output):
     coordinator = preparation["coordinator"]
+    # load_source has verified the frozen inputs and matching sealed checkpoint
+    # and output. A direct resume can finish after the original wrapper exited;
+    # keep its failed launch observation rather than inventing a new exit code.
+    if unsealed_coordinator_failure(coordinator):
+        return
     if coordinator["outcome"] != output["outcome"]:
         raise ExportError("Run Preparer outcome disagrees with Coordinator")
     decision = output.get("decision") if output["outcome"] == "completed" else None
