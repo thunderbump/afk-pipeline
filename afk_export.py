@@ -2833,7 +2833,8 @@ def normalize_run(observed, include_evidence=True):
                             retained_receipt.get("terminal_response"), str
                         )
                     configured_mode = observed["request"].get("review_mode", "combined")
-                    review_input = reader.json(directory / "input.json")
+                    if configured or legacy_receipt:
+                        review_input = reader.json(directory / "input.json")
                     if configured:
                         review_input = validate_review_input(review_input)
                     if (configured or legacy_receipt) and (
