@@ -248,11 +248,11 @@ class ReviewContractTest(unittest.TestCase):
                 "This is the isolated behavior lens invocation. Report only findings "
                 'with lens "behavior".'
             )
-            # Exercise Pi's real rendering: JSON escaping doubles each retained
-            # newline-filled log, then the rendered prompt base64-encodes that
-            # structured task data. Both logs are at the producer's supported
-            # boundary rather than at a small proxy size.
-            retained_log = "\n" * MAX_VALIDATION_LOG_BYTES
+            # Exercise Pi's real rendering with the maximum JSON escape:
+            # each retained NUL becomes six bytes, then the rendered prompt
+            # base64-encodes that structured task data. Both logs are at the
+            # producer's supported boundary rather than at a small proxy size.
+            retained_log = "\0" * MAX_VALIDATION_LOG_BYTES
             prompt = PiAdapter(model="test-model", thinking="high").render(
                 {
                     "system": "Review system instructions.",
@@ -275,7 +275,7 @@ class ReviewContractTest(unittest.TestCase):
                 "requested_capability": "READ_ONLY",
             }
             raw = json.dumps(invocation).encode()
-            self.assertGreater(len(raw), 128 * 1024 * 1024)
+            self.assertGreater(len(raw), 256 * 1024 * 1024)
             (inference / "invocation.json").write_bytes(raw)
             review = self.review()
             (inference / "receipt.json").write_text(

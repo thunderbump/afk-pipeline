@@ -7,10 +7,11 @@ import subprocess
 from pathlib import Path
 
 # A split Review invocation retains the full Validation logs both in structured
-# task data and in Pi's rendered base64 task prompt. JSON escaping doubles
-# newline-filled logs before base64 adds its own 4/3 expansion, so two supported
-# 25 MiB logs require about 234 MiB plus the task's bounded metadata.
-_MAX_INVOCATION_BYTES = 256 * 1024 * 1024
+# task data and in Pi's rendered base64 task prompt. A JSON control character can
+# expand to a six-byte escape in both representations before base64 adds its own
+# 4/3 expansion. Two supported 25 MiB logs therefore require about 700 MiB plus
+# the task's bounded diff and metadata.
+_MAX_INVOCATION_BYTES = 1024 * 1024 * 1024
 
 REVIEW_AUDIT = {
     "completed": True,
