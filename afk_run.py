@@ -46,9 +46,15 @@ class PreparationError(Exception):
 
 
 def main(argv=None):
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] in {"review", "status", "context"}:
+        from afk_pr.__main__ import main as pr_main
+
+        return pr_main(arguments)
     parser = argparse.ArgumentParser(
         prog="afk",
         usage=(
+            "afk review|status|context PR_URL | "
             "afk run <bead-id> [--config PATH] | "
             "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"

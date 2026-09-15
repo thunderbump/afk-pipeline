@@ -1550,3 +1550,56 @@ Run the complete repository check:
 ```sh
 ./scripts/validate
 ```
+
+## Explicit PR review passes
+
+These commands run independently of the retained AFK stage pipeline:
+
+```sh
+./afk context https://github.com/OWNER/REPO/pull/123
+./afk review https://github.com/OWNER/REPO/pull/123 --config ~/.config/afk/config.json
+./afk review https://github.com/OWNER/REPO/pull/123 --fixtures-only
+./afk status https://github.com/OWNER/REPO/pull/123
+./afk review https://github.com/OWNER/REPO/pull/123 --retry-publication JOB_ID
+```
+
+`context` is read-only. It retrieves the description, commits, ordinary comments,
+reviews, inline discussion, checks with annotations, and commit statuses. A failed
+page or a changing PR head/base rejects the observation rather than hiding feedback.
+
+`review` uses the existing config. Exactly one project's `origin` must match the
+PR repository. The command records the selected head, creates a job under
+`run_root/pr-reviews`, publishes a pending commit status, and starts user-systemd
+services. The fixture service always runs the configured validation command.
+The independent review service uses the existing read-only inference role and
+posts Markdown as a COMMENT review. `--fixtures-only` omits this AFK reviewer so
+existing reviewers can supply feedback. Neither mode waits for fixtures in an
+inference session. Reviewer identity is retained separately from fixture results.
+
+The host needs Linux user systemd, `gh` authenticated for repository status and
+comment/review writes, Git, and the existing inference/runtime dependencies when
+AFK review is enabled. Services use the host's `gh` login. They do not inherit
+an invocation-only GitHub token. Enable user lingering if work must continue after
+logout. The launcher explicitly passes PATH so the installed Pi command is found.
+
+Each phase has a detached worktree at the selected commit. Checkouts are serialized
+per repository. Fixture jobs also share a per-repository execution slot; they wait
+up to the configured fixture timeout before reporting `busy`, meaning no tests ran.
+The fixture itself then gets its configured timeout. EQEmu receives a shared
+`VALIDATION_WORKER_HOME` and per-job `VALIDATION_AFK_EVIDENCE_DIR`, retaining its own
+worker/stack locks and committed-Candidate checks.
+
+Each fixture execution owns one commit-status context and one updateable PR result
+comment. The comment includes the commit, result, exit code, and bounded redacted
+output tails. Files above 1 MiB are withheld; full logs remain in the host job
+directory. Code reviews are separately attributed and pinned to their reviewed
+commit. New commits never inherit an old fixture success. No merge, push, response
+pass, thread resolution, or automatic chaining is performed by these commands.
+
+`status` reports current GitHub results and retained local jobs without inference.
+A stopped service without a terminal record appears interrupted. Publication
+failures retain the actual work result; `--retry-publication` posts that result
+without rerunning fixtures or inference. It can also reconcile a stopped service
+and replace its pending fixture status with an error. Worktrees and logs remain
+for inspection and manual cleanup. These jobs are not automatically resumed after
+a reboot, and ambiguous failures may require operator intervention.
