@@ -102,8 +102,11 @@ class GitHub:
         )
 
     def fixture_summary(self, job, body):
+        return self.comment(job, body, "fixtures")
+
+    def comment(self, job, body, kind):
         repo, number = identity(job["pr_url"])
-        marker = f"<!-- afk-fixtures:{job['id']} -->"
+        marker = f"<!-- afk-{kind}:{job['id']} -->"
         login = self.api("user")["login"]
         comments = self.collection(
             f"repos/{repo}/issues/{number}/comments?per_page=100"

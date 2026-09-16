@@ -1551,7 +1551,7 @@ Run the complete repository check:
 ./scripts/validate
 ```
 
-## Explicit PR review passes
+## Explicit PR passes
 
 These commands run independently of the retained AFK stage pipeline:
 
@@ -1559,6 +1559,7 @@ These commands run independently of the retained AFK stage pipeline:
 ./afk context https://github.com/OWNER/REPO/pull/123
 ./afk review https://github.com/OWNER/REPO/pull/123 --config ~/.config/afk/config.json
 ./afk review https://github.com/OWNER/REPO/pull/123 --fixtures-only
+./afk respond https://github.com/OWNER/REPO/pull/123
 ./afk status https://github.com/OWNER/REPO/pull/123
 ./afk review https://github.com/OWNER/REPO/pull/123 --retry-publication JOB_ID
 ```
@@ -1593,8 +1594,9 @@ Each fixture execution owns one commit-status context and one updateable PR resu
 comment. The comment includes the commit, result, exit code, and bounded redacted
 output tails. Files above 1 MiB are withheld; full logs remain in the host job
 directory. Code reviews are separately attributed and pinned to their reviewed
-commit. New commits never inherit an old fixture success. No merge, push, response
-pass, thread resolution, or automatic chaining is performed by these commands.
+commit. New commits never inherit an old fixture success. Review does not push
+code. Neither command merges, resolves threads, or automatically runs another
+model pass.
 
 `status` reports current GitHub results and retained local jobs without inference.
 A stopped service without a terminal record appears interrupted. Publication
@@ -1603,3 +1605,30 @@ without rerunning fixtures or inference. It can also reconcile a stopped service
 and replace its pending fixture status with an error. Worktrees and logs remain
 for inspection and manual cleanup. These jobs are not automatically resumed after
 a reboot, and ambiguous failures may require operator intervention.
+
+`respond` starts one background response pass from the current PR conversation,
+including external reviewers and fixture results. It supports open PRs with a
+head branch in the configured repository; fork PRs are rejected before launch.
+The model edits an isolated worktree and explains consequential choices in
+Markdown. It may disagree, defer, ask for clarification, or make no changes.
+There is no per-comment disposition schema. It does not run or wait for fixtures.
+
+The host commits repairs, checks that the PR head and base are unchanged and the
+PR is still open, then pushes normally to its head branch. A concurrent change
+pauses the pass and retains the repair. A competing push is rejected by Git.
+Successful pushes queue deterministic fixtures for that exact commit. No-change
+responses publish an explanation without a commit or new fixture execution.
+The host needs Git push credentials and a configured commit identity. A completed
+response means the response work finished, not that validation passed; fixture
+results are independent.
+
+Each response has one updateable PR comment and retains `response.md`, its
+worktree, and a small `response-progress.json` record containing the candidate,
+push state, and any fixture job ID. Use `afk status` to inspect both jobs. A failed
+or interrupted pass may already have pushed: inspect this record and the remote
+before starting another pass. `afk respond PR_URL --retry-publication JOB_ID`
+retries only the comment, never inference, commits, push, or fixture scheduling.
+If fixture scheduling failed, submit `afk review PR_URL --fixtures-only` once the
+intended PR head is confirmed. New feedback arriving after submission is left for
+a later explicit pass. Merge policy and automatic pass scheduling remain outside
+these commands.

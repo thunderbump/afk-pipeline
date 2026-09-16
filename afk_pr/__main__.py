@@ -29,6 +29,12 @@ def main(argv=None):
         metavar="JOB_ID",
         help="publish retained results without rerunning fixtures or inference",
     )
+    respond = commands.add_parser(
+        "respond", help="respond to PR feedback in a background job"
+    )
+    respond.add_argument("pr_url")
+    respond.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    respond.add_argument("--retry-publication", metavar="JOB_ID")
     context = commands.add_parser(
         "context", help="read complete PR context without posting"
     )
@@ -49,12 +55,17 @@ def main(argv=None):
         identity(args.pr_url)
         if args.command == "context":
             result = GitHub().observe(args.pr_url)
-        elif args.command == "review" and not args.retry_publication:
-            result = submit(args.pr_url, args.config, fixtures_only=args.fixtures_only)
+        elif args.command in {"review", "respond"} and not args.retry_publication:
+            result = submit(
+                args.pr_url,
+                args.config,
+                fixtures_only=getattr(args, "fixtures_only", False),
+                respond=args.command == "respond",
+            )
         else:
             config, _, _ = settings(args.config, args.pr_url)
             root = Path(config["run_root"]) / "pr-reviews"
-            if args.command == "review":
+            if args.command in {"review", "respond"}:
                 import re
 
                 from afk_pr.jobs import retry_publication

@@ -17,7 +17,7 @@ from afk_pr.github import GitHub, identity
 from afk_runtime import run_command, timestamp
 
 ROOT = Path(__file__).resolve().parents[1]
-PHASES = ("fixtures", "review")
+PHASES = ("fixtures", "review", "response")
 
 
 def write(path, value):
@@ -99,13 +99,25 @@ def launch(directory, phase, timeout):
     )
 
 
-def submit(url, config_path, *, fixtures_only=False, github=None, launcher=launch):
+def submit(
+    url,
+    config_path,
+    *,
+    fixtures_only=False,
+    respond=False,
+    github=None,
+    launcher=launch,
+):
     github = github or GitHub()
     config, slug, project = settings(config_path, url)
     context = github.observe(url)
     pr = context["pull_request"]
     if pr["state"] != "open":
-        raise ValueError("review requires an open PR")
+        raise ValueError("PR passes require an open PR")
+    if respond:
+        from afk_pr.response import response_branch
+
+        response_branch(pr, url)
     job_id = uuid.uuid4().hex[:16]
     directory = Path(config["run_root"]) / "pr-reviews" / job_id
     if directory.resolve().is_relative_to(Path(project["repository"]).resolve()):
@@ -120,19 +132,32 @@ def submit(url, config_path, *, fixtures_only=False, github=None, launcher=launc
         "repository": str(project["repository"]),
         "validation": project["validation"],
         "review_timeout": config["coordinator"]["agent_timeout_seconds"],
-        "reviewers": [] if fixtures_only else ["afk"],
+        "reviewers": [] if fixtures_only or respond else ["afk"],
+        "kind": "response" if respond else "review",
         "created_at": timestamp(),
     }
     write(directory / "job.json", job)
     write(directory / "context.json", context)
-    phases = ["fixtures"] + (["review"] if job["reviewers"] else [])
+    phases = (
+        ["response"]
+        if respond
+        else ["fixtures"] + (["review"] if job["reviewers"] else [])
+    )
+    start(directory, phases, github=github, launcher=launcher)
+    return status_job(directory)
+
+
+def start(directory, phases, *, github, launcher=launch):
+    """Persist work before launching independent managed workers."""
+    job = read(directory / "job.json")
     for phase in phases:
         write(
             directory / f"{phase}.json", {"state": "queued", "publication": "pending"}
         )
     # Establish visible pending status before starting expensive work.
     try:
-        github.fixture_status(job, "pending", "Fixture execution queued")
+        if "fixtures" in phases:
+            github.fixture_status(job, "pending", "Fixture execution queued")
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
         for phase in phases:
             write(
@@ -140,7 +165,7 @@ def submit(url, config_path, *, fixtures_only=False, github=None, launcher=launc
                 {"state": "not_started", "publication": "failed"},
             )
         raise RuntimeError(
-            f"could not publish pending status; job {job_id} was not started"
+            f"could not publish pending status; job {job['id']} was not started"
         ) from None
     for phase in phases:
         try:
@@ -166,7 +191,6 @@ def submit(url, config_path, *, fixtures_only=False, github=None, launcher=launc
                 },
             )
             publish(directory, phase, github=github)
-    return status_job(directory)
 
 
 def checkout(directory, job, phase):
@@ -178,7 +202,7 @@ def checkout(directory, job, phase):
     with (directory.parent / f"checkout-{key}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         git(repository, "fetch", "--no-tags", "origin", f"refs/pull/{number}/head")
-        if phase == "review":
+        if phase in {"review", "response"}:
             git(repository, "fetch", "--no-tags", "origin", job["base"])
         workspace = directory / f"{phase}-worktree"
         git(repository, "worktree", "add", "--detach", str(workspace), job["head"])
@@ -302,11 +326,16 @@ def worker(directory, phase):
             {"state": "running", "started_at": timestamp(), "publication": "pending"},
         )
         try:
-            outcome = (
-                fixtures(directory, job)
-                if phase == "fixtures"
-                else review(directory, job)
-            )
+            if phase == "response":
+                from afk_pr.response import respond
+
+                outcome = respond(directory, job)
+            else:
+                outcome = (
+                    fixtures(directory, job)
+                    if phase == "fixtures"
+                    else review(directory, job)
+                )
         except TimeoutError:
             outcome = {
                 "state": "busy",
@@ -337,7 +366,11 @@ def publish(directory, phase, *, github=None):
     if result["state"] in {"queued", "running"}:
         raise ValueError("phase has no terminal result to publish")
     try:
-        if phase == "fixtures":
+        if phase == "response":
+            from afk_pr.response import publish_response
+
+            result["url"] = publish_response(directory, job, result, github)
+        elif phase == "fixtures":
             state = (
                 "success"
                 if result["state"] == "passed"
