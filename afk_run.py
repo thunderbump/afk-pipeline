@@ -47,14 +47,14 @@ class PreparationError(Exception):
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"review", "respond", "status", "context"}:
+    if arguments and arguments[0] in {"pr", "review", "respond", "status", "context"}:
         from afk_pr.__main__ import main as pr_main
 
         return pr_main(arguments)
     parser = argparse.ArgumentParser(
         prog="afk",
         usage=(
-            "afk review|respond|status|context PR_URL | "
+            "afk pr BEAD_ID | afk review|respond|status|context PR_URL | "
             "afk run <bead-id> [--config PATH] | "
             "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"
@@ -1109,16 +1109,18 @@ def positive(value, name):
         raise PreparationError(f"{name} must be a positive integer")
 
 
-def read_bead(bead_id, workspace):
+def read_bead(bead_id, workspace, *, env=None):
     try:
         completed = subprocess.run(
             ["bd", "show", bead_id, "--json"],
             cwd=workspace,
+            env=env,
+            timeout=120,
             text=True,
             capture_output=True,
             check=False,
         )
-    except OSError as error:
+    except (OSError, subprocess.SubprocessError) as error:
         raise PreparationError(
             f"Bead {bead_id} cannot be read from the configured central workspace"
         ) from error

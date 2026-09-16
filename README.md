@@ -1632,3 +1632,50 @@ If fixture scheduling failed, submit `afk review PR_URL --fixtures-only` once th
 intended PR head is confirmed. New feedback arriving after submission is left for
 a later explicit pass. Merge policy and automatic pass scheduling remain outside
 these commands.
+
+## Bead-to-PR implementation
+
+```sh
+./afk pr CENTRAL_BEAD_ID --config ~/.config/afk/config.json
+./afk pr CENTRAL_BEAD_ID --retry-publication JOB_ID
+```
+
+`pr` reads the central Bead and requires exactly one configured `project:<slug>`
+label. It starts one background implementation pass from the current remote
+version of the configured named base branch. `main`, `origin/main`, and full
+branch refs are accepted; detached SHAs and `HEAD` are not PR base branches.
+A closed Bead cannot start new work. Invoking the command selects a direct task;
+it does not run Acceptance Planner, alter readiness labels, or decompose work.
+The Beads password file, when present, is read only into the `bd` subprocess's
+environment. It is not retained in job records or passed to model services.
+
+The model reads a frozen Bead snapshot and edits an isolated worktree. The host
+creates the implementation commit and pushes `afk-pr-BEAD_ID` with a create-only
+lease. The destination must be absent; no existing branch can be overwritten. A moved
+base or an existing destination branch pauses or rejects work. The PR is a draft
+with the Bead objective and acceptance text, model explanation, and candidate SHA.
+Configured fixtures run independently at that candidate, through the same worker
+used by review and response. Review remains an explicit separate command.
+
+Repeating `pr BEAD_ID` reports its existing local job. If a matching PR exists
+without local records, the command reports it, including a closed PR, instead of
+creating another. Use `respond PR_URL` for repairs. No-change or clarification
+results retain an explanation locally without an empty commit or PR.
+
+Publication retry can recover a lost PR-creation reply or publish a pushed
+candidate whose remote branch still matches. It never reimplements or pushes.
+It schedules fixtures only if no child job was recorded; a failed recorded child
+needs inspection and a separate `review --fixtures-only` submission. Inspect
+`creation.json`, `creation-progress.json`, and any child job when publication
+reports partial success. A published PR is not proof of passing validation.
+The command never closes the Bead, merges, or replaces the retained workflow.
+
+
+A paused or failed creation job remains attached to its Bead. There is no automatic
+implementation restart. Read `creation.md` and inspect `creation-worktree` first.
+You can finish the retained work with normal Git and GitHub commands, then use
+`review` and `respond` on that PR. If you need a fresh AFK implementation after
+clarification, create a successor Bead with the corrected scope and a reference
+to this job. Preserve the old work; do not delete records to bypass the repeat
+check. `status` includes any candidate, push state, and fixture-job ID under the
+phase's `progress` field.

@@ -17,7 +17,7 @@ from afk_pr.github import GitHub, identity
 from afk_runtime import run_command, timestamp
 
 ROOT = Path(__file__).resolve().parents[1]
-PHASES = ("fixtures", "review", "response")
+PHASES = ("fixtures", "review", "response", "creation")
 
 
 def write(path, value):
@@ -326,7 +326,11 @@ def worker(directory, phase):
             {"state": "running", "started_at": timestamp(), "publication": "pending"},
         )
         try:
-            if phase == "response":
+            if phase == "creation":
+                from afk_pr.creation import implement
+
+                outcome = implement(directory, job)
+            elif phase == "response":
                 from afk_pr.response import respond
 
                 outcome = respond(directory, job)
@@ -366,7 +370,16 @@ def publish(directory, phase, *, github=None):
     if result["state"] in {"queued", "running"}:
         raise ValueError("phase has no terminal result to publish")
     try:
-        if phase == "response":
+        if phase == "creation":
+            from afk_pr.creation import publish_creation
+
+            url = publish_creation(directory, job, result, github)
+            if url is None:
+                result["publication"] = "not_applicable"
+                write(directory / f"{phase}.json", result)
+                return
+            result["url"] = url
+        elif phase == "response":
             from afk_pr.response import publish_response
 
             result["url"] = publish_response(directory, job, result, github)
@@ -453,6 +466,9 @@ def status_job(directory, *, probe=True):
                     }
             elif observed.returncode:
                 record = {**record, "worker_observation": "unavailable"}
+        progress = directory / f"{phase}-progress.json"
+        if progress.exists():
+            record = {**record, "progress": read(progress)}
         result["phases"][phase] = record
     return result
 
@@ -509,3 +525,25 @@ def fixture_excerpt(directory, job):
                 f"\n\n<details><summary>{name} (bounded tail)</summary><pre>{public}</pre></details>"
             )
     return "".join(sections)
+
+
+def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
+    """Schedule the exact pushed commit, even if another commit arrives later."""
+    child = {
+        **job,
+        "id": uuid.uuid4().hex[:16],
+        "head": candidate,
+        "kind": "review",
+        "reviewers": [],
+        f"{phase}_job": job["id"],
+        "created_at": timestamp(),
+    }
+    target = directory.parent / child["id"]
+    target.mkdir(mode=0o700)
+    write(target / "job.json", child)
+    # Record the relationship before any remote writes or process launch.
+    progress = read(directory / f"{phase}-progress.json")
+    progress["fixture_job"] = child["id"]
+    write(directory / f"{phase}-progress.json", progress)
+    start(target, ["fixtures"], github=github, launcher=launcher)
+    return child["id"]

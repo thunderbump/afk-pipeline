@@ -1,11 +1,9 @@
 """One PR response: interpret feedback, retain a repair, and publish its history."""
 
-import uuid
 from pathlib import Path
 
 from afk_pr import jobs
 from afk_pr.github import GitHub, identity
-from afk_runtime import timestamp
 
 
 def response_branch(pr, url):
@@ -34,28 +32,6 @@ def unchanged(github, job, branch):
         and current["base"]["sha"] == job["base"]
         and response_branch(current, job["pr_url"]) == branch
     )
-
-
-def queue_fixtures(directory, job, candidate, github, launcher):
-    """Schedule the exact pushed commit, even if another commit arrives later."""
-    child = {
-        **job,
-        "id": uuid.uuid4().hex[:16],
-        "head": candidate,
-        "kind": "review",
-        "reviewers": [],
-        "response_job": job["id"],
-        "created_at": timestamp(),
-    }
-    target = directory.parent / child["id"]
-    target.mkdir(mode=0o700)
-    jobs.write(target / "job.json", child)
-    # Record the relationship before any remote writes or process launch.
-    progress = jobs.read(directory / "response-progress.json")
-    progress["fixture_job"] = child["id"]
-    jobs.write(directory / "response-progress.json", progress)
-    jobs.start(target, ["fixtures"], github=github, launcher=launcher)
-    return child["id"]
 
 
 def respond(directory, job, *, github=None, launcher=jobs.launch):
@@ -139,7 +115,9 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
         jobs.git(workspace, "push", remote, f"{candidate}:refs/heads/{branch}")
         progress["push"] = "pushed"
         jobs.write(directory / "response-progress.json", progress)
-        queue_fixtures(directory, job, candidate, github, launcher)
+        jobs.queue_fixtures(
+            directory, job, candidate, github, launcher, phase="response"
+        )
     return {"state": "completed"}
 
 

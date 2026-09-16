@@ -10,10 +10,16 @@ from afk_pr.jobs import PHASES, read, settings, status_job, submit, worker
 
 
 def main(argv=None):
-    from afk_run import DEFAULT_CONFIG
+    from afk_run import DEFAULT_CONFIG, PreparationError
 
     parser = argparse.ArgumentParser(prog="afk")
     commands = parser.add_subparsers(dest="command", required=True)
+    create = commands.add_parser(
+        "pr", help="implement a central Bead and create one draft PR"
+    )
+    create.add_argument("bead_id")
+    create.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    create.add_argument("--retry-publication", metavar="JOB_ID")
     review = commands.add_parser(
         "review", help="submit fixtures and a read-only PR review"
     )
@@ -52,6 +58,14 @@ def main(argv=None):
         if args.command == "worker":
             worker(args.directory, args.phase)
             return 0
+        if args.command == "pr":
+            from afk_pr.creation import submit_creation
+
+            result = submit_creation(
+                args.bead_id, args.config, retry=args.retry_publication
+            )
+            print(json.dumps(result, indent=2))
+            return 0
         identity(args.pr_url)
         if args.command == "context":
             result = GitHub().observe(args.pr_url)
@@ -87,6 +101,7 @@ def main(argv=None):
                         if (
                             directory.is_dir()
                             and (directory / "job.json").exists()
+                            and read(directory / "job.json").get("pr_url")
                             and identity(read(directory / "job.json")["pr_url"])
                             == identity(args.pr_url)
                         ):
@@ -103,6 +118,7 @@ def main(argv=None):
         return 0
     except (
         OSError,
+        PreparationError,
         ValueError,
         RuntimeError,
         KeyError,
