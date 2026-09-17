@@ -15,6 +15,14 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(prog="afk")
     commands = parser.add_subparsers(dest="command", required=True)
+    finishing = commands.add_parser(
+        "finish", help="preview or explicitly merge a PR and close a selected Bead"
+    )
+    finishing.add_argument("pr_url")
+    finishing.add_argument("--apply", metavar="PREVIEW_ID")
+    finishing.add_argument("--close-bead")
+    finishing.add_argument("--method", choices=("merge", "squash", "rebase"))
+    finishing.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     evaluation = commands.add_parser(
         "evaluate", help="read-only advisory Bead readiness report"
     )
@@ -68,6 +76,18 @@ def main(argv=None):
     background.add_argument("phase", choices=PHASES)
     args = parser.parse_args(argv)
     try:
+        if args.command == "finish":
+            from afk_pr.finish import finish
+
+            result = finish(
+                args.pr_url,
+                args.config,
+                apply=args.apply,
+                close_bead=args.close_bead,
+                method=args.method,
+            )
+            print(json.dumps(result, indent=2))
+            return 0 if result["state"] in {"preview", "completed"} else 1
         if args.command == "evaluate":
             from afk_pr.evaluation import evaluate
 

@@ -1755,3 +1755,35 @@ was produced, including reports recommending clarification; failures exit 1.
 The tool-free fallback inherits the inference runtime's 64 KiB task-data limit.
 Oversized fallback input fails explicitly; it is not silently shortened.
 Default-branch context can lag active work, so reports need human judgment.
+
+### Explicit PR finish
+
+`afk finish PR_URL` creates a read-only preview and prints JSON with its ID,
+head, target branch, merge method and Bead association hints. It makes no
+GitHub or Beads changes. Add `--close-bead BEAD_ID` to explicitly select one
+closure target, and optionally `--method squash|rebase` instead of the default
+merge commit. Unsupported methods fail through GitHub, without fallback.
+
+Execute that exact preview with `afk finish PR_URL --apply PREVIEW_ID`.
+Changing its method or closure target requires a new preview. The selected
+Bead must still be readable before any merge request. GitHub handles its
+native merge policies and queues; the command never requests admin bypass,
+branch deletion, local cleanup, inference, or fixture execution.
+
+A queued merge returns promptly as pending. Repeat the apply command later.
+Every attempt re-reads external state: already merged PRs skip the merge
+request, and only an explicitly selected Bead closes after a fresh merge
+observation. Already closed Beads are left alone. Merge success followed by
+closure failure is retained as partial progress and can be retried.
+
+Evidence lives in `state_root/finishes/PREVIEW_ID/preview.json`, with one
+private attempt subdirectory per execution containing `result.json` and
+native command diagnostics. This is an audit record, not completion authority.
+Exit 0 means preview created or finish completed; pending, unknown and failed
+outcomes exit 1. No worker waits for a queue or automatically retries.
+
+GitHub enforces the expected head at merge time. The target branch is checked
+before and after the request, but that check is not atomic with merging.
+A concurrent retarget can be detected too late to prevent a merge. GitHub and
+Beads do not share a transaction; this command does not claim otherwise.
+Repository protections still depend on repository settings and caller privileges.
