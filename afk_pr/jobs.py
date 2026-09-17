@@ -33,6 +33,44 @@ def read(path):
     return json.loads(path.read_text())
 
 
+class GitFailure(RuntimeError):
+    """Public-safe summary with private diagnostics kept off the exception text."""
+
+    def __init__(self, operation, stderr):
+        super().__init__(f"git {operation} failed; inspect private Git diagnostics")
+        self.stderr = stderr
+
+
+def retain_git_failure(directory, phase, error):
+    path = directory / f"{phase}.git.log"
+    with os.fdopen(
+        os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w"
+    ) as log:
+        os.fchmod(log.fileno(), 0o600)
+        log.write(error.stderr)
+
+
+def check_commit_identity(directory, workspace, phase):
+    """Use Git's effective author and committer resolution in the actual clone."""
+    for variable in ("GIT_AUTHOR_IDENT", "GIT_COMMITTER_IDENT"):
+        try:
+            git(workspace, "var", variable)
+        except GitFailure as error:
+            retain_git_failure(directory, phase, error)
+            return {
+                "state": "failed",
+                "reason": (
+                    f"Git cannot resolve {variable} before inference. Configure user.name and "
+                    "user.email for the OS user running the AFK worker, normally with "
+                    "git config --global user.name NAME and git config --global user.email EMAIL, "
+                    "or supply valid Git author/committer environment overrides. "
+                    "Verify git var GIT_AUTHOR_IDENT and git var GIT_COMMITTER_IDENT "
+                    "in the retained clone. Private details are in the phase .git.log"
+                ),
+            }
+    return None
+
+
 def git(repository, *args):
     result = subprocess.run(
         [
@@ -52,7 +90,7 @@ def git(repository, *args):
         env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
     if result.returncode:
-        raise RuntimeError(f"git {args[0]} failed")
+        raise GitFailure(args[0], result.stderr)
     return result.stdout.strip()
 
 
@@ -376,6 +414,9 @@ def worker(directory, phase):
         ) as error:
             (directory / f"{phase}.error.log").write_text(traceback.format_exc())
             outcome = {"state": "failed", "error": type(error).__name__}
+            if isinstance(error, GitFailure):
+                retain_git_failure(directory, phase, error)
+                outcome["reason"] = str(error)
         outcome.update(
             started_at=read(directory / f"{phase}.json")["started_at"],
             finished_at=timestamp(),

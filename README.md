@@ -1814,3 +1814,16 @@ check marks changed or unconfirmed freshness and prepends a report warning.
 The conversation is a timestamped snapshot, not a lock on later comments or
 check updates. Exit 0 means a report was produced, including advice that work
 remains or that the revision is stale; execution failures exit 1.
+
+Before creation or response inference, the worker checks `git var GIT_AUTHOR_IDENT`
+and `git var GIT_COMMITTER_IDENT` in its actual clone. Git uses that worker's
+configuration and environment. If either fails, the phase fails before model
+invocation with setup guidance. Normally configure `user.name` and `user.email`
+globally for the OS user running the worker; valid Git identity environment
+overrides also work. Read-only review does not require commit identity.
+
+Failed identity checks and nonzero Git commands caught by a PR worker retain
+raw stderr in private `PHASE.git.log` with mode 0600. Published phase results
+contain safe summaries, not raw diagnostics. The check establishes identity
+resolution only; later commit hooks, signing, permissions or changed config
+can still fail. There is no automatic retry or host configuration change.

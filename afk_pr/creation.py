@@ -164,6 +164,9 @@ def implement(directory, job):
             "reason": "Base branch changed before implementation",
         }
     workspace = jobs.checkout(directory, job, "creation")
+    identity_failure = jobs.check_commit_identity(directory, workspace, "creation")
+    if identity_failure:
+        return identity_failure
     evidence = (directory / "bead.json").absolute()
 
     def validate(value):

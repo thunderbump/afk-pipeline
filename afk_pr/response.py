@@ -43,6 +43,9 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
     if not unchanged(github, job, branch):
         return {"state": "paused", "reason": "PR changed before response work started"}
     workspace = jobs.checkout(directory, job, "response")
+    identity_failure = jobs.check_commit_identity(directory, workspace, "response")
+    if identity_failure:
+        return identity_failure
     remote = jobs.git(workspace, "remote", "get-url", "origin")
     if jobs.github_remote(remote) != identity(job["pr_url"])[0].lower():
         raise ValueError("configured origin changed")
