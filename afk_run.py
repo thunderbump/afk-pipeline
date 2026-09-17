@@ -49,6 +49,7 @@ def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] in {
         "pr",
+        "evaluate",
         "review",
         "respond",
         "status",
@@ -61,7 +62,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         prog="afk",
         usage=(
-            "afk pr BEAD_ID | afk review|respond|status|context PR_URL | "
+            "afk pr|evaluate BEAD_ID | afk review|respond|status|context PR_URL | "
             "afk run <bead-id> [--config PATH] | "
             "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"

@@ -1720,3 +1720,34 @@ never delete records to bypass duplicate detection. The stage-pipeline JSON load
 is unchanged until the separate retirement task removes its users.
 
 An existing repository `[validation]` section belongs to the retained validation runner. PR commands do not interpret it; it may coexist with `[fixtures]`. Configure PR fixtures explicitly or provide the conventional executable entrypoint.
+
+### Bead evaluation
+
+`afk evaluate BEAD_ID` runs one advisory evaluation in the foreground and prints
+JSON containing the report, observed repository context and retained directory.
+It uses the same discovered host TOML and central Beads credentials as `pr`.
+No readiness label, fixture policy, Git commit identity or previous project
+checkout is required. The command does not change the Bead or post to GitHub.
+
+The evaluator reads the Bead's exact acceptance text, notes and direct dependency
+summaries. It acquires an independent clone of the registered repository's
+GitHub default branch and uses read-only inference. This is default-branch
+context, not an open PR's implementation. Missing ownership, registration or
+repository access is recorded explicitly; evaluation can still run without
+tools using the frozen Bead alone. Missing Beads or invalid host configuration
+are command errors.
+
+The report recommends readiness, identifies material gaps and asks useful
+clarification questions. It distinguishes repository ownership from examples,
+implementation choices from ambiguity, and repository work from host-only
+verification. It does not decompose work, assign criteria, authorize execution,
+merge, close tasks or start another command. Recommendations are judgment,
+not deterministic guarantees or mandatory gates.
+
+Evidence is retained under `state_root/evaluations/ID`: `bead.json`,
+`context.json`, `evaluation.json`, `report.md` on success and runtime evidence
+under `inference/`. Repository context lives under
+`workspace_root/evaluations/ID/evaluation`. Existing `cleanup JOB_ID` applies
+only to PR jobs; evaluation evidence/clones are retained for now. Calls are
+independent, with no automatic resume or deduplication. Exit 0 means a report
+was produced, including reports recommending clarification; failures exit 1.

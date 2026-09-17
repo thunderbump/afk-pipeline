@@ -8,6 +8,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from afk_pr import jobs
+from afk_pr.beads import read_configured_bead
 from afk_pr.config import (
     branch_sha,
     job_settings,
@@ -65,7 +66,7 @@ def find_pr(github, job):
 def submit_creation(
     bead_id, config_path, *, retry=None, github=None, launcher=jobs.launch
 ):
-    from afk_run import SAFE_ID, ownership, read_bead, safe_bead
+    from afk_run import SAFE_ID, ownership, safe_bead
 
     if not SAFE_ID.fullmatch(bead_id):
         raise ValueError("invalid central Bead ID")
@@ -80,25 +81,7 @@ def submit_creation(
         jobs.retry_publication(directory)
         return jobs.status_job(directory)
     root = Path(config["run_root"]) / "pr-reviews"
-    # The credential exists only in the bd subprocess environment, never a job file.
-    environment = os.environ.copy()
-    from afk_pr.config import location
-
-    workspace = location(config.get("beads_workspace"), "beads_workspace")
-    if not workspace.is_dir():
-        raise ValueError("Beads workspace is unavailable")
-    secret = location(
-        config.get("beads", {}).get(
-            "password_file", str(workspace / "secrets/dolt_beads_password.txt")
-        ),
-        "beads password_file",
-    )
-    if secret.exists():
-        password = secret.read_text().splitlines()
-        if not password or not password[0]:
-            raise ValueError("Beads credential file is empty")
-        environment["BEADS_DOLT_PASSWORD"] = password[0]
-    bead = read_bead(bead_id, workspace, env=environment)
+    bead = read_configured_bead(bead_id, config)
     slug = ownership(bead_id, bead["labels"])
     if slug not in config["projects"]:
         raise ValueError("Bead project has no configured repository")

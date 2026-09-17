@@ -15,6 +15,11 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser(prog="afk")
     commands = parser.add_subparsers(dest="command", required=True)
+    evaluation = commands.add_parser(
+        "evaluate", help="read-only advisory Bead readiness report"
+    )
+    evaluation.add_argument("bead_id")
+    evaluation.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     create = commands.add_parser(
         "pr", help="implement a central Bead and create one draft PR"
     )
@@ -63,6 +68,12 @@ def main(argv=None):
     background.add_argument("phase", choices=PHASES)
     args = parser.parse_args(argv)
     try:
+        if args.command == "evaluate":
+            from afk_pr.evaluation import evaluate
+
+            result = evaluate(args.bead_id, args.config)
+            print(json.dumps(result, indent=2))
+            return 0 if result["state"] == "completed" else 1
         if args.command == "worker":
             worker(args.directory, args.phase)
             return 0
