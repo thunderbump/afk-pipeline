@@ -29,7 +29,13 @@ repositories, describe the boundary without creating children or routing work.
 
 Distinguish a genuinely ambiguous objective from an ordinary implementation
 choice the agent can make. Do not demand detailed implementation instructions
-for a clear bounded task. Distinguish an unresolved blocking dependency from
+for a clear bounded task. Error wording, artifact names, standard Git identity
+resolution and similar implementation details normally belong to the implementer.
+The default branch may lag active work. If the Bead names commands or modules
+absent from this checkout, call out that context mismatch; do not substitute a
+legacy implementation or turn that mismatch into a demand to redefine scope.
+Do not repeat questions the Bead already answers, including who deploys.
+Distinguish an unresolved blocking dependency from
 parent-child or historical relationships; closed prerequisites are not blockers.
 Separate repository work from deployment, external verification, human judgment
 and missing authority. A host-only check need not prevent starting independent

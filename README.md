@@ -1751,3 +1751,7 @@ under `inference/`. Repository context lives under
 only to PR jobs; evaluation evidence/clones are retained for now. Calls are
 independent, with no automatic resume or deduplication. Exit 0 means a report
 was produced, including reports recommending clarification; failures exit 1.
+
+The tool-free fallback inherits the inference runtime's 64 KiB task-data limit.
+Oversized fallback input fails explicitly; it is not silently shortened.
+Default-branch context can lag active work, so reports need human judgment.
