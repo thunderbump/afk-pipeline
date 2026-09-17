@@ -1815,6 +1815,8 @@ The conversation is a timestamped snapshot, not a lock on later comments or
 check updates. Exit 0 means a report was produced, including advice that work
 remains or that the revision is stale; execution failures exit 1.
 
+### Git identity and diagnostics
+
 Before creation or response inference, the worker checks `git var GIT_AUTHOR_IDENT`
 and `git var GIT_COMMITTER_IDENT` in its actual clone. Git uses that worker's
 configuration and environment. If either fails, the phase fails before model
