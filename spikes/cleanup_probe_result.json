@@ -1,0 +1,445 @@
+{
+  "root": "<PROBE_ROOT>",
+  "source_head": "69c3246abbc4b12bad11a79fa4003a4a949ac7ed",
+  "cases": [
+    {
+      "name": "successful_published_open_pr",
+      "job_id": "9a5b71e1579240d0",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "9a5b71e1579240d0",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "eligible",
+            "directories": [
+              "<PROBE_ROOT>/clones/9a5b71e1579240d0/review"
+            ]
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "9a5b71e1579240d0",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "removed",
+            "directories": [
+              "<PROBE_ROOT>/clones/9a5b71e1579240d0/review"
+            ]
+          },
+          "clone_exists": false,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "9a5b71e1579240d0",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "removed",
+            "directories": [
+              "<PROBE_ROOT>/clones/9a5b71e1579240d0/review"
+            ]
+          },
+          "clone_exists": false,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "dirty_response",
+      "job_id": "f99cd61049d54e63",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "f99cd61049d54e63",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "workspace has unexpected changes or HEAD"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "f99cd61049d54e63",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "workspace has unexpected changes or HEAD"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "unpublished_response",
+      "job_id": "ec7fde4844534162",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "ec7fde4844534162",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "candidate push is uncertain or unpublished"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "ec7fde4844534162",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "candidate push is uncertain or unpublished"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "failed_response",
+      "job_id": "db41415c81794d1a",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "db41415c81794d1a",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "response is not successful and published"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "db41415c81794d1a",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "response is not successful and published"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "historical_layout",
+      "job_id": "cdf16add284a4345",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "cdf16add284a4345",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "historical or unknown workspace layout"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "cdf16add284a4345",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "historical or unknown workspace layout"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "completed_pr_external_resources",
+      "job_id": "f2b40e85840840ea",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "f2b40e85840840ea",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "fixture resource release is not proven; cleanup disabled"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "f2b40e85840840ea",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "fixture resource release is not proven; cleanup disabled"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "missing_evidence",
+      "job_id": "b60e1b1c90474357",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "b60e1b1c90474357",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "review required evidence is missing"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "b60e1b1c90474357",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "review required evidence is missing"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "active_lock",
+      "job_id": "4d1ef7e70d5849b6",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "4d1ef7e70d5849b6",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "job is active"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "4d1ef7e70d5849b6",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "job is active"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "active_unit",
+      "job_id": "44d2cea5bad047bb",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "44d2cea5bad047bb",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "worker inactivity is unconfirmed"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "44d2cea5bad047bb",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "retained",
+            "reason": "worker inactivity is unconfirmed"
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        }
+      ]
+    },
+    {
+      "name": "published_response_with_passed_fixture_child",
+      "job_id": "871904bff1b44984",
+      "calls": [
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "871904bff1b44984",
+            "--config",
+            "<PROBE_ROOT>/host.toml",
+            "--dry-run"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "eligible",
+            "directories": [
+              "<PROBE_ROOT>/clones/871904bff1b44984/response"
+            ]
+          },
+          "clone_exists": true,
+          "evidence_preserved": true
+        },
+        {
+          "argv": [
+            "/usr/bin/python3",
+            "<AFK_REPO>/afk",
+            "cleanup",
+            "871904bff1b44984",
+            "--config",
+            "<PROBE_ROOT>/host.toml"
+          ],
+          "exit_code": 0,
+          "result": {
+            "outcome": "removed",
+            "directories": [
+              "<PROBE_ROOT>/clones/871904bff1b44984/response"
+            ]
+          },
+          "clone_exists": false,
+          "evidence_preserved": true
+        }
+      ]
+    }
+  ],
+  "external_workflow_calls": [],
+  "source_preserved": true
+}
