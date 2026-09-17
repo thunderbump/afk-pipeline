@@ -43,7 +43,7 @@ class CreationTests(unittest.TestCase):
         (self.beads / "secrets").mkdir(parents=True)
         (self.beads / "secrets/dolt_beads_password.txt").write_text("test-credential\n")
         self.project = {
-            "repository": self.repo,
+            "repository": "https://github.com/example/repository.git",
             "base_ref": "origin/main",
             "validation": {
                 "command": [
@@ -56,8 +56,12 @@ class CreationTests(unittest.TestCase):
             },
         }
         self.config = {
+            "workspace_root": self.root / "workspaces",
+            "agent_timeout_seconds": 20,
+            "acquisition_timeout_seconds": 20,
+            "config_path": "fixture-host.toml",
             "run_root": self.root / "runs",
-            "beads_workspace": self.beads,
+            "beads_workspace": str(self.beads),
             "coordinator": {"agent_timeout_seconds": 20},
             "projects": {"example": self.project},
         }
@@ -70,9 +74,14 @@ class CreationTests(unittest.TestCase):
         self.launches = []
         self.pushes = []
         self.real_git = jobs.git
+        acquisition = mock.patch("afk_pr.workspace.acquire", side_effect=self.acquire)
+        acquisition.start()
+        self.addCleanup(acquisition.stop)
 
     def api(self, path, **kwargs):
         if "data" not in kwargs:
+            if path == "repos/example/repository":
+                return {"default_branch": "main"}
             return {"object": {"sha": self.base}}
         payload = kwargs["data"]
         self.posts.append(payload)
@@ -101,9 +110,17 @@ class CreationTests(unittest.TestCase):
 
     def submit(self, **kwargs):
         with (
-            mock.patch("afk_run.load_config", return_value=self.config),
+            mock.patch("afk_pr.creation.load_config", return_value=self.config),
             mock.patch("afk_run.read_bead", return_value=self.bead) as read,
             mock.patch.object(jobs, "git", side_effect=self.git),
+            mock.patch(
+                "afk_pr.creation.policy",
+                return_value=(self.project["validation"], {"commit": self.base}, None),
+            ),
+            mock.patch(
+                "afk_pr.config.policy",
+                return_value=(self.project["validation"], {"commit": self.base}, None),
+            ),
         ):
             result = creation.submit_creation(
                 self.bead["id"],
@@ -114,6 +131,15 @@ class CreationTests(unittest.TestCase):
             )
             self.read_environment = read.call_args.kwargs["env"]
         return result
+
+    def acquire(self, directory, job, phase):
+        workspace = Path(job["workspace_root"]) / job["id"] / phase
+        workspace.parent.mkdir(parents=True, exist_ok=True)
+        self.real_git(self.root, "clone", str(self.bare), str(workspace))
+        self.real_git(workspace, "checkout", "--detach", job["head"])
+        self.real_git(workspace, "config", "user.name", "Test")
+        self.real_git(workspace, "config", "user.email", "test@example.com")
+        return workspace
 
     def implement(
         self, directory, *, edit=True, before_return=None, outcome="succeeded"
@@ -132,6 +158,7 @@ class CreationTests(unittest.TestCase):
         with (
             mock.patch.object(jobs, "git", side_effect=self.git),
             mock.patch("afk_inference.runtime.invoke", side_effect=invoke),
+            mock.patch("afk_pr.workspace.acquire", side_effect=self.acquire),
         ):
             return creation.implement(directory, jobs.read(directory / "job.json"))
 
@@ -178,7 +205,13 @@ class CreationTests(unittest.TestCase):
             candidate,
         )
         self.assertEqual(
-            self.real_git(directory / "creation-worktree", "rev-parse", "HEAD^"),
+            self.real_git(
+                Path(jobs.read(directory / "job.json")["workspace_root"])
+                / directory.name
+                / "creation",
+                "rev-parse",
+                "HEAD^",
+            ),
             self.base,
         )
         self.assertEqual((self.repo / "value.txt").read_text(), "before\n")
@@ -295,7 +328,11 @@ class CreationTests(unittest.TestCase):
     def test_remote_move_before_publication_blocks_new_pr(self):
         directory = self.prepared()
         jobs.write(directory / "creation.json", self.implement(directory))
-        workspace = directory / "creation-worktree"
+        workspace = (
+            Path(jobs.read(directory / "job.json")["workspace_root"])
+            / directory.name
+            / "creation"
+        )
         self.real_git(workspace, "commit", "--allow-empty", "-qm", "another actor")
         self.real_git(
             workspace, "push", str(self.bare), "HEAD:refs/heads/afk-pr-central-example"
@@ -377,7 +414,11 @@ class CreationTests(unittest.TestCase):
         jobs.write(directory / "creation.json", self.implement(directory))
         self.publish(directory)
         progress = jobs.read(directory / "creation-progress.json")
-        workspace = directory / "creation-worktree"
+        workspace = (
+            Path(jobs.read(directory / "job.json")["workspace_root"])
+            / directory.name
+            / "creation"
+        )
         (workspace / "value.txt").write_text("later unrelated change\n")
         self.real_git(workspace, "commit", "-am", "later")
         self.real_git(workspace, "push", str(self.bare), "HEAD:refs/pull/12/head")

@@ -47,7 +47,14 @@ class PreparationError(Exception):
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments and arguments[0] in {"pr", "review", "respond", "status", "context"}:
+    if arguments and arguments[0] in {
+        "pr",
+        "review",
+        "respond",
+        "status",
+        "context",
+        "cleanup",
+    }:
         from afk_pr.__main__ import main as pr_main
 
         return pr_main(arguments)

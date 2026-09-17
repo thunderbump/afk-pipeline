@@ -6,11 +6,12 @@ import subprocess
 from pathlib import Path
 
 from afk_pr.github import GitHub, identity
-from afk_pr.jobs import PHASES, read, settings, status_job, submit, worker
+from afk_pr.jobs import PHASES, read, status_job, submit, worker
 
 
 def main(argv=None):
-    from afk_run import DEFAULT_CONFIG, PreparationError
+    from afk_pr.config import DEFAULT_CONFIG, load_config
+    from afk_run import PreparationError
 
     parser = argparse.ArgumentParser(prog="afk")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -50,6 +51,13 @@ def main(argv=None):
     )
     status.add_argument("pr_url")
     status.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    clean = commands.add_parser(
+        "cleanup",
+        help="remove successful inactive clone workspaces; retain job evidence",
+    )
+    clean.add_argument("job_id")
+    clean.add_argument("--dry-run", action="store_true")
+    clean.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     background = commands.add_parser("worker", help=argparse.SUPPRESS)
     background.add_argument("directory", type=Path)
     background.add_argument("phase", choices=PHASES)
@@ -66,6 +74,24 @@ def main(argv=None):
             )
             print(json.dumps(result, indent=2))
             return 0
+        if args.command == "cleanup":
+            import re
+
+            from afk_pr.lifecycle import cleanup
+
+            if not re.fullmatch(r"[0-9a-f]{16}", args.job_id):
+                raise ValueError("invalid job ID")
+            config = load_config(args.config, historical=True)
+            print(
+                json.dumps(
+                    cleanup(
+                        config["run_root"] / "pr-reviews" / args.job_id,
+                        dry_run=args.dry_run,
+                    ),
+                    indent=2,
+                )
+            )
+            return 0
         identity(args.pr_url)
         if args.command == "context":
             result = GitHub().observe(args.pr_url)
@@ -77,7 +103,7 @@ def main(argv=None):
                 respond=args.command == "respond",
             )
         else:
-            config, _, _ = settings(args.config, args.pr_url)
+            config = load_config(args.config, historical=True)
             root = Path(config["run_root"]) / "pr-reviews"
             if args.command in {"review", "respond"}:
                 import re
@@ -120,6 +146,7 @@ def main(argv=None):
         OSError,
         PreparationError,
         ValueError,
+        TypeError,
         RuntimeError,
         KeyError,
         subprocess.SubprocessError,

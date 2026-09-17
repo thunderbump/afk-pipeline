@@ -13,7 +13,9 @@ import traceback
 import uuid
 from pathlib import Path
 
+from afk_pr.config import job_settings, settings
 from afk_pr.github import GitHub, identity
+from afk_pr.lifecycle import guarded
 from afk_runtime import run_command, timestamp
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,11 +35,21 @@ def read(path):
 
 def git(repository, *args):
     result = subprocess.run(
-        ["git", "-C", str(repository), *args],
+        [
+            "git",
+            "-c",
+            "credential.https://github.com.helper=",
+            "-c",
+            "credential.https://github.com.helper=!gh auth git-credential",
+            "-C",
+            str(repository),
+            *args,
+        ],
         capture_output=True,
         text=True,
         check=False,
-        timeout=120,
+        timeout=600,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
     if result.returncode:
         raise RuntimeError(f"git {args[0]} failed")
@@ -50,24 +62,6 @@ def github_remote(value):
         value,
     )
     return match[1].lower() if match else None
-
-
-def settings(config_path, pr_url):
-    from afk_run import load_config
-
-    config = load_config(config_path)
-    repo, _ = identity(pr_url)
-    matches = []
-    for slug, project in config["projects"].items():
-        if (
-            github_remote(git(project["repository"], "remote", "get-url", "origin"))
-            == repo.lower()
-        ):
-            matches.append((slug, project))
-    if len(matches) != 1:
-        raise ValueError("PR must match exactly one configured project's origin")
-    slug, project = matches[0]
-    return config, slug, project
 
 
 def launch(directory, phase, timeout):
@@ -120,18 +114,15 @@ def submit(
         response_branch(pr, url)
     job_id = uuid.uuid4().hex[:16]
     directory = Path(config["run_root"]) / "pr-reviews" / job_id
-    if directory.resolve().is_relative_to(Path(project["repository"]).resolve()):
-        raise ValueError("PR review jobs must live outside the source repository")
+    resolved = job_settings(config, slug, project, github, pr["base"]["sha"])
     directory.mkdir(parents=True, mode=0o700)
     job = {
+        **resolved,
         "id": job_id,
         "pr_url": url,
         "project": slug,
         "head": pr["head"]["sha"],
         "base": pr["base"]["sha"],
-        "repository": str(project["repository"]),
-        "validation": project["validation"],
-        "review_timeout": config["coordinator"]["agent_timeout_seconds"],
         "reviewers": [] if fixtures_only or respond else ["afk"],
         "kind": "response" if respond else "review",
         "created_at": timestamp(),
@@ -147,9 +138,12 @@ def submit(
     return status_job(directory)
 
 
+@guarded
 def start(directory, phases, *, github, launcher=launch):
     """Persist work before launching independent managed workers."""
     job = read(directory / "job.json")
+    job["expected_phases"] = phases
+    write(directory / "job.json", job)
     for phase in phases:
         write(
             directory / f"{phase}.json", {"state": "queued", "publication": "pending"}
@@ -194,6 +188,15 @@ def start(directory, phases, *, github, launcher=launch):
 
 
 def checkout(directory, job, phase):
+    if job.get("layout") == "independent-clones-v1":
+        from afk_pr.workspace import acquire
+
+        return acquire(directory, job, phase)
+    # Retained pre-migration jobs keep their original worktree execution contract.
+    return legacy_checkout(directory, job, phase)
+
+
+def legacy_checkout(directory, job, phase):
     repo, number = identity(job["pr_url"])
     repository = Path(job["repository"])
     if github_remote(git(repository, "remote", "get-url", "origin")) != repo.lower():
@@ -214,9 +217,9 @@ def checkout(directory, job, phase):
 
 def acquire_fixture_slot(directory, job):
     # One slot per source repository, shared across this command's worktrees.
-    key = hashlib.sha256(str(Path(job["repository"]).resolve()).encode()).hexdigest()[
-        :16
-    ]
+    key = hashlib.sha256(
+        job.get("fixture_slot", str(Path(job["repository"]).resolve())).encode()
+    ).hexdigest()[:16]
     lock = (directory.parent / f"fixture-{key}.lock").open("a")
     deadline = time.monotonic() + job["validation"]["timeout_seconds"]
     while True:
@@ -235,15 +238,33 @@ def acquire_fixture_slot(directory, job):
 def fixtures(directory, job):
     with acquire_fixture_slot(directory, job):
         workspace = checkout(directory, job, "fixtures")
-        # EQEmu's existing wrapper uses this variable. A stable home also lets
-        # its own validation-worker lock cooperate across prepared worktrees.
-        command = [
-            "env",
-            "VALIDATION_WORKER_HOME="
-            + str(Path(job["repository"]) / ".validation-worker"),
-            "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence"),
-            *job["validation"]["command"],
-        ]
+        command = list(job["validation"]["command"])
+        resource = job.get("fixture_resource")
+        if resource:
+            command = [
+                "env",
+                "VALIDATION_WORKER_HOME=" + resource["worker_home"],
+                "AKKSTACK_DIR=" + resource["stack_path"],
+                "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence"),
+                *command,
+            ]
+        elif job.get("layout") != "independent-clones-v1":
+            command = [
+                "env",
+                "VALIDATION_WORKER_HOME="
+                + str(Path(job["repository"]) / ".validation-worker"),
+                "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence"),
+                *command,
+            ]
+        if job["validation"].get("github_auth"):
+            # Resolve credentials in the worker child; never retain token values in job/argv.
+            command = [
+                "bash",
+                "-c",
+                'set -e; export GITHUB_TOKEN="$(gh auth token)"; exec "$@"',
+                "afk-fixtures",
+                *command,
+            ]
         process = run_command(
             command,
             workspace,
@@ -312,6 +333,7 @@ def review(directory, job):
     return {"state": "completed", "reviewer": "afk"}
 
 
+@guarded
 def worker(directory, phase):
     job = read(directory / "job.json")
     with (directory / f"{phase}.lock").open("a") as lock:
@@ -432,6 +454,8 @@ def publish(directory, phase, *, github=None):
 def status_job(directory, *, probe=True):
     job = read(directory / "job.json")
     result = {"job": job, "directory": str(directory), "phases": {}}
+    if (directory / "cleanup.json").exists():
+        result["cleanup"] = read(directory / "cleanup.json")
     for phase in PHASES:
         path = directory / f"{phase}.json"
         if not path.exists():
@@ -473,6 +497,7 @@ def status_job(directory, *, probe=True):
     return result
 
 
+@guarded
 def retry_publication(directory):
     """Reconcile stopped workers and retry GitHub writes without repeating work."""
     for phase in PHASES:
@@ -537,6 +562,7 @@ def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
         "reviewers": [],
         f"{phase}_job": job["id"],
         "created_at": timestamp(),
+        "expected_phases": ["fixtures"],
     }
     target = directory.parent / child["id"]
     target.mkdir(mode=0o700)

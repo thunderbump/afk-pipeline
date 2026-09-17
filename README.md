@@ -1553,129 +1553,168 @@ Run the complete repository check:
 
 ## Explicit PR passes
 
-These commands run independently of the retained AFK stage pipeline:
+After one-time host setup, normal calls need only the task or PR:
 
 ```sh
-./afk context https://github.com/OWNER/REPO/pull/123
-./afk review https://github.com/OWNER/REPO/pull/123 --config ~/.config/afk/config.json
-./afk review https://github.com/OWNER/REPO/pull/123 --fixtures-only
+./afk pr CENTRAL_BEAD_ID
+./afk review https://github.com/OWNER/REPO/pull/123
 ./afk respond https://github.com/OWNER/REPO/pull/123
+./afk context https://github.com/OWNER/REPO/pull/123
 ./afk status https://github.com/OWNER/REPO/pull/123
+./afk review https://github.com/OWNER/REPO/pull/123 --fixtures-only
 ./afk review https://github.com/OWNER/REPO/pull/123 --retry-publication JOB_ID
+./afk cleanup JOB_ID --dry-run
 ```
 
-`context` is read-only. It retrieves the description, commits, ordinary comments,
-reviews, inline discussion, checks with annotations, and commit statuses. A failed
-page or a changing PR head/base rejects the observation rather than hiding feedback.
+These commands run independently of the retained stage pipeline. Python 3.11+
+provides the TOML parser. The host needs Git, authenticated `gh`, central `bd`
+for creation, the existing Pi/runtime dependencies for inference, a Git commit
+identity, and Linux user systemd. Background workers use the host user's stored
+authentication, not credentials exported only in the initiating shell. GitHub
+HTTPS acquisition uses a command-scoped `gh auth git-credential` helper.
 
-`review` uses the existing config. Exactly one project's `origin` must match the
-PR repository. The command records the selected head, creates a job under
-`run_root/pr-reviews`, publishes a pending commit status, and starts user-systemd
-services. The fixture service always runs the configured validation command.
-The independent review service uses the existing read-only inference role and
-posts Markdown as a COMMENT review. `--fixtures-only` omits this AFK reviewer so
-existing reviewers can supply feedback. Neither mode waits for fixtures in an
-inference session. Reviewer identity is retained separately from fixture results.
+### Configuration ownership
 
-The host needs Linux user systemd, `gh` authenticated for repository status and
-comment/review writes, Git, and the existing inference/runtime dependencies when
-AFK review is enabled. Services use the host's `gh` login. They do not inherit
-an invocation-only GitHub token. Enable user lingering if work must continue after
-logout. The launcher explicitly passes PATH so the installed Pi command is found.
+The host file is `$XDG_CONFIG_HOME/afk/config.toml`, or
+`~/.config/afk/config.toml`. Copy and customize
+[the host example](examples/pr-config/host.toml). `--config PATH` selects an
+alternate host file for deliberate experiments; ordinary calls do not need it.
 
-Each phase has a detached worktree at the selected commit. Checkouts are serialized
-per repository. Fixture jobs also share a per-repository execution slot; they wait
-up to the configured fixture timeout before reporting `busy`, meaning no tests ran.
-The fixture itself then gets its configured timeout. EQEmu receives a shared
-`VALIDATION_WORKER_HOME` and per-job `VALIDATION_AFK_EVIDENCE_DIR`, retaining its own
-worker/stack locks and committed-Candidate checks.
+```toml
+schema_version = 1
+beads_workspace = "~/Projects/beads"
 
-Each fixture execution owns one commit-status context and one updateable PR result
-comment. The comment includes the commit, result, exit code, and bounded redacted
-output tails. Files above 1 MiB are withheld; full logs remain in the host job
-directory. Code reviews are separately attributed and pinned to their reviewed
-commit. New commits never inherit an old fixture success. Review does not push
-code. Neither command merges, resolves threads, or automatically runs another
-model pass.
-
-`status` reports current GitHub results and retained local jobs without inference.
-A stopped service without a terminal record appears interrupted. Publication
-failures retain the actual work result; `--retry-publication` posts that result
-without rerunning fixtures or inference. It can also reconcile a stopped service
-and replace its pending fixture status with an error. Worktrees and logs remain
-for inspection and manual cleanup. These jobs are not automatically resumed after
-a reboot, and ambiguous failures may require operator intervention.
-
-`respond` starts one background response pass from the current PR conversation,
-including external reviewers and fixture results. It supports open PRs with a
-head branch in the configured repository; fork PRs are rejected before launch.
-The model edits an isolated worktree and explains consequential choices in
-Markdown. It may disagree, defer, ask for clarification, or make no changes.
-There is no per-comment disposition schema. It does not run or wait for fixtures.
-
-The host commits repairs, checks that the PR head and base are unchanged and the
-PR is still open, then pushes normally to its head branch. A concurrent change
-pauses the pass and retains the repair. A competing push is rejected by Git.
-Successful pushes queue deterministic fixtures for that exact commit. No-change
-responses publish an explanation without a commit or new fixture execution.
-The host needs Git push credentials and a configured commit identity. A completed
-response means the response work finished, not that validation passed; fixture
-results are independent.
-
-Each response has one updateable PR comment and retains `response.md`, its
-worktree, and a small `response-progress.json` record containing the candidate,
-push state, and any fixture job ID. Use `afk status` to inspect both jobs. A failed
-or interrupted pass may already have pushed: inspect this record and the remote
-before starting another pass. `afk respond PR_URL --retry-publication JOB_ID`
-retries only the comment, never inference, commits, push, or fixture scheduling.
-If fixture scheduling failed, submit `afk review PR_URL --fixtures-only` once the
-intended PR head is confirmed. New feedback arriving after submission is left for
-a later explicit pass. Merge policy and automatic pass scheduling remain outside
-these commands.
-
-## Bead-to-PR implementation
-
-```sh
-./afk pr CENTRAL_BEAD_ID --config ~/.config/afk/config.json
-./afk pr CENTRAL_BEAD_ID --retry-publication JOB_ID
+[projects.operations-webui]
+repository = "https://github.com/thunderbump/operations-webui.git"
 ```
 
-`pr` reads the central Bead and requires exactly one configured `project:<slug>`
-label. It starts one background implementation pass from the current remote
-version of the configured named base branch. `main`, `origin/main`, and full
-branch refs are accepted; detached SHAs and `HEAD` are not PR base branches.
-A closed Bead cannot start new work. Invoking the command selects a direct task;
-it does not run Acceptance Planner, alter readiness labels, or decompose work.
-The Beads password file, when present, is read only into the `bd` subprocess's
-environment. It is not retained in job records or passed to model services.
+Project labels resolve to registered Git URLs, never pre-existing checkouts.
+Unknown/duplicate repositories are errors. Beads supplies the title, description,
+design, acceptance criteria and exactly one `project:<slug>` label. Only creation
+needs the Beads workspace. The default password-file convention is
+`<beads_workspace>/secrets/dolt_beads_password.txt`; optional
+`[beads] password_file` changes that path. Its contents are passed only to `bd`.
 
-The model reads a frozen Bead snapshot and edits an isolated worktree. The host
-creates the implementation commit and pushes `afk-pr-BEAD_ID` with a create-only
-lease. The destination must be absent; no existing branch can be overwritten. A moved
-base or an existing destination branch pauses or rejects work. The PR is a draft
-with the Bead objective and acceptance text, model explanation, and candidate SHA.
-Configured fixtures run independently at that candidate, through the same worker
-used by review and response. Review remains an explicit separate command.
+State defaults to `$XDG_STATE_HOME/afk` or `~/.local/state/afk`.
+`state_root` overrides it; `workspace_root` optionally places clones on another
+disk. Jobs live under `state_root/pr-reviews/<id>`, while independent phase clones
+live under `workspace_root/<id>/<phase>`, defaulting to `state_root/workspaces`.
+Shared fixture resources must live outside disposable workspaces.
 
-Repeating `pr BEAD_ID` reports its existing local job. If a matching PR exists
-without local records, the command reports it, including a closed PR, instead of
-creating another. Use `respond PR_URL` for repairs. No-change or clarification
-results retain an explanation locally without an empty commit or PR.
+[Pipeline defaults](afk_pr/defaults.toml) set agent timeout to 1800 seconds,
+fixture timeout to 900 and acquisition timeout to 600 per Git operation. Host
+`agent_timeout_seconds` and `acquisition_timeout_seconds` can override their
+values. Model/thinking choices remain in the existing inference runtime.
+No acceptance-routing, assignment, coordinator response limit, publication-bundle
+or separate legacy worktree-root setting is required for PR commands.
 
-Publication retry can recover a lost PR-creation reply or publish a pushed
-candidate whose remote branch still matches. It never reimplements or pushes.
-It schedules fixtures only if no child job was recorded; a failed recorded child
-needs inspection and a separate `review --fixtures-only` submission. Inspect
-`creation.json`, `creation-progress.json`, and any child job when publication
-reports partial success. A published PR is not proof of passing validation.
-The command never closes the Bead, merges, or replaces the retained workflow.
+Commit a root `afk.toml` to each repository's trusted base:
 
+```toml
+schema_version = 1
 
-A paused or failed creation job remains attached to its Bead. There is no automatic
-implementation restart. Read `creation.md` and inspect `creation-worktree` first.
-You can finish the retained work with normal Git and GitHub commands, then use
-`review` and `respond` on that PR. If you need a fresh AFK implementation after
-clarification, create a successor Bead with the corrected scope and a reference
-to this job. Preserve the old work; do not delete records to bypass the repeat
-check. `status` includes any candidate, push state, and fixture-job ID under the
-phase's `progress` field.
+[fixtures]
+command = ["./scripts/validate"]
+github_auth = true
+```
+
+`description` and `timeout_seconds` are optional fixture settings. See the
+[Operations](examples/pr-config/operations-afk.toml) and
+[EQEmu](examples/pr-config/eqemu-afk.toml) examples. Without a command, a committed
+executable `scripts/validate` is the only fallback. Missing or malformed fixture
+policy is an error. `github_auth=true` resolves a token with `gh auth token` inside
+the fixture child and exports GITHUB_TOKEN without persisting its value.
+
+Creation reads policy at the GitHub default branch's captured SHA. Optional
+`base_branch` chooses another creation branch once; policy still comes from that
+captured default-branch commit. Review/respond read policy at the exact PR base
+SHA. The candidate cannot choose its own fixture policy. Resolved argv, timeout,
+auth requirement and provenance are saved in the job, and fixture children inherit
+them. A temporary `[projects.<slug>.fixtures]` host override supplies the same
+fixture fields until repo policy reaches its trusted base. Its `host_override`
+provenance is visible; it replaces the complete fixture selection, not an opaque
+recursive merge. Remove it when the committed repo policy is available.
+
+### Acquisition and shared fixtures
+
+Each phase gets a full independent clone, detached at the recorded candidate SHA,
+with recursive submodules initialized. Missing pinned objects receive one explicit
+SHA fetch attempt; failure stops the phase instead of substituting a newer head.
+There is no clone cache or dependency on a developer checkout. Failed acquisition
+is retained with a private diagnostic log; no automatic execution retry occurs.
+
+One fixture slot is shared per GitHub repository unless the host project selects
+`fixture_resource`. EQEmu uses a named host resource with `worker_home`,
+`stack_path`, and `workspace_cleanup=false`; see the host example. The adapter
+sets VALIDATION_WORKER_HOME, AKKSTACK_DIR and job-local
+VALIDATION_AFK_EVIDENCE_DIR. Existing repository worker/stack locks remain in use.
+Different named resources can run independently. Queue wait and command execution
+each have the fixture timeout, rather than one shared end-to-end deadline.
+The EQEmu wrapper retains its own 2600-second execution default under an outer
+2700-second fixture allowance.
+
+External resource workspace cleanup is disabled until resource teardown can be
+proved. In particular, an inactive local Compose client is not proof that a
+Docker daemon-owned container has stopped. This configuration change does not
+fix that existing EQEmu timeout concern or authorize unsafe stack reuse.
+
+### Pass behavior and retained results
+
+`pr` starts one direct implementation from a central Bead and opens a draft PR.
+It rejects closed or ambiguously owned Beads, but does not add legacy readiness or
+acceptance-planning gates. The host commits and pushes an absent
+`afk-pr-BEAD_ID` branch using a create-only lease. A moved base/destination pauses
+work. Repeating the command reports the retained job or matching PR instead of
+starting another implementation. A paused job remains attached to the Bead; inspect
+its explanation and workspace, or create a successor Bead for a new attempt.
+
+`review` captures the description, commits, ordinary comments, all reviewers,
+inline discussion, checks/annotations and statuses. It launches independent
+read-only inference and deterministic fixture services. `--fixtures-only` omits
+AFK inference, leaving existing reviewers to supply feedback. Review posts a
+COMMENT review and never pushes code. Multiple-reviewer expansion remains possible;
+the current default is one `afk` reviewer.
+
+`respond` reads the captured PR story and edits an independent clone. It may
+repair, disagree, defer, seek clarification or make no changes. The host verifies
+that the PR head/base and branch remain unchanged before pushing normally. Fork
+response branches remain unsupported. New pushes schedule fixtures at that exact
+commit; no-change responses post an explanation without another fixture run.
+No pass merges or automatically invokes another model pass.
+
+Fixture results have a commit status and updateable summary with bounded redacted
+log excerpts. Detailed logs, inference evidence, task snapshots and progress stay
+in the durable job directory. A completed creation/response is not a passing
+fixture result. Feedback arriving after capture is available to the next explicit
+pass; there is no mandatory per-comment disposition schema.
+
+`context` reads GitHub without host configuration. `status` reads GitHub and the
+selected state root without needing a checkout or Beads access. Publication retry
+uses retained job facts and phase locks; it never repeats inference, commits or
+pushes. Creation retry can recover/create a PR and schedule fixtures when no child
+was recorded. Response retry only posts the summary. An uncertain push or failed
+recorded child still requires inspection; use an explicit fixtures-only review
+when appropriate. Stopped workers are not automatically resumed.
+
+### Cleanup and migration
+
+`cleanup JOB_ID --dry-run` explains eligibility. Without dry-run it removes only
+owned new-layout independent clones for successful, published, inactive jobs.
+Required fixture children must pass and publish. Shared lifecycle locks protect
+workers/retries while cleanup holds an exclusive lock. Missing evidence, active
+or unobservable workers, external resources, failed/paused work, uncertain pushes,
+changed HEAD or unexpected files retain the workspace. No-change responses do not
+need a fictitious push. Ignored dependency/build scratch is disposable.
+
+A deletion receipt permits an interrupted cleanup to finish on a later explicit
+call. Job evidence remains, and old workers cannot restart after deletion begins.
+No automatic age-based cleanup, forced deletion or durable-evidence expiry exists.
+Historical linked worktrees are excluded. Do not store required artifacts only
+inside clones or as symlinks into them.
+
+Legacy JSON is rejected for new PR submissions. It remains accepted only to locate
+historical jobs for status/publication retry. Preserve original assessment configs
+and paths. A new state root cannot discover an old unpublished local job: inspect
+old roots before changing the default, keep active work on its original root and
+never delete records to bypass duplicate detection. The stage-pipeline JSON loader
+is unchanged until the separate retirement task removes its users.

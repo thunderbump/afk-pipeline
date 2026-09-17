@@ -8,6 +8,15 @@ from pathlib import Path
 from urllib.parse import quote
 
 from afk_pr import jobs
+from afk_pr.config import (
+    branch_sha,
+    job_settings,
+    load_config,
+    policy,
+)
+from afk_pr.config import (
+    repository as repository_identity,
+)
 from afk_pr.github import GitHub
 from afk_runtime import timestamp
 
@@ -25,7 +34,7 @@ def base_branch(value):
 
 def remote_head(job, branch):
     output = jobs.git(
-        job["repository"], "ls-remote", "--heads", job["remote"], "refs/heads/" + branch
+        Path.cwd(), "ls-remote", "--heads", job["remote"], "refs/heads/" + branch
     )
     rows = [line.split() for line in output.splitlines()]
     return next((sha for sha, ref in rows if ref == "refs/heads/" + branch), None)
@@ -56,44 +65,50 @@ def find_pr(github, job):
 def submit_creation(
     bead_id, config_path, *, retry=None, github=None, launcher=jobs.launch
 ):
-    from afk_run import SAFE_ID, load_config, ownership, read_bead, safe_bead
+    from afk_run import SAFE_ID, ownership, read_bead, safe_bead
 
     if not SAFE_ID.fullmatch(bead_id):
         raise ValueError("invalid central Bead ID")
-    config = load_config(config_path)
+    config = load_config(config_path, historical=bool(retry))
+    if retry:
+        if not re.fullmatch(r"[0-9a-f]{16}", retry):
+            raise ValueError("invalid job ID")
+        directory = config["run_root"] / "pr-reviews" / retry
+        job = jobs.read(directory / "job.json")
+        if job.get("bead_id") != bead_id or job.get("kind") != "creation":
+            raise ValueError("publication job does not match Bead")
+        jobs.retry_publication(directory)
+        return jobs.status_job(directory)
     root = Path(config["run_root"]) / "pr-reviews"
     # The credential exists only in the bd subprocess environment, never a job file.
     environment = os.environ.copy()
-    secret = config["beads_workspace"] / "secrets/dolt_beads_password.txt"
+    from afk_pr.config import location
+
+    workspace = location(config.get("beads_workspace"), "beads_workspace")
+    if not workspace.is_dir():
+        raise ValueError("Beads workspace is unavailable")
+    secret = location(
+        config.get("beads", {}).get(
+            "password_file", str(workspace / "secrets/dolt_beads_password.txt")
+        ),
+        "beads password_file",
+    )
     if secret.exists():
-        environment["BEADS_DOLT_PASSWORD"] = secret.read_text().splitlines()[0]
-    bead = read_bead(bead_id, config["beads_workspace"], env=environment)
+        password = secret.read_text().splitlines()
+        if not password or not password[0]:
+            raise ValueError("Beads credential file is empty")
+        environment["BEADS_DOLT_PASSWORD"] = password[0]
+    bead = read_bead(bead_id, workspace, env=environment)
     slug = ownership(bead_id, bead["labels"])
     if slug not in config["projects"]:
         raise ValueError("Bead project has no configured repository")
     project = config["projects"][slug]
-    repository = Path(project["repository"])
-    if root.resolve().is_relative_to(repository.resolve()):
-        raise ValueError("PR jobs must live outside the source repository")
+    repo = repository_identity(project["repository"])
+    repository = f"https://github.com/{repo}.git"
     root.mkdir(parents=True, exist_ok=True)
     key = hashlib.sha256(bead_id.encode()).hexdigest()[:16]
     with (root / f"bead-{key}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if retry:
-            if not re.fullmatch(r"[0-9a-f]{16}", retry):
-                raise ValueError("invalid job ID")
-            directory = root / retry
-            job = jobs.read(directory / "job.json")
-            if (
-                job.get("bead_id") != bead_id
-                or job.get("kind") != "creation"
-                or job["repository"] != str(repository)
-            ):
-                raise ValueError(
-                    "publication job does not match this Bead and repository"
-                )
-            jobs.retry_publication(directory)
-            return jobs.status_job(directory)
         for directory in sorted(root.iterdir()):
             if directory.is_dir() and (directory / "job.json").exists():
                 job = jobs.read(directory / "job.json")
@@ -106,16 +121,16 @@ def submit_creation(
         if bead.get("status") == "closed":
             raise ValueError("cannot implement a closed Bead")
         github = github or GitHub()
-        remote = jobs.git(repository, "remote", "get-url", "origin")
-        repo = jobs.github_remote(remote)
-        if not repo:
-            raise ValueError("configured origin must identify a GitHub repository")
-        branch = base_branch(project["base_ref"])
-        base = github.api(f"repos/{repo}/git/ref/heads/{quote(branch, safe='/')}")[
-            "object"
-        ]["sha"]
+        remote = repository
+        branch = github.api(f"repos/{repo}")["default_branch"]
+        policy_base = branch_sha(github, repo, branch)
+        _, _, override = policy(github, repo, policy_base, project)
+        branch = base_branch(override or branch)
+        base = branch_sha(github, repo, branch) if override else policy_base
+        resolved = job_settings(config, slug, project, github, policy_base)
         job_id = os.urandom(8).hex()
         job = {
+            **resolved,
             "id": job_id,
             "kind": "creation",
             "bead_id": bead_id,
@@ -128,12 +143,10 @@ def submit_creation(
             "base_branch": branch,
             "head": base,
             "base": base,
-            "validation": project["validation"],
-            "review_timeout": config["coordinator"]["agent_timeout_seconds"],
             "reviewers": [],
             "created_at": timestamp(),
         }
-        jobs.git(repository, "check-ref-format", "refs/heads/" + job["branch"])
+        jobs.git(Path.cwd(), "check-ref-format", "refs/heads/" + job["branch"])
         existing = find_pr(github, job)
         if existing:
             return {
@@ -162,27 +175,12 @@ def implement(directory, job):
             "state": "paused",
             "reason": "Bead branch appeared before implementation",
         }
-    repository = Path(job["repository"])
-    if jobs.git(repository, "remote", "get-url", "origin") != job["remote"]:
-        raise ValueError("configured origin changed")
-    key = hashlib.sha256(str(repository.resolve()).encode()).hexdigest()[:16]
-    with (directory.parent / f"checkout-{key}.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        jobs.git(
-            repository,
-            "fetch",
-            "--no-tags",
-            job["remote"],
-            "refs/heads/" + job["base_branch"],
-        )
-        if jobs.git(repository, "rev-parse", "FETCH_HEAD") != job["base"]:
-            return {
-                "state": "paused",
-                "reason": "Base branch changed before implementation",
-            }
-        workspace = directory / "creation-worktree"
-        jobs.git(repository, "worktree", "add", "--detach", str(workspace), job["base"])
-        jobs.git(workspace, "submodule", "update", "--init", "--recursive")
+    if remote_head(job, job["base_branch"]) != job["base"]:
+        return {
+            "state": "paused",
+            "reason": "Base branch changed before implementation",
+        }
+    workspace = jobs.checkout(directory, job, "creation")
     evidence = (directory / "bead.json").absolute()
 
     def validate(value):

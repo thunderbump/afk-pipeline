@@ -149,6 +149,15 @@ class JobTests(unittest.TestCase):
             mock.patch.object(
                 jobs, "status_job", side_effect=lambda d: {"directory": str(d)}
             ),
+            mock.patch.object(
+                jobs,
+                "job_settings",
+                return_value={
+                    "repository": self.project["repository"],
+                    "validation": self.project["validation"],
+                    "review_timeout": 30,
+                },
+            ),
         ):
             result = jobs.submit(
                 URL,

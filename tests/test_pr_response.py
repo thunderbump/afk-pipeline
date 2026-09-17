@@ -266,6 +266,15 @@ class ResponseTests(unittest.TestCase):
         with (
             mock.patch.object(jobs, "settings", return_value=(config, "test", project)),
             mock.patch.object(
+                jobs,
+                "job_settings",
+                return_value={
+                    "repository": str(self.repo),
+                    "validation": self.job["validation"],
+                    "review_timeout": 20,
+                },
+            ),
+            mock.patch.object(
                 jobs, "status_job", side_effect=lambda d: jobs.read(d / "job.json")
             ),
         ):
