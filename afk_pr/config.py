@@ -60,6 +60,18 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
         value = tomllib.loads(path.read_text())
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise ValueError(f"Cannot read host TOML {path}: {error}") from error
+    state = location(
+        value.get(
+            "state_root",
+            str(
+                Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
+                / "afk"
+            ),
+        ),
+        "state_root",
+    )
+    if historical:
+        return {"run_root": state}
     keys(
         value,
         {
@@ -77,16 +89,6 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
     )
     if value.get("schema_version") != 1:
         raise ValueError("host schema_version must be 1")
-    state = location(
-        value.get(
-            "state_root",
-            str(
-                Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state"))
-                / "afk"
-            ),
-        ),
-        "state_root",
-    )
     result = {
         **value,
         "run_root": state,
@@ -219,6 +221,10 @@ def policy(github, repo, sha, project):
         keys(value, {"schema_version", "base_branch", "fixtures"}, "repository")
         if value.get("schema_version") != 1:
             raise ValueError("repository schema_version must be 1")
+    if "base_branch" in value and (
+        not isinstance(value["base_branch"], str) or not value["base_branch"].strip()
+    ):
+        raise ValueError("base_branch must be a nonempty string")
     override = project.get("fixtures")
     fixtures = override if override is not None else value.get("fixtures", {})
     keys(

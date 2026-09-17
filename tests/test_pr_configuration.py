@@ -109,6 +109,47 @@ class ConfigurationTests(unittest.TestCase):
         )
         return Path(result["directory"])
 
+    def test_historical_location_ignores_unrelated_invalid_settings(self):
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[fixture_resources.bad]\nstack_path = "relative"\n'
+        )
+        self.assertEqual(
+            config.load_config(self.host, historical=True)["run_root"],
+            self.root / "state",
+        )
+        with self.assertRaises(ValueError):
+            config.load_config(self.host)
+
+    def test_policy_rejects_malformed_base_branch(self):
+        for value in ("true", "false", '""', "123"):
+            with self.subTest(value=value):
+                (self.source / "afk.toml").write_text(
+                    "schema_version = 1\nbase_branch = " + value + "\n"
+                )
+                self.git(self.source, "add", ".")
+                self.git(self.source, "commit", "-m", "invalid branch")
+                sha = self.git(self.source, "rev-parse", "HEAD")
+                with self.assertRaisesRegex(ValueError, "base_branch"):
+                    config.policy(self.gh, "example/repository", sha, {})
+
+    def test_authentication_failure_prevents_fixture_execution(self):
+        wrapper = (
+            'set -e; GITHUB_TOKEN="$(gh auth token)"; export GITHUB_TOKEN; exec "$@"'
+        )
+        result = self.run(
+            [
+                "bash",
+                "-c",
+                "gh() { return 17; }; " + wrapper,
+                "fixtures",
+                "touch",
+                str(self.root / "executed"),
+            ]
+        )
+        self.assertEqual(result.returncode, 17)
+        self.assertFalse((self.root / "executed").exists())
+
     def test_real_toml_submission_has_no_beads_or_checkout_and_snapshots_base_policy(
         self,
     ):
@@ -356,7 +397,8 @@ class ConfigurationTests(unittest.TestCase):
             self.assertEqual(jobs.fixtures(d, job)["state"], "passed")
         command = run.call_args.args[0]
         self.assertIn(
-            'set -e; export GITHUB_TOKEN="$(gh auth token)"; exec "$@"', command
+            'set -e; GITHUB_TOKEN="$(gh auth token)"; export GITHUB_TOKEN; exec "$@"',
+            command,
         )
         self.assertIn("VALIDATION_WORKER_HOME=" + str(self.root / "worker"), command)
         self.assertIn(

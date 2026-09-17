@@ -261,7 +261,7 @@ def fixtures(directory, job):
             command = [
                 "bash",
                 "-c",
-                'set -e; export GITHUB_TOKEN="$(gh auth token)"; exec "$@"',
+                'set -e; GITHUB_TOKEN="$(gh auth token)"; export GITHUB_TOKEN; exec "$@"',
                 "afk-fixtures",
                 *command,
             ]
