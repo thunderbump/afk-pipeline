@@ -1787,3 +1787,30 @@ before and after the request, but that check is not atomic with merging.
 A concurrent retarget can be detected too late to prevent a merge. GitHub and
 Beads do not share a transaction; this command does not claim otherwise.
 Repository protections still depend on repository settings and caller privileges.
+
+### Completion assessment
+
+`afk assess PR_URL` runs one foreground advisory pass against the actual central
+Bead identified by one `<!-- afk-bead:ID -->` marker in the PR body. Use
+`--bead BEAD_ID` for a follow-up or ambiguous/missing association. It uses the
+same host TOML, credentials and inference runtime as the other short commands.
+
+The assessor reads the frozen Bead, full PR conversation, third-party reviews,
+current-head checks/statuses and a read-only clone pinned to PR head/base.
+It compares acceptance with existing evidence, without running new tests or
+posting, repairing, merging, closing tasks or launching another command.
+If code acquisition fails, it retains that limitation and reads the frozen
+story without repository code. Linked artifact contents are not auto-fetched.
+
+Stdout JSON contains the report and retained directory. Evidence lives under
+`state_root/assessments/ID`; clones live under
+`workspace_root/assessments/ID/assessment`. Evidence includes `bead.json`,
+`context.json`, `repository.json`, `assessment.json`, successful `report.md`
+and inference runtime records. These directories are retained for now.
+
+The model recommends ready, remaining work or insufficient evidence. These are
+judgments, not enforced enums or merge authorization. A final head/base/target
+check marks changed or unconfirmed freshness and prepends a report warning.
+The conversation is a timestamped snapshot, not a lock on later comments or
+check updates. Exit 0 means a report was produced, including advice that work
+remains or that the revision is stale; execution failures exit 1.
