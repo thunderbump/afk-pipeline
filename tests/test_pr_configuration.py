@@ -121,6 +121,24 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.load_config(self.host)
 
+    def test_old_validation_section_coexists_with_explicit_fixture_override(self):
+        (self.source / "afk.toml").write_text(
+            'schema_version = 1\n[validation]\ncommand = ["old-runner"]\n'
+        )
+        self.git(self.source, "add", ".")
+        self.git(self.source, "commit", "-m", "old validation policy")
+        sha = self.git(self.source, "rev-parse", "HEAD")
+        validation, origin, _ = config.policy(
+            self.gh,
+            "example/repository",
+            sha,
+            {"fixtures": {"command": ["new-runner"]}},
+        )
+        self.assertEqual(validation["command"], ["new-runner"])
+        self.assertEqual(origin["source"], "host_override")
+        with self.assertRaisesRegex(ValueError, "fixture_policy_missing"):
+            config.policy(self.gh, "example/repository", sha, {})
+
     def test_policy_rejects_malformed_base_branch(self):
         for value in ("true", "false", '""', "123"):
             with self.subTest(value=value):

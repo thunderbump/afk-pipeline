@@ -1718,3 +1718,5 @@ and paths. A new state root cannot discover an old unpublished local job: inspec
 old roots before changing the default, keep active work on its original root and
 never delete records to bypass duplicate detection. The stage-pipeline JSON loader
 is unchanged until the separate retirement task removes its users.
+
+An existing repository `[validation]` section belongs to the retained validation runner. PR commands do not interpret it; it may coexist with `[fixtures]`. Configure PR fixtures explicitly or provide the conventional executable entrypoint.

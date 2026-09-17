@@ -218,7 +218,11 @@ def policy(github, repo, sha, project):
         if blob.get("size", 0) > 65536 or blob.get("encoding") != "base64":
             raise ValueError("repository policy exceeds supported size/encoding")
         value = tomllib.loads(base64.b64decode(blob["content"]).decode())
-        keys(value, {"schema_version", "base_branch", "fixtures"}, "repository")
+        keys(
+            value,
+            {"schema_version", "base_branch", "fixtures", "validation"},
+            "repository",
+        )
         if value.get("schema_version") != 1:
             raise ValueError("repository schema_version must be 1")
     if "base_branch" in value and (
