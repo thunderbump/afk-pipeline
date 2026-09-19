@@ -169,13 +169,9 @@ def prepare_submission(
     respond,
     github,
 ):
+    """Write job/context for a validated reserved action, without launching work."""
     pr = context["pull_request"]
-    if pr["state"] != "open":
-        raise ValueError("PR passes require an open PR")
     if respond:
-        from afk_pr.response import response_branch
-
-        response_branch(pr, url)
         from afk_pr.review_result import retained
 
         context["afk_review_results"] = retained(
@@ -237,6 +233,12 @@ def start(directory, phases, *, github, launcher=launch):
                 else job["review_timeout"]
             )
             launcher(directory, phase, timeout)
+        except subprocess.TimeoutExpired as error:
+            # systemd may have accepted the worker. Preserve its phase state and
+            # let the action receipt pause instead of declaring execution failed.
+            raise RuntimeError(
+                f"Launch of {phase} is uncertain after timeout"
+            ) from error
         except (
             OSError,
             ValueError,

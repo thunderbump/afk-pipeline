@@ -67,7 +67,9 @@ def submit_action(
                     "action ID already belongs to a different command or head"
                 )
             directory = Path(config["run_root"]) / "pr-reviews" / receipt["job_id"]
-            if receipt["state"] != "submitted" or not (directory / "job.json").exists():
+            if receipt["state"] != "paused" and (
+                receipt["state"] != "submitted" or not (directory / "job.json").exists()
+            ):
                 receipt.update(
                     state="paused",
                     reason="Submission interrupted or uncertain; inspect retained job before choosing a new action",

@@ -1,6 +1,9 @@
 import contextlib
 import io
 import json
+import signal
+import subprocess
+import sys
 import tempfile
 import threading
 import unittest
@@ -109,6 +112,7 @@ class ActionTests(unittest.TestCase):
             with mock.patch.object(self.gh, "observe", side_effect=[first, second]):
                 result = self.submit(action_id=field)
             self.assertEqual(result["action"]["state"], "paused")
+            self.assertEqual(self.submit(action_id=field)["action"], result["action"])
             self.assertEqual(
                 self.submit(action_id=field)["action"]["job_id"],
                 result["action"]["job_id"],
@@ -159,6 +163,53 @@ class ActionTests(unittest.TestCase):
         self.assertEqual(replay["action"]["state"], "paused")
         self.assertEqual(len(self.launches), 2)
 
+    def test_accepted_worker_then_launcher_timeout_pauses_without_overwriting_worker(
+        self,
+    ):
+        def launch(directory, phase, timeout):
+            self.launches.append((directory, phase))
+            jobs.write(
+                directory / f"{phase}.json",
+                {"state": "running", "publication": "pending"},
+            )
+            raise subprocess.TimeoutExpired("systemd-run", timeout)
+
+        with self.assertRaisesRegex(RuntimeError, "uncertain"):
+            self.submit(action_id="timeout", launcher=launch)
+        path = actions.receipt_path(self.root, URL, "timeout")
+        original = jobs.read(path)
+        replay = self.submit(action_id="timeout")
+        self.assertEqual(replay["action"], original)
+        self.assertEqual(replay["action"]["state"], "paused")
+        self.assertEqual(replay["phases"]["fixtures"]["state"], "running")
+        self.assertEqual(len(self.launches), 1)
+
+    def test_sigkill_releases_process_lock_and_keeps_reserved_job_identity(self):
+        script = """
+import os, signal, sys
+from pathlib import Path
+from unittest import mock
+from afk_pr import jobs
+from tests.test_pr_passes import FakeGitHub, URL
+root = Path(sys.argv[1])
+def crash(*args, **kwargs):
+    os.kill(os.getpid(), signal.SIGKILL)
+with mock.patch.object(jobs, 'settings', return_value=({'run_root': root}, 'test', {})), mock.patch.object(jobs, 'prepare_submission', side_effect=crash):
+    jobs.submit(URL, root / 'config', action_id='killed', github=FakeGitHub())
+"""
+        child = subprocess.run(
+            [sys.executable, "-c", script, str(self.root)],
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        self.assertEqual(child.returncode, -signal.SIGKILL, child.stderr)
+        original = jobs.read(actions.receipt_path(self.root, URL, "killed"))
+        replay = self.submit(action_id="killed")
+        self.assertEqual(replay["action"]["state"], "paused")
+        self.assertEqual(replay["action"]["job_id"], original["job_id"])
+        self.assertFalse(self.launches)
+
     def test_concurrent_submission_is_busy_then_reuses_existing_job(self):
         entered, release = threading.Event(), threading.Event()
         results, errors = [], []
@@ -191,7 +242,7 @@ class ActionTests(unittest.TestCase):
         )
         self.assertEqual(len(self.launches), 2)
 
-    def test_url_case_reuses_receipt_and_finished_response_does_not_need_old_head(self):
+    def test_url_case_reuses_receipt_and_submitted_replay_does_not_reobserve_head(self):
         first = self.submit(action_id="case")
         with mock.patch.object(
             self.gh, "observe", side_effect=AssertionError("replay must not reobserve")
