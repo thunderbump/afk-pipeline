@@ -111,7 +111,10 @@ class GitIdentityTest(unittest.TestCase):
             patch.object(jobs, "checkout", return_value=self.repo),
             patch(
                 "afk_inference.runtime.invoke",
-                return_value=SimpleNamespace(outcome="succeeded", value="No concerns"),
+                return_value=SimpleNamespace(
+                    outcome="succeeded",
+                    value={"summary": "No concerns", "findings": []},
+                ),
             ) as inference,
         ):
             result = jobs.review(
@@ -119,6 +122,7 @@ class GitIdentityTest(unittest.TestCase):
                 {"head": self.head, "base": self.head, "review_timeout": 5},
             )
         self.assertEqual(result["state"], "completed")
+        self.assertEqual(result["result"]["findings"], [])
         inference.assert_called_once()
 
     def test_git_stderr_is_private_and_not_in_worker_publication(self):
