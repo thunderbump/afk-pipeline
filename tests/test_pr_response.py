@@ -135,6 +135,22 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(jobs.read(summary)["statuses"][0]["state"], "failure")
         self.assertEqual(self.invocation["read_only_evidence"][0], str(summary))
         self.assertEqual(self.invocation["purpose"], "feedback_response")
+        self.assertEqual(self.invocation["task_contract_version"], 2)
+        instructions = self.invocation["trusted_task_instructions"]
+        for requirement in (
+            "inspect its callers and sibling paths",
+            "state changes before first processing",
+            "processing, retry and shutdown where relevant",
+            "bounded to the accepted defect and PR objective",
+            "regression tests through the affected production paths",
+            "related callers and state transitions checked",
+            "regression coverage added or missing",
+            "no changes, disagreement",
+            "Do not commit, push, merge",
+            "run or wait for fixtures",
+        ):
+            with self.subTest(requirement=requirement):
+                self.assertIn(requirement, instructions)
         self.assertEqual(self.invocation["requested_capability"].value, "WRITE")
         self.assertIn(
             "Do not classify every comment",
