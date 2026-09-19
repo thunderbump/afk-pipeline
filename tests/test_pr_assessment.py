@@ -14,6 +14,21 @@ URL = "https://github.com/example/repo/pull/1"
 SHA = "a" * 40
 
 
+def scope_report(remaining="None identified in the supplied evidence", **sections):
+    values = {
+        "Remaining requirements": remaining,
+        "Deferrals": sections.get("deferrals", "None recorded"),
+        "Uncertainty": sections.get("uncertainty", "None identified"),
+        "Evidence": sections.get(
+            "evidence", f"Observed head {SHA}; supplied task and PR."
+        ),
+    }
+    return "\n\n".join(f"## {heading}\n{body}" for heading, body in values.items())
+
+
+COMPLETE_REPORT = scope_report()
+
+
 class AssessmentTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -50,7 +65,7 @@ class AssessmentTest(unittest.TestCase):
     def run_assessment(
         self,
         *,
-        report="Insufficient evidence: the current head was not reviewed.",
+        report=COMPLETE_REPORT,
         acquired=False,
         changed=False,
         **kwargs,
@@ -162,6 +177,78 @@ class AssessmentTest(unittest.TestCase):
             self.assertEqual(result["state"], "failed")
             self.assertNotIn("report", result)
             self.assertFalse((Path(result["directory"]) / "report.md").exists())
+
+    def test_completed_scope_and_partial_multi_pr_scope_remain_advisory(self):
+        reports = (
+            scope_report(),
+            scope_report(
+                "Second requirement remains. The selected PR covers the first only.",
+                deferrals="Second requirement is deferred to another PR, still unmet.",
+                uncertainty="The other PR's claimed work is not supplied.",
+            ),
+        )
+        for report in reports:
+            with self.subTest(report=report):
+                result = self.run_assessment(report=report)
+                self.assertEqual(result["state"], "completed")
+                self.assertEqual(result["report"], report)
+                self.assertNotIn("verdict", result)
+                self.assertEqual(self.calls[-1]["task_contract_version"], 2)
+
+    def test_report_shape_rejects_legacy_verdict_and_missing_empty_extra_sections(self):
+        for report in (
+            "Ready: all requirements covered.",
+            "Not ready\n" + scope_report(),
+            scope_report().replace("## Deferrals\nNone recorded", "## Deferrals\n"),
+            scope_report().replace("## Uncertainty", "## Verdict"),
+            scope_report() + "\n## Approval\nApproved",
+            scope_report() + "x" * 20000,
+        ):
+            with self.subTest(report=report[:100]):
+                result = self.run_assessment(report=report)
+                self.assertEqual(result["state"], "failed")
+                self.assertNotIn("report", result)
+
+    def test_later_matching_head_fixture_is_delivered_with_earlier_missing_run_review(
+        self,
+    ):
+        # Reduced PR61 chronology. This verifies evidence delivery, not model reasoning.
+        self.context["reviews"] = [
+            {
+                "commit_id": SHA,
+                "body": "No successful exact-head rehearsal yet.",
+                "submitted_at": "2026-09-18T23:06:27Z",
+            }
+        ]
+        self.context["statuses"] = [
+            {
+                "context": "afk/fixtures/ec38d425d795446a",
+                "state": "success",
+                "updated_at": "2026-09-18T23:06:49Z",
+                "creator": {"id": 1, "login": "fixture-runner"},
+                "target_url": URL + "#issuecomment-5737257489",
+            }
+        ]
+        result = self.run_assessment(
+            report=scope_report(
+                evidence=(
+                    f"Observed {SHA}. Later fixture success is reported at "
+                    + self.context["statuses"][0]["target_url"]
+                )
+            )
+        )
+        self.assertEqual(result["state"], "completed")
+        call = self.calls[-1]
+        summary = json.loads(Path(call["read_only_evidence"][0]).read_text())
+        self.assertTrue(summary["statuses"][0]["current_head"])
+        self.assertEqual(summary["statuses"][0]["state"], "success")
+        self.assertGreater(
+            summary["statuses"][0]["updated_at"], summary["reviews"][0]["submitted_at"]
+        )
+        instructions = call["trusted_task_instructions"]
+        self.assertIn("Do not claim no", instructions)
+        self.assertIn("URLs\npresent verbatim", instructions)
+        self.assertIn("Do not give a ready/not-ready", instructions)
 
     def test_context_failure_does_not_launch_inference(self):
         self.gh.observe.side_effect = ValueError("PR changed while reading context")

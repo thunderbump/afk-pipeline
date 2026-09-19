@@ -16,7 +16,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="afk")
     commands = parser.add_subparsers(dest="command", required=True)
     assessment = commands.add_parser(
-        "assess", help="advisory completion assessment against a selected Bead"
+        "assess", help="optional remaining-scope assessment against a selected Bead"
     )
     assessment.add_argument("pr_url")
     assessment.add_argument("--bead")

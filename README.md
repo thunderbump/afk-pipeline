@@ -1788,32 +1788,39 @@ A concurrent retarget can be detected too late to prevent a merge. GitHub and
 Beads do not share a transaction; this command does not claim otherwise.
 Repository protections still depend on repository settings and caller privileges.
 
-### Completion assessment
+### Remaining-scope assessment
 
-`afk assess PR_URL` runs one foreground advisory pass against the actual central
-Bead identified by one `<!-- afk-bead:ID -->` marker in the PR body. Use
-`--bead BEAD_ID` for a follow-up or ambiguous/missing association. It uses the
-same host TOML, credentials and inference runtime as the other short commands.
+`afk assess PR_URL [--bead BEAD_ID]` runs an optional foreground scope check
+against the selected central Bead. Without `--bead`, the PR body must contain
+exactly one `<!-- afk-bead:ID -->` marker. Explicit selection supports child Beads
+and partial or multi-PR delivery. It does not infer closure from that marker.
 
-The assessor reads the frozen Bead, full PR conversation, third-party reviews,
-current-head checks/statuses and a read-only clone pinned to PR head/base.
-It compares acceptance with existing evidence, without running new tests or
-posting, repairing, merging, closing tasks or launching another command.
-If code acquisition fails, it retains that limitation and reads the frozen
-story without repository code. Linked artifact contents are not auto-fetched.
+The assessor reads the execution summary first, then the frozen Bead, full PR
+story and repository metadata. It may inspect an exact-head clone to answer a
+specific scope question. It does not run tests, fetch artifacts, repeat code
+review, post feedback, create work, merge or close anything. Missing repository
+access is recorded and the pass can continue using the remaining evidence.
 
-Stdout JSON contains the report and retained directory. Evidence lives under
-`state_root/assessments/ID`; clones live under
-`workspace_root/assessments/ID/assessment`. Evidence includes `bead.json`,
-`context.json`, `repository.json`, `assessment.json`, successful `report.md`
-and inference runtime records. These directories are retained for now.
+Reports contain four nonempty Markdown sections in order: `Remaining
+requirements`, `Deferrals`, `Uncertainty`, and `Evidence`. They describe what
+remains and cite supplied evidence, with no overall readiness or approval
+verdict. A deferred acceptance requirement remains unmet. Matching-head terminal
+execution records take precedence over older prose about that run being pending.
+The host validates report shape and length, not the truth of the model's prose
+or citations. A report is advice for the caller, never a gate for `finish`.
 
-The model recommends ready, remaining work or insufficient evidence. These are
-judgments, not enforced enums or merge authorization. A final head/base/target
-check marks changed or unconfirmed freshness and prepends a report warning.
-The conversation is a timestamped snapshot, not a lock on later comments or
-check updates. Exit 0 means a report was produced, including advice that work
-remains or that the revision is stale; execution failures exit 1.
+Evidence lives under `state_root/assessments/ID`, or the configured run root;
+clones live under `workspace_root/assessments/ID/assessment`. Files include
+`bead.json`, `context.json`, `execution-summary.json`, `repository.json`,
+`assessment.json`, successful `report.md` and private inference receipts.
+The host rechecks head/base/base branch and flags changed or unknown freshness.
+Exit 0 means a report completed; exit 1 means execution failed.
+
+Contract version 2 replaces the former free-form ready/remaining-work/insufficient-
+evidence response with the four sections. The outer command JSON and `report.md`
+remain unchanged. Historical reports are retained; consumers must not parse old
+readiness words as an approval signal. The internal inference purpose remains
+`completion_assessment` for model configuration compatibility.
 
 ### Git identity and diagnostics
 
