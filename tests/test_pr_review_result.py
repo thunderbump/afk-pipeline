@@ -56,7 +56,9 @@ class ReviewResultTests(unittest.TestCase):
                 if name == "legacy":
                     del record["result"]
                 jobs.write(d / "review.json", record)
-            results = review_result.retained(root, url, "b" * 40)
+            results = review_result.retained(
+                root, "https://github.com/Example/Repo/pull/1", "b" * 40
+            )
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["result"]["head"], "a" * 40)
             self.assertFalse(results[0]["current_head"])

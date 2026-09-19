@@ -63,10 +63,12 @@ def render(report):
 
 def retained(run_root, url, head):
     """Freeze completed local reviews; legacy/external feedback stays in PR context."""
+    repository, number = identity(url)
     results = []
     for path in sorted((Path(run_root) / "pr-reviews").glob("*/review.json")):
         job = json.loads((path.parent / "job.json").read_text())
-        if identity(job["pr_url"]) != identity(url):
+        job_repository, job_number = identity(job["pr_url"])
+        if (job_repository.lower(), job_number) != (repository.lower(), number):
             continue
         record = json.loads(path.read_text())
         if record.get("state") != "completed" or "result" not in record:
