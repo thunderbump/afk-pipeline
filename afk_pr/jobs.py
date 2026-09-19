@@ -309,6 +309,8 @@ def fixtures(directory, job):
             job["validation"]["timeout_seconds"],
             directory / "fixtures.stdout.log",
             directory / "fixtures.stderr.log",
+            # Repository supervision must stop children and clean owned Docker resources.
+            termination_grace_seconds=60,
         )
         clean = git(workspace, "rev-parse", "HEAD") == job["head"] and not git(
             workspace, "status", "--porcelain", "--untracked-files=no"

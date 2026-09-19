@@ -22,6 +22,8 @@ def run_command(
     timeout_seconds: int,
     stdout_path: Path,
     stderr_path: Path,
+    *,
+    termination_grace_seconds: int = TERMINATION_GRACE_SECONDS,
 ) -> dict[str, object]:
     timed_out = False
     interrupted = False
@@ -45,14 +47,14 @@ def run_command(
             except subprocess.TimeoutExpired:
                 timed_out = True
                 try:
-                    exit_code = terminate(process)
+                    exit_code = terminate(process, termination_grace_seconds)
                 except ProcessReapTimeout as reap_error:
                     exit_code = None
                     error = str(reap_error)
             except KeyboardInterrupt:
                 interrupted = True
                 try:
-                    exit_code = terminate(process)
+                    exit_code = terminate(process, termination_grace_seconds)
                 except ProcessReapTimeout as reap_error:
                     exit_code = None
                     error = str(reap_error)
@@ -108,7 +110,9 @@ def process_result(exit_code: int | None, error: str | None) -> dict[str, object
     return result
 
 
-def terminate(process: subprocess.Popen[bytes]) -> int:
+def terminate(
+    process: subprocess.Popen[bytes], grace_seconds: int = TERMINATION_GRACE_SECONDS
+) -> int:
     if process.poll() is not None:
         return process.returncode
     try:
@@ -116,7 +120,7 @@ def terminate(process: subprocess.Popen[bytes]) -> int:
     except ProcessLookupError:
         return reap(process, "after SIGTERM")
     try:
-        return process.wait(timeout=TERMINATION_GRACE_SECONDS)
+        return process.wait(timeout=grace_seconds)
     except subprocess.TimeoutExpired:
         try:
             os.killpg(process.pid, signal.SIGKILL)

@@ -261,9 +261,10 @@ class JobTests(unittest.TestCase):
                         "error": None,
                         "timed_out": timed_out,
                     },
-                ),
+                ) as run,
             ):
                 self.assertEqual(jobs.fixtures(directory, job)["state"], expected)
+                self.assertEqual(run.call_args.kwargs["termination_grace_seconds"], 60)
 
     def test_publish_failure_retains_result_for_retry_without_work(self):
         directory = self.submit(fixtures_only=True)
