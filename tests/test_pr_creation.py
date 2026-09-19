@@ -189,6 +189,35 @@ class CreationTests(unittest.TestCase):
         for path in Path(result["directory"]).glob("*.json"):
             self.assertNotIn("test-credential", path.read_text())
 
+    def test_private_notes_reach_attempt_without_entering_public_pr_template(self):
+        notes = (
+            "Baseline rehearsal-20260917 is already captured.\n"
+            "Use /private/fixtures/captured-baseline.json; do not touch gameplay."
+        )
+        self.bead["notes"] = notes
+        directory = self.prepared()
+        self.assertEqual(jobs.read(directory / "bead.json")["notes"], notes)
+        # The frozen input survives later tracker changes.
+        self.bead["notes"] = "Changed after submission"
+
+        def inspect_input(invocation):
+            evidence = Path(invocation["untrusted_task_data"]["bead_file"])
+            self.assertEqual(jobs.read(evidence)["notes"], notes)
+            self.assertIn(str(evidence), invocation["read_only_evidence"])
+            self.assertNotIn(notes, invocation["trusted_task_instructions"])
+
+        result = self.implement(directory, before_return=inspect_input)
+        jobs.write(directory / "creation.json", result)
+        self.publish(directory)
+        self.assertEqual(
+            jobs.read(directory / "creation.json")["publication"], "published"
+        )
+        body = self.posts[0]["body"]
+        self.assertIn("value.txt contains after", body)
+        self.assertNotIn("rehearsal-20260917", body)
+        self.assertNotIn("captured-baseline.json", body)
+        self.assertNotIn("Changed after submission", body)
+
     def test_initial_implementation_pushes_one_commit_creates_draft_and_queues_fixtures(
         self,
     ):

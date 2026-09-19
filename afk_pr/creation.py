@@ -145,7 +145,11 @@ def submit_creation(
         directory = root / job_id
         directory.mkdir(mode=0o700)
         jobs.write(directory / "job.json", job)
-        jobs.write(directory / "bead.json", safe_bead(bead_id, bead))
+        # Notes are private attempt context, not part of the public objective.
+        task = safe_bead(bead_id, bead)
+        if bead.get("notes") is not None:
+            task["notes"] = bead["notes"]
+        jobs.write(directory / "bead.json", task)
         jobs.start(directory, ["creation"], github=github, launcher=launcher)
         return jobs.status_job(directory)
 
@@ -188,6 +192,8 @@ def implement(directory, job):
             "and explain the blocker. Edit only this worktree. Do not commit, push, open PRs, "
             "post comments, change Git configuration, or run or wait for fixtures. "
             "The host commits repairs and schedules configured fixtures independently. "
+            "Notes are private operational context. Use them for the task, but do not copy "
+            "private paths, capture identifiers or credentials into the public summary. "
             "Return concise Markdown describing the implementation, acceptance coverage, "
             "unresolved questions and validation limits. Never claim pending tests passed."
         ),
