@@ -132,6 +132,8 @@ _PI_TOOLS = {
 _PI_CONTRACT_VERSION = 1
 _PRODUCTION_ROLE_POLICY = {
     "attempt": {"model": "gpt-5.6-sol", "thinking": "medium"},
+    "completion_assessment": {"model": "gpt-5.6-luna", "thinking": "low"},
+    "bead_evaluation": {"model": "gpt-5.6-luna", "thinking": "low"},
     "acceptance_planning": {"model": "gpt-5.6-luna", "thinking": "low"},
     "review": {"model": "gpt-5.6-sol", "thinking": "medium"},
     "finding_assessment": {"model": "gpt-5.6-sol", "thinking": "medium"},

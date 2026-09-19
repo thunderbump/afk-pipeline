@@ -1,0 +1,6 @@
+schema_version = 1
+
+[fixtures]
+command = ["./scripts/validate-afk"]
+timeout_seconds = 2700
+description = "Tier 1, canonical Zone Harness and actor runtime validation"

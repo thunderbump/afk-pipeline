@@ -1,0 +1,5 @@
+schema_version = 1
+
+[fixtures]
+command = ["./scripts/validate"]
+description = "Python regression suite and repository style checks"

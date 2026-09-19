@@ -1,0 +1,4 @@
+schema_version = 1
+agent_timeout_seconds = 1800
+fixture_timeout_seconds = 900
+acquisition_timeout_seconds = 600

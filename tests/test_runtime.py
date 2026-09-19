@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,6 +24,28 @@ class ResistantProcess:
 
 
 class RunCommandTerminationTest(unittest.TestCase):
+    def test_repository_cleanup_can_outlive_default_termination_grace(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            marker = root / "cleaned"
+            script = (
+                "import signal,time,pathlib; "
+                "signal.signal(signal.SIGTERM, lambda *_: "
+                f"(time.sleep(2.1),pathlib.Path({str(marker)!r}).touch(),exit(0))); "
+                "time.sleep(60)"
+            )
+            result = afk_runtime.run_command(
+                [sys.executable, "-c", script],
+                root,
+                0.3,
+                root / "stdout",
+                root / "stderr",
+                termination_grace_seconds=4,
+            )
+            self.assertTrue(result["timed_out"])
+            self.assertEqual(result["exit_code"], 0)
+            self.assertTrue(marker.exists())
+
     def test_post_sigkill_reap_timeout_is_bounded_and_reported(self):
         process = ResistantProcess()
         with tempfile.TemporaryDirectory() as temporary:

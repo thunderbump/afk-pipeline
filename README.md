@@ -1550,3 +1550,319 @@ Run the complete repository check:
 ```sh
 ./scripts/validate
 ```
+
+## Explicit PR passes
+
+After one-time host setup, normal calls need only the task or PR:
+
+```sh
+./afk pr CENTRAL_BEAD_ID
+./afk review https://github.com/OWNER/REPO/pull/123
+./afk respond https://github.com/OWNER/REPO/pull/123
+./afk context https://github.com/OWNER/REPO/pull/123
+./afk status https://github.com/OWNER/REPO/pull/123
+./afk review https://github.com/OWNER/REPO/pull/123 --fixtures-only
+./afk review https://github.com/OWNER/REPO/pull/123 --retry-publication JOB_ID
+./afk cleanup JOB_ID --dry-run
+```
+
+These commands run independently of the retained stage pipeline. Python 3.11+
+provides the TOML parser. The host needs Git, authenticated `gh`, central `bd`
+for creation, the existing Pi/runtime dependencies for inference, a Git commit
+identity, and Linux user systemd. Background workers use the host user's stored
+authentication, not credentials exported only in the initiating shell. GitHub
+HTTPS acquisition uses a command-scoped `gh auth git-credential` helper.
+
+### Configuration ownership
+
+The host file is `$XDG_CONFIG_HOME/afk/config.toml`, or
+`~/.config/afk/config.toml`. Copy and customize
+[the host example](examples/pr-config/host.toml). `--config PATH` selects an
+alternate host file for deliberate experiments; ordinary calls do not need it.
+
+```toml
+schema_version = 1
+beads_workspace = "~/Projects/beads"
+
+[projects.operations-webui]
+repository = "https://github.com/thunderbump/operations-webui.git"
+```
+
+Project labels resolve to registered Git URLs, never pre-existing checkouts.
+Unknown/duplicate repositories are errors. Beads supplies the title, description,
+design, acceptance criteria and exactly one `project:<slug>` label. Only creation
+needs the Beads workspace. The default password-file convention is
+`<beads_workspace>/secrets/dolt_beads_password.txt`; optional
+`[beads] password_file` changes that path. Its contents are passed only to `bd`.
+
+State defaults to `$XDG_STATE_HOME/afk` or `~/.local/state/afk`.
+`state_root` overrides it; `workspace_root` optionally places clones on another
+disk. Jobs live under `state_root/pr-reviews/<id>`, while independent phase clones
+live under `workspace_root/<id>/<phase>`, defaulting to `state_root/workspaces`.
+Shared fixture resources must live outside disposable workspaces.
+
+[Pipeline defaults](afk_pr/defaults.toml) set agent timeout to 1800 seconds,
+fixture timeout to 900 and acquisition timeout to 600 per Git operation. Host
+`agent_timeout_seconds` and `acquisition_timeout_seconds` can override their
+values. Model/thinking choices remain in the existing inference runtime.
+No acceptance-routing, assignment, coordinator response limit, publication-bundle
+or separate legacy worktree-root setting is required for PR commands.
+
+Commit a root `afk.toml` to each repository's trusted base:
+
+```toml
+schema_version = 1
+
+[fixtures]
+command = ["./scripts/validate"]
+github_auth = true
+```
+
+`description` and `timeout_seconds` are optional fixture settings. See the
+[Operations](examples/pr-config/operations-afk.toml) and
+[EQEmu](examples/pr-config/eqemu-afk.toml) examples. Without a command, a committed
+executable `scripts/validate` is the only fallback. Missing or malformed fixture
+policy is an error. `github_auth=true` resolves a token with `gh auth token` inside
+the fixture child and exports GITHUB_TOKEN without persisting its value.
+
+Creation reads policy at the GitHub default branch's captured SHA. Optional
+`base_branch` chooses another creation branch once; policy still comes from that
+captured default-branch commit. Review/respond read policy at the exact PR base
+SHA. The candidate cannot choose its own fixture policy. Resolved argv, timeout,
+auth requirement and provenance are saved in the job, and fixture children inherit
+them. A temporary `[projects.<slug>.fixtures]` host override supplies the same
+fixture fields until repo policy reaches its trusted base. Its `host_override`
+provenance is visible; it replaces the complete fixture selection, not an opaque
+recursive merge. Remove it when the committed repo policy is available.
+
+### Acquisition and shared fixtures
+
+Each phase gets a full independent clone, detached at the recorded candidate SHA,
+with recursive submodules initialized. Missing pinned objects receive one explicit
+SHA fetch attempt; failure stops the phase instead of substituting a newer head.
+There is no clone cache or dependency on a developer checkout. Failed acquisition
+is retained with a private diagnostic log; no automatic execution retry occurs.
+
+One fixture slot is shared per GitHub repository unless the host project selects
+`fixture_resource`. EQEmu uses a named host resource with `worker_home`,
+`stack_path`, and `workspace_cleanup=false`; see the host example. The adapter
+sets VALIDATION_WORKER_HOME, AKKSTACK_DIR and job-local
+VALIDATION_AFK_EVIDENCE_DIR. Existing repository worker/stack locks remain in use.
+Different named resources can run independently. Queue wait and command execution
+each have the fixture timeout, rather than one shared end-to-end deadline.
+The EQEmu wrapper retains its own 2600-second execution default under an outer
+2700-second fixture allowance.
+
+External resource workspace cleanup is disabled until resource teardown can be
+proved. In particular, an inactive local Compose client is not proof that a
+Docker daemon-owned container has stopped. This configuration change does not
+fix that existing EQEmu timeout concern or authorize unsafe stack reuse.
+
+### Pass behavior and retained results
+
+`pr` starts one direct implementation from a central Bead and opens a draft PR.
+It rejects closed or ambiguously owned Beads, but does not add legacy readiness or
+acceptance-planning gates. The host commits and pushes an absent
+`afk-pr-BEAD_ID` branch using a create-only lease. A moved base/destination pauses
+work. Repeating the command reports the retained job or matching PR instead of
+starting another implementation. A paused job remains attached to the Bead; inspect
+its explanation and workspace, or create a successor Bead for a new attempt.
+
+`review` captures the description, commits, ordinary comments, all reviewers,
+inline discussion, checks/annotations and statuses. It launches independent
+read-only inference and deterministic fixture services. `--fixtures-only` omits
+AFK inference, leaving existing reviewers to supply feedback. Review posts a
+COMMENT review and never pushes code. Multiple-reviewer expansion remains possible;
+the current default is one `afk` reviewer.
+
+`respond` reads the captured PR story and edits an independent clone. It may
+repair, disagree, defer, seek clarification or make no changes. The host verifies
+that the PR head/base and branch remain unchanged before pushing normally. Fork
+response branches remain unsupported. New pushes schedule fixtures at that exact
+commit; no-change responses post an explanation without another fixture run.
+No pass merges or automatically invokes another model pass.
+
+Fixture results have a commit status and updateable summary with bounded redacted
+log excerpts. Detailed logs, inference evidence, task snapshots and progress stay
+in the durable job directory. A completed creation/response is not a passing
+fixture result. Feedback arriving after capture is available to the next explicit
+pass; there is no mandatory per-comment disposition schema.
+
+`context` reads GitHub without host configuration. `status` reads GitHub and the
+selected state root without needing a checkout or Beads access. Publication retry
+uses retained job facts and phase locks; it never repeats inference, commits or
+pushes. Creation retry can recover/create a PR and schedule fixtures when no child
+was recorded. Response retry only posts the summary. An uncertain push or failed
+recorded child still requires inspection; use an explicit fixtures-only review
+when appropriate. Stopped workers are not automatically resumed.
+
+### Cleanup and migration
+
+`cleanup JOB_ID --dry-run` explains eligibility. Without dry-run it removes only
+owned new-layout independent clones for successful, published, inactive jobs.
+Required fixture children must pass and publish. Shared lifecycle locks protect
+workers/retries while cleanup holds an exclusive lock. Missing evidence, active
+or unobservable workers, external resources, failed/paused work, uncertain pushes,
+changed HEAD or unexpected files retain the workspace. No-change responses do not
+need a fictitious push. Ignored dependency/build scratch is disposable.
+
+A deletion receipt permits an interrupted cleanup to finish on a later explicit
+call. Job evidence remains, and old workers cannot restart after deletion begins.
+No automatic age-based cleanup, forced deletion or durable-evidence expiry exists.
+Historical linked worktrees are excluded. Do not store required artifacts only
+inside clones or as symlinks into them.
+
+Legacy JSON is rejected for new PR submissions. It remains accepted only to locate
+historical jobs for status/publication retry. Preserve original assessment configs
+and paths. A new state root cannot discover an old unpublished local job: inspect
+old roots before changing the default, keep active work on its original root and
+never delete records to bypass duplicate detection. The stage-pipeline JSON loader
+is unchanged until the separate retirement task removes its users.
+
+An existing repository `[validation]` section belongs to the retained validation runner. PR commands do not interpret it; it may coexist with `[fixtures]`. Configure PR fixtures explicitly or provide the conventional executable entrypoint.
+
+### Bead evaluation
+
+`afk evaluate BEAD_ID` runs one advisory evaluation in the foreground and prints
+JSON containing the report, observed repository context and retained directory.
+It uses the same discovered host TOML and central Beads credentials as `pr`.
+No readiness label, fixture policy, Git commit identity or previous project
+checkout is required. The command does not change the Bead or post to GitHub.
+
+The evaluator reads the Bead's exact acceptance text, notes and direct dependency
+summaries. It acquires an independent clone of the registered repository's
+GitHub default branch and uses read-only inference. This is default-branch
+context, not an open PR's implementation. Missing ownership, registration or
+repository access is recorded explicitly; evaluation can still run without
+tools using the frozen Bead alone. Missing Beads or invalid host configuration
+are command errors.
+
+The report recommends readiness, identifies material gaps and asks useful
+clarification questions. It distinguishes repository ownership from examples,
+implementation choices from ambiguity, and repository work from host-only
+verification. It does not decompose work, assign criteria, authorize execution,
+merge, close tasks or start another command. Recommendations are judgment,
+not deterministic guarantees or mandatory gates.
+
+Evidence is retained under `state_root/evaluations/ID`: `bead.json`,
+`context.json`, `evaluation.json`, `report.md` on success and runtime evidence
+under `inference/`. Repository context lives under
+`workspace_root/evaluations/ID/evaluation`. Existing `cleanup JOB_ID` applies
+only to PR jobs; evaluation evidence/clones are retained for now. Calls are
+independent, with no automatic resume or deduplication. Exit 0 means a report
+was produced, including reports recommending clarification; failures exit 1.
+
+The tool-free fallback inherits the inference runtime's 64 KiB task-data limit.
+Oversized fallback input fails explicitly; it is not silently shortened.
+Default-branch context can lag active work, so reports need human judgment.
+
+### Explicit PR finish
+
+`afk finish PR_URL` creates a read-only preview and prints JSON with its ID,
+head, target branch, merge method and Bead association hints. It makes no
+GitHub or Beads changes. Add `--close-bead BEAD_ID` to explicitly select one
+closure target, and optionally `--method squash|rebase` instead of the default
+merge commit. Unsupported methods fail through GitHub, without fallback.
+
+Execute that exact preview with `afk finish PR_URL --apply PREVIEW_ID`.
+Changing its method or closure target requires a new preview. The selected
+Bead must still be readable before any merge request. GitHub handles its
+native merge policies and queues; the command never requests admin bypass,
+branch deletion, local cleanup, inference, or fixture execution.
+
+A queued merge returns promptly as pending. Repeat the apply command later.
+Every attempt re-reads external state: already merged PRs skip the merge
+request, and only an explicitly selected Bead closes after a fresh merge
+observation. Already closed Beads are left alone. Merge success followed by
+closure failure is retained as partial progress and can be retried.
+
+Evidence lives in `state_root/finishes/PREVIEW_ID/preview.json`, with one
+private attempt subdirectory per execution containing `result.json` and
+native command diagnostics. This is an audit record, not completion authority.
+Exit 0 means preview created or finish completed; pending, unknown and failed
+outcomes exit 1. No worker waits for a queue or automatically retries.
+
+GitHub enforces the expected head at merge time. The target branch is checked
+before and after the request, but that check is not atomic with merging.
+A concurrent retarget can be detected too late to prevent a merge. GitHub and
+Beads do not share a transaction; this command does not claim otherwise.
+Repository protections still depend on repository settings and caller privileges.
+
+### Remaining-scope assessment
+
+`afk assess PR_URL [--bead BEAD_ID]` runs an optional foreground scope check
+against the selected central Bead. Without `--bead`, the PR body must contain
+exactly one `<!-- afk-bead:ID -->` marker. Explicit selection supports child Beads
+and partial or multi-PR delivery. It does not infer closure from that marker.
+
+The assessor reads the execution summary first, then the frozen Bead, full PR
+story and repository metadata. It may inspect an exact-head clone to answer a
+specific scope question. It does not run tests, fetch artifacts, repeat code
+review, post feedback, create work, merge or close anything. Missing repository
+access is recorded and the pass can continue using the remaining evidence.
+
+Reports contain four nonempty Markdown sections in order: `Remaining
+requirements`, `Deferrals`, `Uncertainty`, and `Evidence`. They describe what
+remains and cite supplied evidence, with no overall readiness or approval
+verdict. A deferred acceptance requirement remains unmet. Matching-head terminal
+execution records take precedence over older prose about that run being pending.
+The host validates report shape and length, not the truth of the model's prose
+or citations. A report is advice for the caller, never a gate for `finish`.
+
+Evidence lives under `state_root/assessments/ID`, or the configured run root;
+clones live under `workspace_root/assessments/ID/assessment`. Files include
+`bead.json`, `context.json`, `execution-summary.json`, `repository.json`,
+`assessment.json`, successful `report.md` and private inference receipts.
+The host rechecks head/base/base branch and flags changed or unknown freshness.
+Exit 0 means a report completed; exit 1 means execution failed.
+
+Contract version 2 replaces the former free-form ready/remaining-work/insufficient-
+evidence response with the four sections. The outer command JSON and `report.md`
+remain unchanged. Historical reports are retained; consumers must not parse old
+readiness words as an approval signal. The internal inference purpose remains
+`completion_assessment` for model configuration compatibility.
+
+### Git identity and diagnostics
+
+Before creation or response inference, the worker checks `git var GIT_AUTHOR_IDENT`
+and `git var GIT_COMMITTER_IDENT` in its actual clone. Git uses that worker's
+configuration and environment. If either fails, the phase fails before model
+invocation with setup guidance. Normally configure `user.name` and `user.email`
+globally for the OS user running the worker; valid Git identity environment
+overrides also work. Read-only review does not require commit identity.
+
+Failed identity checks and nonzero Git commands caught by a PR worker retain
+raw stderr in private `PHASE.git.log` with mode 0600. Published phase results
+contain safe summaries, not raw diagnostics. The check establishes identity
+resolution only; later commit hooks, signing, permissions or changed config
+can still fail. There is no automatic retry or host configuration change.
+
+### Repository public fixture diagnostics
+
+A fixture command may write `fixture-evidence/public-summary.json` beneath its AFK job.
+For configured fixture resources this is `$VALIDATION_AFK_EVIDENCE_DIR/public-summary.json`.
+AFK accepts at most 8192 bytes and requires exactly these version-1 fields:
+
+```json
+{
+  "schema_version": 1,
+  "head": "<exact job commit>",
+  "profile": "tier1-migration-tier3",
+  "status": "failed",
+  "step": "upgraded_assertions",
+  "diagnostic_codes": ["actor_events.event_json_constraint"],
+  "timings_ms": {"validation": 1500, "restore": null}
+}
+```
+
+Profile, optional step and up to 24 diagnostic codes must be lowercase identifiers
+of at most 96 characters, using letters, digits, underscores, dots or hyphens.
+Status is `passed` or `failed`; timings are null or integer milliseconds from zero
+through seven days. Head must match the job. Unknown keys or versions are rejected.
+
+A valid summary replaces the existing top-level log excerpts in the fixture comment.
+AFK still applies its public-log redactor and HTML escaping. Missing, malformed,
+oversized, symlinked or wrong-head summaries fall back to existing excerpts without
+changing execution state. The repository owns safe diagnostic content; this contract
+is not an arbitrary-data secrecy guarantee. Do not write private values as codes.
+AFK's own outcome and exit code remain authoritative. No nested logs are uploaded.

@@ -1,0 +1,6 @@
+schema_version = 1
+
+[fixtures]
+command = ["./scripts/validate"]
+github_auth = true
+description = "Repository tests, source authority validation and static build"

@@ -1,0 +1,14 @@
+schema_version = 1
+beads_workspace = "~/Projects/beads"
+
+[projects.operations-webui]
+repository = "https://github.com/thunderbump/operations-webui.git"
+
+[projects.bump-eqemu]
+repository = "https://github.com/thunderbump/bump-EQEmu.git"
+fixture_resource = "eqemu-validation"
+
+[fixture_resources.eqemu-validation]
+worker_home = "~/.local/state/afk/validation/eqemu-validation"
+stack_path = "~/Projects/bump-eqemu/bump-akk-stack-validation"
+workspace_cleanup = false

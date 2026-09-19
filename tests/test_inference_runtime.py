@@ -52,6 +52,8 @@ class InferenceRuntimeTest(unittest.TestCase):
     def test_production_roles_use_runtime_owned_policy(self):
         expected = object()
         policies = {
+            "completion_assessment": ("gpt-5.6-luna", "low"),
+            "bead_evaluation": ("gpt-5.6-luna", "low"),
             "acceptance_planning": ("gpt-5.6-luna", "low"),
             "review": ("gpt-5.6-sol", "medium"),
             "finding_assessment": ("gpt-5.6-sol", "medium"),
