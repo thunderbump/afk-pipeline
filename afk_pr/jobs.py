@@ -139,23 +139,44 @@ def submit(
     respond=False,
     github=None,
     launcher=launch,
+    action_id=None,
+    expected_head=None,
 ):
-    github = github or GitHub()
-    config, slug, project = settings(config_path, url)
-    context = github.observe(url)
-    pr = context["pull_request"]
-    if pr["state"] != "open":
-        raise ValueError("PR passes require an open PR")
-    if respond:
-        from afk_pr.response import response_branch
+    from afk_pr.actions import submit_action
 
-        response_branch(pr, url)
+    return submit_action(
+        url,
+        settings(config_path, url),
+        fixtures_only=fixtures_only,
+        respond=respond,
+        github=github or GitHub(),
+        launcher=launcher,
+        action_id=action_id,
+        expected_head=expected_head,
+    )
+
+
+def prepare_submission(
+    url,
+    config,
+    slug,
+    project,
+    context,
+    job_id,
+    action_id,
+    *,
+    fixtures_only,
+    respond,
+    github,
+):
+    """Write job/context for a validated reserved action, without launching work."""
+    pr = context["pull_request"]
+    if respond:
         from afk_pr.review_result import retained
 
         context["afk_review_results"] = retained(
             config["run_root"], url, pr["head"]["sha"]
         )
-    job_id = uuid.uuid4().hex[:16]
     directory = Path(config["run_root"]) / "pr-reviews" / job_id
     resolved = job_settings(config, slug, project, github, pr["base"]["sha"])
     directory.mkdir(parents=True, mode=0o700)
@@ -169,6 +190,7 @@ def submit(
         "reviewers": [] if fixtures_only or respond else ["afk"],
         "kind": "response" if respond else "review",
         "created_at": timestamp(),
+        "action_id": action_id,
     }
     write(directory / "job.json", job)
     write(directory / "context.json", context)
@@ -177,8 +199,7 @@ def submit(
         if respond
         else ["fixtures"] + (["review"] if job["reviewers"] else [])
     )
-    start(directory, phases, github=github, launcher=launcher)
-    return status_job(directory)
+    return directory, phases
 
 
 @guarded
@@ -212,6 +233,12 @@ def start(directory, phases, *, github, launcher=launch):
                 else job["review_timeout"]
             )
             launcher(directory, phase, timeout)
+        except subprocess.TimeoutExpired as error:
+            # systemd may have accepted the worker. Preserve its phase state and
+            # let the action receipt pause instead of declaring execution failed.
+            raise RuntimeError(
+                f"Launch of {phase} is uncertain after timeout"
+            ) from error
         except (
             OSError,
             ValueError,
@@ -512,6 +539,11 @@ def publish(directory, phase, *, github=None):
 def status_job(directory, *, probe=True):
     job = read(directory / "job.json")
     result = {"job": job, "directory": str(directory), "phases": {}}
+    if job.get("action_id"):
+        from afk_pr.actions import receipt_path
+
+        path = receipt_path(directory.parent.parent, job["pr_url"], job["action_id"])
+        result["action"] = read(path)
     if (directory / "cleanup.json").exists():
         result["cleanup"] = read(directory / "cleanup.json")
     for phase in PHASES:
@@ -626,6 +658,8 @@ def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
         "created_at": timestamp(),
         "expected_phases": ["fixtures"],
     }
+    # The receipt reserves the parent job; this child already links back to it.
+    child.pop("action_id", None)
     target = directory.parent / child["id"]
     target.mkdir(mode=0o700)
     write(target / "job.json", child)
