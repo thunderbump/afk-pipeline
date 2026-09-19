@@ -390,6 +390,36 @@ class JobTests(unittest.TestCase):
         self.assertNotIn("<script>", body)
         self.assertLess(len(body), 4500)
 
+    def test_repository_diagnostic_reaches_pr_without_nested_private_logs(self):
+        directory = self.submit(fixtures_only=True)
+        jobs.write(
+            directory / "fixtures.json",
+            {"state": "failed", "process": {"exit_code": 1}},
+        )
+        evidence = directory / "fixture-evidence"
+        evidence.mkdir()
+        jobs.write(
+            evidence / "public-summary.json",
+            {
+                "schema_version": 1,
+                "head": SHA,
+                "profile": "tier1-migration-tier3",
+                "status": "failed",
+                "step": "upgraded_assertions",
+                "diagnostic_codes": ["actor_events.event_json_constraint"],
+                "timings_ms": {"validation": 500, "restore": None},
+            },
+        )
+        (directory / "fixtures.stderr.log").write_text("PRIVATE_SENTINEL captured row")
+        (evidence / "nested.log").write_text("password=PRIVATE_SENTINEL")
+        jobs.publish(directory, "fixtures", github=self.gh)
+        body = self.gh.comments[-1]
+        self.assertIn("upgraded_assertions", body)
+        self.assertIn("actor_events.event_json_constraint", body)
+        self.assertNotIn("PRIVATE_SENTINEL", body)
+        self.assertEqual(self.gh.posts[-1][1], "failure")
+        self.assertEqual(jobs.read(directory / "fixtures.json")["state"], "failed")
+
     def test_public_log_redaction_sees_headers_before_the_displayed_tail(self):
         directory = self.submit(fixtures_only=True)
         job = jobs.read(directory / "job.json")

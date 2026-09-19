@@ -562,9 +562,13 @@ def retry_publication(directory):
 
 
 def fixture_excerpt(directory, job):
-    """Publish bounded diagnostic tails using the existing public-log redactor."""
+    """Prefer the repository public summary, falling back to redacted log tails."""
     from afk_export import ExportError, sanitize_public_artifact_text
+    from afk_pr.diagnostics import public_summary
 
+    summary = public_summary(directory, job)
+    if summary:
+        return summary
     sections = []
     for name in (
         "fixtures.stdout.log",

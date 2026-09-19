@@ -1836,3 +1836,33 @@ raw stderr in private `PHASE.git.log` with mode 0600. Published phase results
 contain safe summaries, not raw diagnostics. The check establishes identity
 resolution only; later commit hooks, signing, permissions or changed config
 can still fail. There is no automatic retry or host configuration change.
+
+### Repository public fixture diagnostics
+
+A fixture command may write `fixture-evidence/public-summary.json` beneath its AFK job.
+For configured fixture resources this is `$VALIDATION_AFK_EVIDENCE_DIR/public-summary.json`.
+AFK accepts at most 8192 bytes and requires exactly these version-1 fields:
+
+```json
+{
+  "schema_version": 1,
+  "head": "<exact job commit>",
+  "profile": "tier1-migration-tier3",
+  "status": "failed",
+  "step": "upgraded_assertions",
+  "diagnostic_codes": ["actor_events.event_json_constraint"],
+  "timings_ms": {"validation": 1500, "restore": null}
+}
+```
+
+Profile, optional step and up to 24 diagnostic codes must be lowercase identifiers
+of at most 96 characters, using letters, digits, underscores, dots or hyphens.
+Status is `passed` or `failed`; timings are null or integer milliseconds from zero
+through seven days. Head must match the job. Unknown keys or versions are rejected.
+
+A valid summary replaces the existing top-level log excerpts in the fixture comment.
+AFK still applies its public-log redactor and HTML escaping. Missing, malformed,
+oversized, symlinked or wrong-head summaries fall back to existing excerpts without
+changing execution state. The repository owns safe diagnostic content; this contract
+is not an arbitrary-data secrecy guarantee. Do not write private values as codes.
+AFK's own outcome and exit code remain authoritative. No nested logs are uploaded.
