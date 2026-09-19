@@ -143,7 +143,7 @@ class JobTests(unittest.TestCase):
             "coordinator": {"agent_timeout_seconds": 30},
         }
 
-    def submit(self, fixtures_only=False, launcher=None):
+    def submit(self, fixtures_only=False, launcher=None, respond=False):
         with (
             mock.patch.object(
                 jobs, "settings", return_value=(self.config, "test", self.project)
@@ -165,6 +165,7 @@ class JobTests(unittest.TestCase):
                 URL,
                 self.root / "config",
                 fixtures_only=fixtures_only,
+                respond=respond,
                 github=self.gh,
                 launcher=launcher or (lambda *args: None),
             )
@@ -301,7 +302,20 @@ class JobTests(unittest.TestCase):
 
         directory = self.submit()
         adapter = FixtureAdapter(
-            script=(ScriptedResult(response="A concrete review concern."),)
+            script=(
+                ScriptedResult(
+                    response={
+                        "summary": "Reviewed code.",
+                        "findings": [
+                            {
+                                "message": "A concrete review concern.",
+                                "path": "a.py",
+                                "line": 3,
+                            }
+                        ],
+                    }
+                ),
+            )
         )
 
         def fixture_invoke(**kwargs):
@@ -317,8 +331,55 @@ class JobTests(unittest.TestCase):
         ):
             result = jobs.review(directory, jobs.read(directory / "job.json"))
         self.assertEqual(result["state"], "completed")
+        self.assertEqual(result["result"]["head"], SHA)
+        self.assertEqual(result["result"]["findings"][0]["line"], 3)
         self.assertIn("concrete review", (directory / "review.md").read_text())
         self.assertEqual(jobs.read(directory / "fixtures.json")["state"], "queued")
+
+    def test_response_freezes_structured_reviews_and_preserves_external_feedback(self):
+        directory = self.submit()
+        report = {
+            "schema_version": 1,
+            "head": SHA,
+            "summary": "Reviewed",
+            "findings": [],
+        }
+        jobs.write(
+            directory / "review.json",
+            {
+                "state": "completed",
+                "reviewer": "afk",
+                "result": report,
+                "publication": "published",
+                "url": URL + "#review",
+            },
+        )
+        with mock.patch("afk_pr.response.response_branch", return_value="repair"):
+            response_directory = self.submit(respond=True)
+        frozen = jobs.read(response_directory / "context.json")
+        self.assertEqual(frozen["afk_review_results"][0]["result"], report)
+        self.assertTrue(frozen["afk_review_results"][0]["current_head"])
+        self.assertEqual(frozen["reviews"][0]["body"], "A concern")
+        jobs.write(directory / "review.json", {"state": "failed"})
+        self.assertEqual(jobs.read(response_directory / "context.json"), frozen)
+
+    def test_invalid_review_is_failed_not_empty_findings(self):
+        from afk_inference.runtime import FixtureAdapter, ScriptedResult, invoke
+
+        directory = self.submit()
+        adapter = FixtureAdapter(script=(ScriptedResult(response="No concerns."),))
+        with (
+            mock.patch.object(jobs, "checkout", return_value=self.root),
+            mock.patch.object(jobs, "git", side_effect=[SHA, ""]),
+            mock.patch(
+                "afk_inference.runtime.invoke",
+                side_effect=lambda **kw: invoke(adapter=adapter, **kw),
+            ),
+        ):
+            result = jobs.review(directory, jobs.read(directory / "job.json"))
+        self.assertEqual(result["state"], "failed")
+        self.assertNotIn("result", result)
+        self.assertFalse((directory / "review.md").exists())
 
     def test_launcher_uses_managed_service_not_blocking_wait(self):
         directory = self.submit()
