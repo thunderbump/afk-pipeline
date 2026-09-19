@@ -232,6 +232,16 @@ class DecisionTests(unittest.TestCase):
         item["phases"]["fixtures"]["process"] = []
         self.assert_decision([item], "pause", "fixture_result_inconsistent")
 
+    def test_malformed_phase_states_and_publication_are_unknown(self):
+        for field, code in (
+            ("state", "execution_not_successful"),
+            ("publication", "publication_state_unknown"),
+        ):
+            for value in (None, [], {}, 1):
+                item = review()
+                item["phases"]["review"][field] = value
+                self.assert_decision([item], "pause", code)
+
     def test_observer_converts_invalid_progress_and_worker_probe_timeout_to_pause(self):
         gh = mock.Mock()
         gh.observe.return_value = context()

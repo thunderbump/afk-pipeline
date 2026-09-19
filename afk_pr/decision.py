@@ -86,12 +86,14 @@ def decide(context, selected):
             )
             if not isinstance(action, dict) or any(
                 (
+                    type(action.get("schema_version")) is not int,
                     action.get("schema_version") != 1,
                     action.get("id") != job["action_id"],
                     action.get("job_id") != job_id,
                     action.get("head") != job.get("head"),
                     action.get("base") != job.get("base"),
                     action.get("repository") != repository.lower(),
+                    type(action.get("pr_number")) is not int,
                     action.get("pr_number") != number,
                     action.get("command") != command,
                 )
@@ -125,7 +127,7 @@ def decide(context, selected):
             state = record.get("state")
             if record.get("worker_observation") == "unavailable":
                 pause("worker_ownership_unknown", job_id, phase)
-            if state in {"queued", "running"}:
+            if state in ("queued", "running"):
                 waiting.append(
                     {"code": "work_pending", "job_id": job_id, "phase": phase}
                 )
@@ -135,7 +137,7 @@ def decide(context, selected):
                 pause(
                     "fixture_failed"
                     if phase == "fixtures"
-                    and state in {"failed", "timed_out", "busy", "interrupted"}
+                    and state in ("failed", "timed_out", "busy", "interrupted")
                     else "execution_not_successful",
                     job_id,
                     phase,
@@ -189,7 +191,7 @@ def decide(context, selected):
                     ):
                         pause("fixture_child_missing_or_mismatched", job_id, phase)
             publication = record.get("publication")
-            if publication in {"pending", "failed"}:
+            if publication in ("pending", "failed"):
                 retries.append(
                     {"code": "publication_incomplete", "job_id": job_id, "phase": phase}
                 )
@@ -225,6 +227,7 @@ def decide(context, selected):
 def observe(url, run_root, job_ids, *, github=None):
     """Read selected records and linked fixture children; leave all retained files alone."""
     from afk_pr import jobs
+    from afk_pr.execution import summarize
 
     github = github or GitHub()
     context = github.observe(url)
@@ -261,6 +264,10 @@ def observe(url, run_root, job_ids, *, github=None):
     return {
         "pr_url": url,
         "head": context["pull_request"]["head"]["sha"],
+        "execution_summary": summarize(context),
+        "checks": context.get("checks", []),
+        "statuses": context.get("statuses", []),
+        "reviews": context.get("reviews", []),
         "jobs": selected,
         "decision": decide(context, selected),
     }
