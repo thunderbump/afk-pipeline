@@ -260,6 +260,23 @@ with mock.patch.object(jobs, 'settings', return_value=({'run_root': root}, 'test
         self.assertEqual(replay["action"]["state"], "paused")
         self.assertEqual(len(self.launches), 2)
 
+    def test_automatic_fixture_child_links_parent_without_claiming_its_receipt(self):
+        parent = self.submit(action_id="parent")
+        directory = Path(parent["directory"])
+        jobs.write(directory / "response-progress.json", {})
+        child_id = jobs.queue_fixtures(
+            directory,
+            parent["job"],
+            "c" * 40,
+            self.gh,
+            lambda *args: None,
+            phase="response",
+        )
+        child = self.real_status(directory.parent / child_id, probe=False)
+        self.assertNotIn("action_id", child["job"])
+        self.assertNotIn("action", child)
+        self.assertEqual(child["job"]["response_job"], parent["job"]["id"])
+
     def test_cli_options_and_paused_exit_code(self):
         with (
             mock.patch(

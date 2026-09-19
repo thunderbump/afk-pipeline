@@ -658,6 +658,8 @@ def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
         "created_at": timestamp(),
         "expected_phases": ["fixtures"],
     }
+    # The receipt reserves the parent job; this child already links back to it.
+    child.pop("action_id", None)
     target = directory.parent / child["id"]
     target.mkdir(mode=0o700)
     write(target / "job.json", child)
