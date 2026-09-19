@@ -139,10 +139,36 @@ def submit(
     respond=False,
     github=None,
     launcher=launch,
+    action_id=None,
+    expected_head=None,
 ):
-    github = github or GitHub()
-    config, slug, project = settings(config_path, url)
-    context = github.observe(url)
+    from afk_pr.actions import submit_action
+
+    return submit_action(
+        url,
+        settings(config_path, url),
+        fixtures_only=fixtures_only,
+        respond=respond,
+        github=github or GitHub(),
+        launcher=launcher,
+        action_id=action_id,
+        expected_head=expected_head,
+    )
+
+
+def prepare_submission(
+    url,
+    config,
+    slug,
+    project,
+    context,
+    job_id,
+    action_id,
+    *,
+    fixtures_only,
+    respond,
+    github,
+):
     pr = context["pull_request"]
     if pr["state"] != "open":
         raise ValueError("PR passes require an open PR")
@@ -155,7 +181,6 @@ def submit(
         context["afk_review_results"] = retained(
             config["run_root"], url, pr["head"]["sha"]
         )
-    job_id = uuid.uuid4().hex[:16]
     directory = Path(config["run_root"]) / "pr-reviews" / job_id
     resolved = job_settings(config, slug, project, github, pr["base"]["sha"])
     directory.mkdir(parents=True, mode=0o700)
@@ -169,6 +194,7 @@ def submit(
         "reviewers": [] if fixtures_only or respond else ["afk"],
         "kind": "response" if respond else "review",
         "created_at": timestamp(),
+        "action_id": action_id,
     }
     write(directory / "job.json", job)
     write(directory / "context.json", context)
@@ -177,8 +203,7 @@ def submit(
         if respond
         else ["fixtures"] + (["review"] if job["reviewers"] else [])
     )
-    start(directory, phases, github=github, launcher=launcher)
-    return status_job(directory)
+    return directory, phases
 
 
 @guarded
@@ -512,6 +537,11 @@ def publish(directory, phase, *, github=None):
 def status_job(directory, *, probe=True):
     job = read(directory / "job.json")
     result = {"job": job, "directory": str(directory), "phases": {}}
+    if job.get("action_id"):
+        from afk_pr.actions import receipt_path
+
+        path = receipt_path(directory.parent.parent, job["pr_url"], job["action_id"])
+        result["action"] = read(path)
     if (directory / "cleanup.json").exists():
         result["cleanup"] = read(directory / "cleanup.json")
     for phase in PHASES:

@@ -61,6 +61,14 @@ def main(argv=None):
     respond.add_argument("pr_url")
     respond.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     respond.add_argument("--retry-publication", metavar="JOB_ID")
+    for command in (review, respond):
+        command.add_argument(
+            "--action-id",
+            help="stable submission ID; reuse to inspect/retry without duplicate work",
+        )
+        command.add_argument(
+            "--expected-head", help="submit only for this full commit SHA"
+        )
     context = commands.add_parser(
         "context", help="read complete PR context without posting"
     )
@@ -135,6 +143,14 @@ def main(argv=None):
                 )
             )
             return 0
+        if (
+            args.command in {"review", "respond"}
+            and args.retry_publication
+            and (args.action_id or args.expected_head)
+        ):
+            raise ValueError(
+                "publication retry cannot be combined with submission options"
+            )
         identity(args.pr_url)
         if args.command == "context":
             result = GitHub().observe(args.pr_url)
@@ -144,6 +160,8 @@ def main(argv=None):
                 args.config,
                 fixtures_only=getattr(args, "fixtures_only", False),
                 respond=args.command == "respond",
+                action_id=args.action_id,
+                expected_head=args.expected_head,
             )
         else:
             config = load_config(args.config, historical=True)
@@ -187,7 +205,7 @@ def main(argv=None):
                     "jobs": jobs,
                 }
         print(json.dumps(result, indent=2))
-        return 0
+        return 1 if result.get("action", {}).get("state") == "paused" else 0
     except (
         OSError,
         PreparationError,
