@@ -67,7 +67,7 @@ class GitHub:
             ),
             "commits": self.collection(f"{path}/pulls/{number}/commits?per_page=100"),
             "checks": self.collection(
-                f"{path}/commits/{sha}/check-runs?per_page=100", "check_runs"
+                f"{path}/commits/{sha}/check-runs?per_page=100&filter=all", "check_runs"
             ),
             "statuses": self.collection(f"{path}/commits/{sha}/statuses?per_page=100"),
         }
@@ -81,7 +81,9 @@ class GitHub:
         current = self.api(f"{path}/pulls/{number}")
         if current["head"]["sha"] != sha or current["base"]["sha"] != pr["base"]["sha"]:
             raise ValueError("PR changed while reading context; retry the observation")
-        return context
+        from afk_pr.execution import summarize
+
+        return {"execution_summary": summarize(context), **context}
 
     def head(self, url):
         repo, number = identity(url)

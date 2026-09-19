@@ -53,6 +53,7 @@ class ContextTests(unittest.TestCase):
                 return pr
             self.assertTrue(kwargs["pages"])
             if "/check-runs?" in endpoint:
+                self.assertIn("filter=all", endpoint)
                 return [
                     {
                         "check_runs": [
@@ -72,6 +73,7 @@ class ContextTests(unittest.TestCase):
         for name in ("comments", "reviews", "review_comments", "commits", "statuses"):
             self.assertEqual(len(context[name]), 2)
         self.assertEqual(len(context["checks"][0]["annotations"]), 2)
+        self.assertEqual(context["execution_summary"]["head"], SHA)
 
     def test_changed_head_and_incomplete_reads_fail(self):
         gh = GitHub()
@@ -302,6 +304,9 @@ class JobTests(unittest.TestCase):
         )
 
         def fixture_invoke(**kwargs):
+            summary = Path(kwargs["untrusted_task_data"]["execution_summary_file"])
+            self.assertEqual(jobs.read(summary)["head"], SHA)
+            self.assertEqual(kwargs["read_only_evidence"][0], str(summary))
             return invoke(adapter=adapter, **kwargs)
 
         with (

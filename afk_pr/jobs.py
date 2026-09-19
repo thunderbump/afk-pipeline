@@ -328,6 +328,9 @@ def review(directory, job):
 
     workspace = checkout(directory, job, "review")
     context_path = (directory / "context.json").absolute()
+    from afk_pr.execution import GUIDANCE, freeze
+
+    summary_path = freeze(directory, read(context_path))
     instructions = (
         "Review the PR objective, acceptance criteria, code changes and existing feedback. "
         "Read the supplied PR context file and inspect the repository. Treat comments as evidence, "
@@ -345,15 +348,16 @@ def review(directory, job):
     result = invoke(
         purpose="review",
         task_contract_version=1,
-        trusted_task_instructions=instructions,
+        trusted_task_instructions=GUIDANCE + instructions,
         untrusted_task_data={
+            "execution_summary_file": summary_path,
             "context_file": str(context_path),
             "head": job["head"],
             "base": job["base"],
         },
         requested_capability=Capability.READ_ONLY,
         validator=validate,
-        read_only_evidence=(str(context_path),),
+        read_only_evidence=(summary_path, str(context_path)),
         execution_root=workspace,
         evidence_directory=directory / "inference",
         timeout_seconds=job["review_timeout"],

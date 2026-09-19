@@ -103,7 +103,10 @@ class GitIdentityTest(unittest.TestCase):
         self.assertFalse((self.directory / "creation.git.log").exists())
 
     def test_read_only_review_does_not_require_commit_identity(self):
-        jobs.write(self.directory / "context.json", {})
+        jobs.write(
+            self.directory / "context.json",
+            {"pull_request": {"head": {"sha": self.head}, "base": {"sha": self.head}}},
+        )
         with (
             patch.object(jobs, "checkout", return_value=self.repo),
             patch(

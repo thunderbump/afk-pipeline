@@ -95,7 +95,11 @@ class AssessmentTest(unittest.TestCase):
         self.assertTrue((directory / "inference/receipt.json").exists())
         call = self.calls[0]
         self.assertEqual(call["requested_capability"], Capability.READ_ONLY)
-        self.assertEqual(len(call["read_only_evidence"]), 3)
+        summary = json.loads(Path(call["read_only_evidence"][0]).read_text())
+        self.assertEqual(summary["head"], SHA)
+        self.assertEqual(summary["checks"][0]["conclusion"], "success")
+        self.assertFalse(summary["reviews"][0]["current_head"])
+        self.assertEqual(len(call["read_only_evidence"]), 4)
         self.assertEqual(self.gh.api.call_args.args, ("repos/example/repo/pulls/1",))
         self.assertFalse(self.gh.api.call_args.kwargs)
         self.assertFalse((self.root / "state/pr-reviews").exists())

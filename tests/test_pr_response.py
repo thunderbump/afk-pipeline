@@ -130,6 +130,10 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(jobs.read(child / "job.json")["head"], candidate)
         self.assertEqual([call[1] for call in self.launches], ["fixtures"])
         self.assertFalse(any("force" in arg for arg in self.pushes[0]))
+        summary = Path(self.invocation["untrusted_task_data"]["execution_summary_file"])
+        self.assertEqual(jobs.read(summary)["head"], self.head)
+        self.assertEqual(jobs.read(summary)["statuses"][0]["state"], "failure")
+        self.assertEqual(self.invocation["read_only_evidence"][0], str(summary))
         self.assertEqual(self.invocation["purpose"], "feedback_response")
         self.assertEqual(self.invocation["requested_capability"].value, "WRITE")
         self.assertIn(

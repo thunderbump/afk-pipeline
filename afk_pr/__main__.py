@@ -175,7 +175,10 @@ def main(argv=None):
                             == identity(args.pr_url)
                         ):
                             jobs.append(status_job(directory))
+                from afk_pr.execution import summarize
+
                 result = {
+                    "execution_summary": summarize(context),
                     "pr_url": args.pr_url,
                     "head": context["pull_request"]["head"]["sha"],
                     "checks": context["checks"],

@@ -129,7 +129,10 @@ def assess(url, config_path, *, bead_id=None, github=None, inference=invoke):
         except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
             repository["unavailable_reason"] = str(error)
         jobs.write(directory / "repository.json", repository)
-        evidence = tuple(
+        from afk_pr.execution import GUIDANCE, freeze
+
+        summary_path = freeze(directory, context)
+        evidence = (summary_path,) + tuple(
             str(directory / name)
             for name in ("bead.json", "context.json", "repository.json")
         )
@@ -144,7 +147,7 @@ def assess(url, config_path, *, bead_id=None, github=None, inference=invoke):
         result = inference(
             purpose="completion_assessment",
             task_contract_version=1,
-            trusted_task_instructions=INSTRUCTIONS,
+            trusted_task_instructions=GUIDANCE + INSTRUCTIONS,
             untrusted_task_data={
                 "pr_url": url,
                 "bead_id": selected,

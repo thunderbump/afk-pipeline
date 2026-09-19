@@ -50,6 +50,9 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
     if jobs.github_remote(remote) != identity(job["pr_url"])[0].lower():
         raise ValueError("configured origin changed")
     context_path = (directory / "context.json").absolute()
+    from afk_pr.execution import GUIDANCE, freeze
+
+    summary_path = freeze(directory, jobs.read(context_path))
 
     def validate(value):
         if not isinstance(value, str) or not value.strip() or len(value) > 40000:
@@ -61,7 +64,8 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
     result = invoke(
         purpose="feedback_response",
         task_contract_version=1,
-        trusted_task_instructions=(
+        trusted_task_instructions=GUIDANCE
+        + (
             "Read the PR context file, including the objective, commits, conversation, "
             "reviews from all reviewers, checks, fixture summaries and annotations. "
             "Inspect the repository and make useful repairs for the PR objective. "
@@ -76,13 +80,14 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
             "declined, unresolved questions and validation limits. Never claim pending tests passed."
         ),
         untrusted_task_data={
+            "execution_summary_file": summary_path,
             "context_file": str(context_path),
             "head": job["head"],
             "base": job["base"],
         },
         requested_capability=Capability.WRITE,
         validator=validate,
-        read_only_evidence=(str(context_path),),
+        read_only_evidence=(summary_path, str(context_path)),
         execution_root=workspace,
         evidence_directory=directory / "inference",
         timeout_seconds=job["review_timeout"],
