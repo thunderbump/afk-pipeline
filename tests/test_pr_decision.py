@@ -1,5 +1,6 @@
 import copy
 import io
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -219,6 +220,34 @@ class DecisionTests(unittest.TestCase):
             changed=False, candidate=OLD, push="not_started"
         )
         self.assert_decision([parent], "pause", "response_no_change")
+
+    def test_unknown_response_change_flag_and_malformed_records_pause(self):
+        for changed in (None, "true", 1, [], {}):
+            parent, child = response()
+            parent["phases"]["response"]["progress"]["changed"] = changed
+            self.assert_decision([parent, child], "pause", "response_result_unknown")
+        for item in (None, [], {"job": None}, {"job": []}):
+            self.assert_decision([item], "pause", "evidence_unavailable")
+        item = review()
+        item["phases"]["fixtures"]["process"] = []
+        self.assert_decision([item], "pause", "fixture_result_inconsistent")
+
+    def test_observer_converts_invalid_progress_and_worker_probe_timeout_to_pause(self):
+        gh = mock.Mock()
+        gh.observe.return_value = context()
+        parent, _ = response()
+        parent["phases"]["response"]["progress"] = []
+        with mock.patch.object(jobs, "status_job", return_value=parent):
+            result = decision.observe(URL, "/unused", [RESPONSE], github=gh)
+        self.assertEqual(result["decision"]["recommendation"], "pause")
+        self.assertEqual(
+            result["decision"]["reasons"][0]["code"], "evidence_unavailable"
+        )
+        with mock.patch.object(
+            jobs, "status_job", side_effect=subprocess.TimeoutExpired("systemctl", 10)
+        ):
+            result = decision.observe(URL, "/unused", [RESPONSE], github=gh)
+        self.assertEqual(result["decision"]["recommendation"], "pause")
 
     def test_action_receipt_must_match_and_be_settled(self):
         item = review()

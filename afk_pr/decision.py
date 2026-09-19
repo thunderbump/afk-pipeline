@@ -1,10 +1,20 @@
 """Read-only next-step eligibility for explicitly selected PR jobs."""
 
 import re
+import subprocess
 from pathlib import Path
 
 from afk_pr.github import GitHub, identity
 from afk_pr.review_result import validate
+
+
+def _selected_id(item):
+    if not isinstance(item, dict):
+        return None
+    job = item.get("job")
+    return item.get("requested_id") or (
+        job.get("id") if isinstance(job, dict) else None
+    )
 
 
 def decide(context, selected):
@@ -13,7 +23,13 @@ def decide(context, selected):
     head, base = pr["head"]["sha"], pr["base"]["sha"]
     repository, number = identity(pr["html_url"])
     reasons, waiting, retries = [], [], []
-    by_id = {item.get("job", {}).get("id"): item for item in selected if "job" in item}
+    by_id = {
+        item["job"]["id"]: item
+        for item in selected
+        if isinstance(item, dict)
+        and isinstance(item.get("job"), dict)
+        and isinstance(item["job"].get("id"), str)
+    }
 
     def pause(code, job_id=None, phase=None):
         reasons.append({"code": code, "job_id": job_id, "phase": phase})
@@ -23,6 +39,9 @@ def decide(context, selected):
     if not selected:
         pause("no_jobs_selected")
     for item in selected:
+        if not isinstance(item, dict):
+            pause("evidence_unavailable")
+            continue
         job = item.get("job")
         if not isinstance(job, dict) or not job or item.get("error"):
             pause("evidence_unavailable", item.get("requested_id"))
@@ -48,7 +67,8 @@ def decide(context, selected):
             "creation": ({"creation"},),
         }
         if (
-            not isinstance(expected, list)
+            not isinstance(kind, str)
+            or not isinstance(expected, list)
             or not expected
             or not all(isinstance(phase, str) for phase in expected)
             or set(expected) not in allowed.get(kind, ())
@@ -149,6 +169,8 @@ def decide(context, selected):
             else:
                 if phase == "response" and progress.get("changed") is False:
                     pause("response_no_change", job_id, phase)
+                elif phase == "response" and progress.get("changed") is not True:
+                    pause("response_result_unknown", job_id, phase)
                 elif progress.get("push") != "pushed":
                     pause("push_unconfirmed", job_id, phase)
                 else:
@@ -189,9 +211,7 @@ def decide(context, selected):
         "head": head,
         "base": base,
         "observed_at": context.get("observed_at"),
-        "selected_job_ids": [
-            item.get("requested_id", item.get("job", {}).get("id")) for item in selected
-        ],
+        "selected_job_ids": [_selected_id(item) for item in selected],
         "reasons": reasons
         or waiting
         or retries
@@ -228,7 +248,14 @@ def observe(url, run_root, job_ids, *, github=None):
                 )
                 if isinstance(child, str) and re.fullmatch(r"[0-9a-f]{16}", child):
                     pending.append(child)
-        except (OSError, ValueError, KeyError, TypeError):
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+            subprocess.SubprocessError,
+        ):
             item = {"error": "evidence_unavailable"}
         selected.append({**item, "requested_id": job_id})
     return {
