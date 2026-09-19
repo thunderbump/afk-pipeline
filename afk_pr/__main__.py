@@ -78,6 +78,11 @@ def main(argv=None):
     )
     status.add_argument("pr_url")
     status.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    status.add_argument(
+        "--job",
+        action="append",
+        help="select a job for read-only failure-handling advice; repeat as needed",
+    )
     clean = commands.add_parser(
         "cleanup",
         help="remove successful inactive clone workspaces; retain job evidence",
@@ -152,6 +157,13 @@ def main(argv=None):
                 "publication retry cannot be combined with submission options"
             )
         identity(args.pr_url)
+        if args.command == "status" and args.job:
+            from afk_pr.decision import observe
+
+            config = load_config(args.config, historical=True)
+            result = observe(args.pr_url, config["run_root"], args.job)
+            print(json.dumps(result, indent=2))
+            return 0
         if args.command == "context":
             result = GitHub().observe(args.pr_url)
         elif args.command in {"review", "respond"} and not args.retry_publication:
