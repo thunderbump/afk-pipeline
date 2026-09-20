@@ -255,6 +255,92 @@ class DriverTests(unittest.TestCase):
             (result["status"], result["stage"]), ("running", "review_wait")
         )
 
+    def fail_fixture(self, item, code=1):
+        phase = item["phases"]["fixtures"]
+        phase.update(state="failed")
+        phase["process"]["exit_code"] = code
+
+    def test_creation_validation_failure_routes_to_first_repair(self):
+        self.tick()
+        self.fail_fixture(self.world.jobs["f" * 16])
+        state = self.tick()
+        self.assertEqual((state["stage"], state["repairs"]), ("response_submit", 1))
+        self.assertEqual(state["head"], HEAD)
+        self.assertEqual(self.tick()["stage"], "response_wait")
+
+    def test_failed_validation_overrides_clean_review_and_recovers(self):
+        self.reach_review()
+        self.fail_fixture(self.world.jobs[driver.read(self.path)["active_job"]], -6)
+        state = self.tick()
+        self.assertEqual((state["stage"], state["repairs"]), ("response_submit", 1))
+        self.tick()
+        self.tick()
+        self.tick()
+        self.assertEqual(self.tick()["status"], "ready_for_merge")
+
+    def test_response_validation_failure_uses_new_head_and_action(self):
+        self.world.findings = [{"message": "Fix"}]
+        self.reach_review()
+        self.tick()
+        state = self.tick()
+        child = self.world.jobs[state["active_job"]]["phases"]["response"]["progress"][
+            "fixture_job"
+        ]
+        self.fail_fixture(self.world.jobs[child])
+        candidate = self.world.head
+        state = self.tick()
+        self.assertEqual((state["stage"], state["repairs"]), ("response_submit", 2))
+        self.assertEqual(state["head"], candidate)
+        self.tick()
+        calls = [call for call in self.world.calls if call[0] == "respond"]
+        self.assertNotEqual(calls[0][3], calls[1][3])
+        self.assertEqual(calls[1][5], candidate)
+
+    def test_failed_fixture_waits_for_concurrent_review_then_repairs(self):
+        self.reach_review()
+        state = driver.read(self.path)
+        item = self.world.jobs[state["active_job"]]
+        self.fail_fixture(item)
+        item["phases"]["review"].update(state="running", publication="pending")
+        self.assertEqual(self.tick()["status"], "running")
+        self.assertEqual(self.tick()["stage"], "review_wait")
+        item["phases"]["review"].update(state="completed", publication="published")
+        self.assertEqual(self.tick()["stage"], "response_submit")
+
+    def test_validation_repairs_share_existing_limit(self):
+        self.reach_review()
+        state = driver.read(self.path)
+        state["repairs"] = state["max_repairs"]
+        driver.write(self.path, state)
+        self.fail_fixture(self.world.jobs[state["active_job"]])
+        self.assertEqual(self.tick()["reason"], "repair_limit_reached")
+        self.assertFalse(any(call[0] == "respond" for call in self.world.calls))
+
+    def test_failed_validation_does_not_bypass_other_boundaries(self):
+        self.reach_review()
+        saved = driver.read(self.path)
+        identifier = saved["active_job"]
+        self.fail_fixture(self.world.jobs[identifier])
+        original = copy.deepcopy(self.world.jobs[identifier])
+        mutations = [
+            lambda i: i["phases"]["fixtures"].update(publication="pending"),
+            lambda i: i["phases"]["fixtures"].update(candidate_unchanged=False),
+            lambda i: i["phases"]["fixtures"].update(state="busy"),
+            lambda i: i["phases"]["fixtures"]["process"].update(timed_out=True),
+            lambda i: i["phases"]["fixtures"]["process"].update(interrupted=True),
+            lambda i: i["phases"]["fixtures"]["process"].update(error="launch failed"),
+            lambda i: i["phases"]["review"].update(result={}),
+            lambda i: i["job"].update(head=OLD),
+            lambda i: i["job"].update(base=OLD),
+        ]
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                driver.write(self.path, saved)
+                self.world.jobs[identifier] = copy.deepcopy(original)
+                mutate(self.world.jobs[identifier])
+                self.assertEqual(self.tick()["status"], "paused")
+        self.assertFalse(any(call[0] == "respond" for call in self.world.calls))
+
     def test_response_fixture_failure_pauses(self):
         self.world.findings = [{"message": "Fix"}]
         self.reach_review()
