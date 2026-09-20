@@ -54,31 +54,83 @@ def lock(path, *, blocking=False):
         yield
 
 
+class CommandFailure(RuntimeError):
+    def __init__(self, command, diagnostic=None):
+        super().__init__(f"{command} failed; inspect retained command diagnostics")
+        self.command = command
+        self.diagnostic = diagnostic
+
+
 class Commands:
-    def __init__(self, config):
+    def __init__(self, config, evidence_directory=None):
         self.config = str(config)
+        self.evidence_directory = evidence_directory
+
+    def failed(self, command, stdout="", stderr="", returncode=None, error=None):
+        diagnostic = None
+        if self.evidence_directory is not None:
+            directory = Path(self.evidence_directory) / "command-errors"
+            directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd, filename = tempfile.mkstemp(
+                prefix=command + "-", suffix=".json", dir=directory
+            )
+            os.close(fd)
+            diagnostic = str(Path(filename).absolute())
+
+            def bounded(value):
+                if isinstance(value, bytes):
+                    value = value.decode("utf-8", errors="replace")
+                return (value or "")[-32768:]
+
+            write(
+                Path(filename),
+                {
+                    "at": now(),
+                    "command": command,
+                    "returncode": returncode,
+                    "error": error,
+                    "stdout_tail": bounded(stdout),
+                    "stderr_tail": bounded(stderr),
+                },
+            )
+        raise CommandFailure(command, diagnostic)
 
     def __call__(self, *arguments):
         command = [sys.executable, str(ROOT / "afk"), *arguments]
         if arguments[0] != "context":
             command += ["--config", self.config]
-        result = subprocess.run(
-            command, capture_output=True, text=True, timeout=600, check=False
-        )
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=600, check=False
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            self.failed(
+                arguments[0],
+                getattr(error, "stdout", ""),
+                getattr(error, "stderr", ""),
+                error=type(error).__name__,
+            )
         try:
             value = json.loads(result.stdout)
-        except ValueError as error:
-            raise RuntimeError(
-                f"{arguments[0]} returned no valid JSON receipt"
-            ) from error
+        except ValueError:
+            self.failed(
+                arguments[0],
+                result.stdout,
+                result.stderr,
+                result.returncode,
+                "invalid_json",
+            )
         if (
             result.returncode
             or not isinstance(value, dict)
             or value.get("outcome") == "failed"
         ):
-            # Keep raw command output private; it may contain configuration details.
-            raise RuntimeError(
-                f"{arguments[0]} failed; inspect the independent command/job"
+            self.failed(
+                arguments[0],
+                result.stdout,
+                result.stderr,
+                result.returncode,
+                "command_failed",
             )
         return value
 
@@ -212,6 +264,15 @@ def step(state, commands):
     if state["status"] != "running":
         return
     stage = state["stage"]
+    invoke = commands
+
+    def commands(*arguments):
+        value = invoke(*arguments)
+        if state.get("observation_failure_command") == arguments[0]:
+            state.pop("observation_failures", None)
+            state.pop("observation_failure_command", None)
+        return value
+
     try:
         if stage == "creation_submit":
             result = commands("pr", state["bead_id"])
@@ -324,6 +385,24 @@ def step(state, commands):
                     request_repair(state)
         else:
             raise ValueError("unknown orchestration stage")
+    except CommandFailure as error:
+        details = {
+            "command": error.command,
+            "diagnostic": error.diagnostic,
+            "stage": stage,
+        }
+        if error.command in {"status", "job", "context"}:
+            failures = (
+                state.get("observation_failures", 0)
+                if state.get("observation_failure_command") == error.command
+                else 0
+            ) + 1
+            state["observation_failure_command"] = error.command
+            state["observation_failures"] = failures
+            if failures < 3:
+                record(state, "observation_retry", attempt=failures, **details)
+                return
+        pause(state, "command_or_evidence_error", details)
     except (
         OSError,
         ValueError,
@@ -381,7 +460,7 @@ def advance(path, commands=None):
     """One locked tick, useful for schedulers and bounded operational checks."""
     with lock(path):
         state = read(path)
-        step(state, commands or Commands(state["config"]))
+        step(state, commands or Commands(state["config"], path.parent))
         write(path, state)
         return state
 
@@ -389,7 +468,7 @@ def advance(path, commands=None):
 def resume(path, *, review_current_head=False, commands=None):
     with lock(path):
         state = read(path)
-        commands = commands or Commands(state["config"])
+        commands = commands or Commands(state["config"], path.parent)
         if review_current_head:
             context = commands("context", state["pr_url"])["pull_request"]
             if context["state"] != "open":
@@ -403,6 +482,8 @@ def resume(path, *, review_current_head=False, commands=None):
             record(state, "operator_selected_current_head", head=state["head"])
         elif state["status"] == "ready_for_merge":
             return state
+        state.pop("observation_failures", None)
+        state.pop("observation_failure_command", None)
         state.update(status="running", reason=None, details=None)
         record(state, "resumed")
         write(path, state)
