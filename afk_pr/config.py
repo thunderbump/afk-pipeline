@@ -133,7 +133,7 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
     for name, resource in resources.items():
         keys(
             resource,
-            {"worker_home", "stack_path", "workspace_cleanup"},
+            {"worker_home", "stack_path", "workspace_cleanup", "cleanup_adapter"},
             "fixture resource",
         )
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", name):
@@ -148,6 +148,10 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
                 raise ValueError(
                     "shared fixture resources must not overlap disposable workspaces"
                 )
+        if "cleanup_adapter" in resource:
+            resource["cleanup_adapter"] = str(
+                location(resource["cleanup_adapter"], "cleanup_adapter")
+            )
         if resource.get("workspace_cleanup", False) is not False:
             raise ValueError(
                 "external fixture workspace cleanup is unsupported until resource release is proven"

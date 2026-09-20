@@ -95,6 +95,11 @@ def main(argv=None):
     clean.add_argument("job_id")
     clean.add_argument("--dry-run", action="store_true")
     clean.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    gc = commands.add_parser("gc", help="preview bounded cleanup of inactive PR jobs")
+    gc.add_argument("--project", required=True)
+    gc.add_argument("--keep", type=int, default=2)
+    gc.add_argument("--apply", action="store_true")
+    gc.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     background = commands.add_parser("worker", help=argparse.SUPPRESS)
     background.add_argument("directory", type=Path)
     background.add_argument("phase", choices=PHASES)
@@ -144,6 +149,14 @@ def main(argv=None):
             result = status_job(config["run_root"] / "pr-reviews" / args.job_id)
             if result["job"]["id"] != args.job_id:
                 raise ValueError("job identity mismatch")
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "gc":
+            from afk_pr.garbage_collection import collect
+
+            result = collect(
+                load_config(args.config), args.project, keep=args.keep, apply=args.apply
+            )
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "cleanup":

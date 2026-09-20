@@ -61,6 +61,7 @@ def main(argv=None):
         "status",
         "context",
         "cleanup",
+        "gc",
         "job",
     }:
         from afk_pr.__main__ import main as pr_main
