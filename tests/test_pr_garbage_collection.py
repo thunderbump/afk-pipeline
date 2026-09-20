@@ -234,6 +234,72 @@ class GarbageCollectionTests(unittest.TestCase):
         )
         self.assertTrue(response.exists())
 
+    def test_unpublished_branch_or_reflog_is_retained(self):
+        directory, workspace = self.fixture(1)
+        job = jobs.read(directory / "job.json")
+        self.git(workspace, "checkout", "-qb", "unpublished")
+        (workspace / "code").write_text("unpublished commit")
+        self.git(
+            workspace,
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "-qam",
+            "local work",
+        )
+        self.git(workspace, "checkout", "--detach", self.head)
+        with self.assertRaisesRegex(gc.Retain, "unpublished commits"):
+            gc.collect_job(self.config, directory, job, True)
+        self.git(workspace, "branch", "-D", "unpublished")
+        with self.assertRaisesRegex(gc.Retain, "unpublished commits"):
+            gc.collect_job(self.config, directory, job, True)
+        self.assertTrue(workspace.exists())
+
+    def test_partial_clone_deletion_resumes_from_exact_decision(self):
+        directory, workspace = self.fixture(1)
+        job = jobs.read(directory / "job.json")
+        remove = gc.shutil.rmtree
+
+        def partial_remove(path):
+            remove(path / ".git")
+            raise OSError("interrupted after git metadata removal")
+
+        with (
+            mock.patch.object(gc.shutil, "rmtree", side_effect=partial_remove),
+            self.assertRaises(OSError),
+        ):
+            gc.collect_job(self.config, directory, job, True)
+        self.assertFalse((workspace / ".git").exists())
+        self.assertEqual(
+            gc.collect_job(self.config, directory, job, True)["outcome"], "removed"
+        )
+        self.assertFalse(workspace.exists())
+
+    def test_interrupted_cleanup_rechecks_intact_clone_for_new_work(self):
+        directory, workspace = self.fixture(1)
+        job = jobs.read(directory / "job.json")
+        with (
+            mock.patch.object(gc.shutil, "rmtree", side_effect=OSError("interrupted")),
+            self.assertRaises(OSError),
+        ):
+            gc.collect_job(self.config, directory, job, True)
+        (workspace / "new-work").write_text("keep me")
+        with self.assertRaisesRegex(gc.Retain, "unpublished"):
+            gc.collect_job(self.config, directory, job, True)
+        self.assertEqual((workspace / "new-work").read_text(), "keep me")
+
+    def test_malformed_retention_evidence_does_not_block_other_jobs(self):
+        self.fixture(1)
+        bad, _ = self.fixture(2)
+        self.fixture(3)
+        self.fixture(4)
+        (bad / "fixtures.json").write_text("invalid json")
+        report = gc.collect(self.config, "test", apply=True)
+        self.assertEqual(self.result(report, 1)["outcome"], "removed")
+        self.assertIn("unreadable", self.result(report, 2)["reason"])
+
     def test_adapter_lock_covers_actual_removal(self):
         directory, workspace = self.fixture(1)
         job = jobs.read(directory / "job.json")

@@ -1770,7 +1770,7 @@ Preview reports current retained bytes; apply reports bytes remaining afterward.
 
 External fixture resources may set `cleanup_adapter` to an absolute path to an
 operator-trusted Python module in host TOML. The module exports a context manager
-`cleanup_targets(directory, job, *, apply=False)` that yields owned generated
+`cleanup_targets(directory, job, *, apply=False, resume=False)` that yields owned generated
 directories, holding resource leases until the context exits. It must refuse
 uncertain release and protect baseline data and external references. AFK never
 selects this executable from candidate policy or job metadata. Resource identity
@@ -1779,8 +1779,11 @@ The EQEmu adapter lives in its repository at `scripts/afk_cleanup.py`.
 
 GC retains job records, logs and action receipts, and writes `cleanup.json` before
 removal so old workers cannot restart. It does not prune Docker or remove legacy
-linked worktrees. An interrupted deletion with a damaged partial clone may need
-operator inspection; GC refuses to infer that its remaining files are disposable.
+linked worktrees. An interrupted deletion resumes only its recorded target list, after rechecking
+worker inactivity and resource ownership. New eligibility checks include local
+refs and reflogs, including submodules, to retain unpublished commits. The EQEmu
+adapter recovers its own interrupted GC leases while holding both worker guards;
+ordinary validation leases still require the repository recovery command.
 No automatic scheduling is installed by this command.
 
 Legacy JSON is rejected for new PR submissions. It remains accepted only to locate

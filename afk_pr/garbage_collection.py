@@ -40,10 +40,21 @@ def clean_clone(path, head):
         path, "status", "--porcelain", "--untracked-files=all"
     ):
         raise Retain("workspace has unexpected HEAD or unpublished changes")
-    # Nested submodule changes are included by status; an ignored build is disposable.
+    if jobs.git(path, "rev-list", "--all", "--reflog", "--not", head, "--remotes"):
+        raise Retain("clone contains unpublished commits in refs or reflogs")
+    if jobs.git(
+        path,
+        "submodule",
+        "foreach",
+        "--quiet",
+        "--recursive",
+        "git rev-list --all --reflog --not HEAD --remotes",
+    ):
+        raise Retain("submodule contains unpublished commits in refs or reflogs")
+    # Ignored dependency/build scratch is disposable.
 
 
-def workspace_targets(directory, job):
+def workspace_targets(directory, job, *, resume=False):
     if job.get("layout") != "independent-clones-v1":
         raise Retain("historical or unknown workspace layout")
     phases = job.get("expected_phases", [])
@@ -82,12 +93,19 @@ def workspace_targets(directory, job):
                 "push"
             ) != "pushed":
                 raise Retain("candidate push is unproven")
-        clean_clone(owned_path(root / phase), head)
+        target = owned_path(root / phase)
+        if resume and (
+            (target / ".git").is_symlink()
+            or ((target / ".git").exists() and not (target / ".git").is_dir())
+        ):
+            raise Retain("linked worktree substituted during interrupted cleanup")
+        if not resume or (target / ".git").exists():
+            clean_clone(target, head)
     return [root / phase for phase in phases]
 
 
 @contextmanager
-def resource_targets(config, directory, job, apply):
+def resource_targets(config, directory, job, apply, resume):
     resource = job.get("fixture_resource")
     if not resource:
         if not job.get("cleanup_allowed"):
@@ -108,7 +126,7 @@ def resource_targets(config, directory, job, apply):
         raise Retain("cleanup adapter must be a loadable Python file")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    with module.cleanup_targets(directory, job, apply=apply) as targets:
+    with module.cleanup_targets(directory, job, apply=apply, resume=resume) as targets:
         yield [owned_path(p) for p in targets]
 
 
@@ -119,6 +137,7 @@ def retained_jobs(entries, keep):
             (job.get("project"), job.get("pr_url") or job.get("bead_id") or job["id"])
         ].append((directory, job))
     protected = set()
+    errors = {}
     for group in groups.values():
         group.sort(
             key=lambda item: (item[1].get("created_at", ""), item[1]["id"]),
@@ -127,21 +146,28 @@ def retained_jobs(entries, keep):
         protected.update(job["id"] for _, job in group[:keep])
         seen = set()
         for directory, job in group:
-            kinds = []
-            kind = job.get("kind")
-            if kind in {"creation", "response"}:
-                record = directory / f"{kind}.json"
-                if record.is_file() and jobs.read(record).get("state") == "completed":
-                    kinds.append("latest candidate workspace")
-            if (directory / "fixtures.json").is_file():
-                state = jobs.read(directory / "fixtures.json").get("state")
-                if state in {"passed", "failed", "timed_out"}:
-                    kinds.append("success" if state == "passed" else "failure")
+            try:
+                kinds = []
+                kind = job.get("kind")
+                if kind in {"creation", "response"}:
+                    record = directory / f"{kind}.json"
+                    if (
+                        record.is_file()
+                        and jobs.read(record).get("state") == "completed"
+                    ):
+                        kinds.append("latest candidate workspace")
+                if (directory / "fixtures.json").is_file():
+                    state = jobs.read(directory / "fixtures.json").get("state")
+                    if state in {"passed", "failed", "timed_out"}:
+                        kinds.append("success" if state == "passed" else "failure")
+            except (OSError, ValueError, TypeError, AttributeError) as error:
+                errors[job["id"]] = f"unreadable retention evidence: {error}"
+                continue
             for kind in kinds:
                 if kind not in seen:
                     protected.add(job["id"])
                     seen.add(kind)
-    return protected
+    return protected, errors
 
 
 def collect_job(config, directory, job, apply):
@@ -160,8 +186,13 @@ def collect_job(config, directory, job, apply):
             }
         if Path(job["workspace_root"]) != config["workspace_root"]:
             raise Retain("workspace root no longer matches host configuration")
-        targets = workspace_targets(directory, job)
-        with resource_targets(config, directory, job, apply) as extra:
+        if previous and (
+            previous.get("state") != "deleting" or previous.get("command") != "gc"
+        ):
+            raise Retain("unknown interrupted cleanup decision")
+        resume = previous is not None
+        targets = workspace_targets(directory, job, resume=resume)
+        with resource_targets(config, directory, job, apply, resume) as extra:
             targets += extra
             # Adapters own external path validation; never permit deletion of the
             # durable job directory, or overlapping targets counted twice.
@@ -244,9 +275,11 @@ def collect(config, project, *, keep=2, apply=False):
             results.append(
                 {"job_id": directory.name, "outcome": "retained", "reason": str(error)}
             )
-    protected = retained_jobs(entries, keep)
+    protected, errors = retained_jobs(entries, keep)
     for directory, job in entries:
         try:
+            if job["id"] in errors:
+                raise Retain(errors[job["id"]])
             if job["id"] in protected:
                 raise Retain(
                     "retention policy: recent job or latest candidate/success/failure"
