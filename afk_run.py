@@ -47,6 +47,10 @@ class PreparationError(Exception):
 
 def main(argv=None):
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "orchestrate":
+        from afk_orchestrate.__main__ import main as orchestration_main
+
+        return orchestration_main(arguments[1:])
     if arguments and arguments[0] in {
         "pr",
         "evaluate",
@@ -57,6 +61,7 @@ def main(argv=None):
         "status",
         "context",
         "cleanup",
+        "job",
     }:
         from afk_pr.__main__ import main as pr_main
 
@@ -65,6 +70,7 @@ def main(argv=None):
         prog="afk",
         usage=(
             "afk pr|evaluate BEAD_ID | afk review|respond|status|context|finish|assess PR_URL | "
+            "afk job JOB_ID | afk orchestrate start BEAD_ID | "
             "afk run <bead-id> [--config PATH] | "
             "afk continue <sealed-run> ADDITIONAL_RESPONSES [--config PATH] | "
             "afk export <sealed-run> <new-bundle-directory> [--project SLUG --run-id ID]"

@@ -83,6 +83,11 @@ def main(argv=None):
         action="append",
         help="select a job for read-only failure-handling advice; repeat as needed",
     )
+    job = commands.add_parser(
+        "job", help="read a local job before or after PR creation"
+    )
+    job.add_argument("job_id")
+    job.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     clean = commands.add_parser(
         "cleanup",
         help="remove successful inactive clone workspaces; retain job evidence",
@@ -128,6 +133,17 @@ def main(argv=None):
             result = submit_creation(
                 args.bead_id, args.config, retry=args.retry_publication
             )
+            print(json.dumps(result, indent=2))
+            return 0
+        if args.command == "job":
+            import re
+
+            if not re.fullmatch(r"[0-9a-f]{16}", args.job_id):
+                raise ValueError("invalid job ID")
+            config = load_config(args.config, historical=True)
+            result = status_job(config["run_root"] / "pr-reviews" / args.job_id)
+            if result["job"]["id"] != args.job_id:
+                raise ValueError("job identity mismatch")
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "cleanup":
