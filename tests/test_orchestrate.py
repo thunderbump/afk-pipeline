@@ -246,6 +246,48 @@ class DriverTests(unittest.TestCase):
                 self.assertEqual(self.tick()["status"], "paused")
         self.assertFalse(any(call[0] == "respond" for call in self.world.calls))
 
+    def test_failed_fixture_waits_for_active_publication_then_repairs_once(self):
+        self.reach_review()
+        item = self.world.jobs[driver.read(self.path)["active_job"]]
+        self.fail_fixture(item)
+        phase = item["phases"]["fixtures"]
+        phase.update(publication="pending", worker_observation="active")
+        for _ in range(2):
+            state = self.tick()
+            self.assertEqual(
+                (state["status"], state["stage"], state["repairs"]),
+                ("running", "review_wait", 0),
+            )
+        phase.update(publication="published")
+        self.assertEqual(self.tick()["stage"], "response_submit")
+        self.assertEqual(self.tick()["stage"], "response_wait")
+        self.assertEqual(sum(c[0] == "respond" for c in self.world.calls), 1)
+
+    def test_failed_fixture_publisher_stopped_failed_or_unknown_pauses(self):
+        self.reach_review()
+        saved = driver.read(self.path)
+        item = self.world.jobs[saved["active_job"]]
+        self.fail_fixture(item)
+        for publication, worker in (
+            ("pending", "inactive"),
+            ("pending", "unavailable"),
+            ("failed", "active"),
+        ):
+            driver.write(self.path, saved)
+            item["phases"]["fixtures"].update(
+                publication=publication, worker_observation=worker
+            )
+            self.assertEqual(self.tick()["status"], "paused")
+        self.assertFalse(any(c[0] == "respond" for c in self.world.calls))
+
+    def test_creation_waits_for_active_publisher(self):
+        self.tick()
+        phase = self.world.creation["phases"]["creation"]
+        phase.update(publication="pending", worker_observation="active")
+        self.assertEqual(self.tick()["status"], "running")
+        phase.update(publication="published")
+        self.assertEqual(self.tick()["stage"], "review_submit")
+
     def test_pending_fixtures_wait_without_responding(self):
         self.reach_review()
         item = self.world.jobs[driver.read(self.path)["active_job"]]
