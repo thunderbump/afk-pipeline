@@ -112,6 +112,35 @@ class ResponseTests(unittest.TestCase):
                 launcher=launcher or (lambda *a: self.launches.append(a)),
             )
 
+    def test_failed_fixture_logs_match_revision_and_remain_read_only(self):
+        identifier = "f" * 16
+        retained = self.directory.parent / identifier
+        log = retained / "worker/logs/build.log"
+        log.parent.mkdir(parents=True)
+        log.write_text("error: const Bot cannot call HasDied\n")
+        jobs.write(retained / "job.json", {**self.job, "id": identifier})
+        jobs.write(
+            retained / "fixtures.json", {"state": "failed", "candidate_unchanged": True}
+        )
+        self.context["statuses"] = [
+            {"state": "failure", "context": "afk/fixtures/" + identifier}
+        ]
+        jobs.write(self.directory / "context.json", self.context)
+        self.run_response()
+        data = self.invocation["untrusted_task_data"]
+        self.assertEqual(data["failed_fixture_log_files"], [str(log)])
+        self.assertIn(str(log), self.invocation["read_only_evidence"])
+        for change in ({"head": "0" * 40}, {"base": "0" * 40}, {"pr_url": URL + "3"}):
+            jobs.write(retained / "job.json", {**self.job, "id": identifier, **change})
+            from afk_pr.execution import summarize
+
+            self.assertEqual(
+                response.failed_fixture_logs(
+                    self.directory, self.job, summarize(self.context)
+                ),
+                [],
+            )
+
     def edit(self):
         (self.repo / "file.txt").write_text("repaired\n")
 
@@ -135,7 +164,7 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(jobs.read(summary)["statuses"][0]["state"], "failure")
         self.assertEqual(self.invocation["read_only_evidence"][0], str(summary))
         self.assertEqual(self.invocation["purpose"], "feedback_response")
-        self.assertEqual(self.invocation["task_contract_version"], 2)
+        self.assertEqual(self.invocation["task_contract_version"], 3)
         instructions = self.invocation["trusted_task_instructions"]
         for requirement in (
             "inspect its callers and sibling paths",

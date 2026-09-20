@@ -115,12 +115,80 @@ def action_id(state, command):
     return f"orch-{state['id']}-{state['generation']}-{command}-{state['repairs']}"
 
 
+def repairable_validation(result):
+    """Accept completed, published nonzero fixture exits, never uncertain execution.
+
+    Status remains a read-only eligibility report. Only this supervisor chooses
+    to spend a repair on failed validation; respond reads the published evidence.
+    """
+    decision = result["decision"]
+    reasons = decision.get("reasons", [])
+    if (
+        decision.get("recommendation") != "pause"
+        or not reasons
+        or any(reason.get("code") != "fixture_failed" for reason in reasons)
+    ):
+        return False
+    failed = set()
+    for item in result["jobs"]:
+        for phase, record in item["phases"].items():
+            if record.get("publication") != "published":
+                return False
+            if phase != "fixtures":
+                if record.get("state") != "completed":
+                    return False
+                continue
+            process = record.get("process", {})
+            code = process.get("exit_code")
+            if (
+                record.get("candidate_unchanged") is not True
+                or type(code) is not int
+                or process.get("timed_out") is not False
+                or process.get("interrupted") is not False
+                or "error" not in process
+                or process["error"] is not None
+            ):
+                return False
+            if record.get("state") == "failed" and code != 0:
+                failed.add(item["job"]["id"])
+            elif record.get("state") != "passed" or code != 0:
+                return False
+    return bool(failed) and failed == {
+        reason.get("job_id") for reason in reasons if reason.get("phase") == "fixtures"
+    }
+
+
+def request_repair(state):
+    if state["repairs"] >= state["max_repairs"]:
+        pause(state, "repair_limit_reached")
+    else:
+        state["repairs"] += 1
+        transition(state, "response_submit")
+
+
 def selected(state, commands, job):
     result = commands("status", state["pr_url"], "--job", job)
     decision = result["decision"]
     if decision.get("recommendation") == "wait":
         return None
-    if decision.get("recommendation") != "continue":
+    # A failed fixture can finish before its concurrent reviewer. Let that
+    # already-submitted work settle before selecting another response.
+    if (
+        decision.get("recommendation") == "pause"
+        and decision.get("reasons")
+        and all(
+            reason.get("code") == "fixture_failed" for reason in decision["reasons"]
+        )
+        and any(
+            phase.get("state") in {"queued", "running"}
+            for item in result["jobs"]
+            for phase in item["phases"].values()
+        )
+    ):
+        return None
+    if decision.get("recommendation") != "continue" and not repairable_validation(
+        result
+    ):
         pause(state, "independent_command_requires_attention", decision)
         return None
     if revision(decision.get("base")) != state["base"]:
@@ -188,7 +256,10 @@ def step(state, commands):
                 if candidate != result["head"]:
                     raise ValueError("creation candidate no longer current")
                 state["head"] = candidate
-                transition(state, "review_submit")
+                if repairable_validation(result):
+                    request_repair(state)
+                else:
+                    transition(state, "review_submit")
         elif stage in {"review_submit", "response_submit"}:
             command = "review" if stage == "review_submit" else "respond"
             result = commands(
@@ -226,10 +297,16 @@ def step(state, commands):
                 if candidate != result["head"]:
                     raise ValueError("response candidate no longer current")
                 state["head"] = candidate
-                transition(state, "review_submit")
+                if repairable_validation(result):
+                    request_repair(state)
+                else:
+                    transition(state, "review_submit")
             else:
                 if result["head"] != state["head"]:
                     raise ValueError("review head changed")
+                if repairable_validation(result):
+                    request_repair(state)
+                    return
                 review = item["phases"]["review"]["result"]
                 if review["head"] != state["head"] or not isinstance(
                     review["findings"], list
@@ -243,11 +320,8 @@ def step(state, commands):
                         head=state["head"],
                         review_job=state["active_job"],
                     )
-                elif state["repairs"] >= state["max_repairs"]:
-                    pause(state, "repair_limit_reached")
                 else:
-                    state["repairs"] += 1
-                    transition(state, "response_submit")
+                    request_repair(state)
         else:
             raise ValueError("unknown orchestration stage")
     except (

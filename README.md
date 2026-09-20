@@ -1584,9 +1584,14 @@ The independent commands also have an optional caller:
 ```
 
 `start` returns a run ID and starts a user systemd worker. It creates the PR,
-waits for matching fixtures, reviews, and responds to structured findings.
-It stops at `ready_for_merge`, or pauses on failed, stale, missing or uncertain
-evidence. It allows at most five responses, configurable downward with
+waits for matching fixtures, reviews, and responds to structured findings or
+completed validation failures. Published fixture failures with a nonzero exit
+use the same repair budget, including build errors, failed tests and crashes.
+The response reads their existing PR diagnostics. Stale or missing evidence,
+unpublished results, timeouts, interruptions and uncertain execution still pause.
+A normal nonzero exit does not identify the root cause: an environment failure
+can consume a repair attempt too. It stops at `ready_for_merge` only after a
+clean review and passing fixtures. It allows at most five responses, configurable downward with
 `--max-repairs 0..5`. Merge and Bead closure remain explicit `finish` operations.
 No command reads orchestration state or requires this caller.
 
