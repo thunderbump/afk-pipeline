@@ -1573,6 +1573,46 @@ identity, and Linux user systemd. Background workers use the host user's stored
 authentication, not credentials exported only in the initiating shell. GitHub
 HTTPS acquisition uses a command-scoped `gh auth git-credential` helper.
 
+### Optional supervised orchestration
+
+The independent commands also have an optional caller:
+
+```sh
+./afk orchestrate start CENTRAL_BEAD_ID
+./afk orchestrate status RUN_ID
+./afk job JOB_ID
+```
+
+`start` returns a run ID and starts a user systemd worker. It creates the PR,
+waits for matching fixtures, reviews, and responds to structured findings.
+It stops at `ready_for_merge`, or pauses on failed, stale, missing or uncertain
+evidence. It allows at most five responses, configurable downward with
+`--max-repairs 0..5`. Merge and Bead closure remain explicit `finish` operations.
+No command reads orchestration state or requires this caller.
+
+There is one run per Bead under the configured `run_root/orchestrations`.
+Repeated `start` returns that run without restarting it. After inspecting a pause,
+use independent commands to resolve the problem and then resume:
+
+```sh
+./afk orchestrate resume RUN_ID
+# Explicitly choose the PR's current head after manual intervention:
+./afk orchestrate resume RUN_ID --review-current-head
+```
+
+Ordinary resume retains the selected job and submission identity. Current-head
+resume starts a fresh review and keeps the repair count. A running worker locks
+its run; stop `afk-orchestrate-RUN_ID.service` with `systemctl --user stop` before
+changing it. Stopping the driver does not stop detached PR jobs. Inspect them
+before resuming. A ready result records the observed revision; it is not a
+permanent statement about a changing PR.
+
+For explicit scheduling or a bounded test, `start --no-start` saves state without
+launching a worker, and `orchestrate step RUN_ID` performs one transition. All
+orchestration operations accept `--config PATH`. Keep the configured run root and
+configuration path available across restarts. No inference runs in the driver;
+its worker polls independent commands every 30 seconds while jobs are pending.
+
 ### Configuration ownership
 
 The host file is `$XDG_CONFIG_HOME/afk/config.toml`, or

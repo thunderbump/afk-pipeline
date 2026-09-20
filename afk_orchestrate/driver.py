@@ -148,6 +148,8 @@ def step(state, commands):
         if stage == "creation_submit":
             result = commands("pr", state["bead_id"])
             if "job" not in result:
+                if isinstance(result.get("pr_url"), str):
+                    state["pr_url"] = result["pr_url"]
                 pause(state, "existing_pr_without_creation_receipt", result)
                 return
             if result["job"].get("bead_id") != state["bead_id"]:
@@ -166,6 +168,8 @@ def step(state, commands):
             ):
                 raise ValueError("creation identity changed")
             phase = result["phases"]["creation"]
+            if isinstance(phase.get("progress", {}).get("pr_url"), str):
+                state["pr_url"] = phase["progress"]["pr_url"]
             if phase.get("worker_observation") == "unavailable":
                 pause(state, "creation_worker_unknown")
                 return

@@ -282,6 +282,26 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(self.tick()["status"], "ready_for_merge")
         self.assertEqual(len(self.world.receipts), 2)
 
+    def test_existing_pr_without_creation_receipt_can_be_explicitly_adopted(self):
+        result = driver.advance(
+            self.path, lambda *args: {"bead_id": "central-example", "pr_url": URL}
+        )
+        self.assertEqual(result["reason"], "existing_pr_without_creation_receipt")
+        self.assertEqual(result["pr_url"], URL)
+        state = driver.resume(self.path, review_current_head=True, commands=self.world)
+        self.assertEqual(state["stage"], "review_submit")
+        self.tick()
+        self.assertEqual(self.tick()["status"], "ready_for_merge")
+
+    def test_creation_publication_failure_retains_url_for_operator_recovery(self):
+        self.tick()
+        self.world.creation["phases"]["creation"]["publication"] = "failed"
+        result = self.tick()
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["pr_url"], URL)
+        state = driver.resume(self.path, review_current_head=True, commands=self.world)
+        self.assertEqual(state["stage"], "review_submit")
+
     def test_base_change_pauses_before_review(self):
         self.tick()
         self.world.base = OLD
