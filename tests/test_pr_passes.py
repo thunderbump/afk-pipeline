@@ -286,6 +286,39 @@ class JobTests(unittest.TestCase):
             jobs.read(directory / "fixtures.json")["publication"], "published"
         )
 
+    def test_terminal_publication_observes_existing_worker(self):
+        directory = self.submit(fixtures_only=True)
+        jobs.write(
+            directory / "fixtures.json", {"state": "failed", "publication": "pending"}
+        )
+        for observed in ("active", "inactive"):
+            with mock.patch.object(
+                jobs.subprocess,
+                "run",
+                return_value=SimpleNamespace(returncode=0, stdout=observed),
+            ):
+                phase = jobs.status_job(directory)["phases"]["fixtures"]
+            self.assertEqual(phase["state"], "failed")
+            self.assertEqual(phase["worker_observation"], observed)
+        self.assertNotIn("worker_observation", jobs.read(directory / "fixtures.json"))
+
+    def test_terminal_publication_rereads_after_worker_probe(self):
+        directory = self.submit(fixtures_only=True)
+        jobs.write(
+            directory / "fixtures.json", {"state": "passed", "publication": "pending"}
+        )
+
+        def finish(*args, **kwargs):
+            jobs.write(
+                directory / "fixtures.json",
+                {"state": "passed", "publication": "published"},
+            )
+            return SimpleNamespace(returncode=0, stdout="inactive")
+
+        with mock.patch.object(jobs.subprocess, "run", side_effect=finish):
+            phase = jobs.status_job(directory)["phases"]["fixtures"]
+        self.assertEqual(phase["publication"], "published")
+
     def test_status_detects_dead_worker_without_running_inference(self):
         directory = self.submit(fixtures_only=True)
         with mock.patch.object(

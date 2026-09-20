@@ -191,7 +191,14 @@ def decide(context, selected):
                     ):
                         pause("fixture_child_missing_or_mismatched", job_id, phase)
             publication = record.get("publication")
-            if publication in ("pending", "failed"):
+            if (
+                publication == "pending"
+                and record.get("worker_observation") == "active"
+            ):
+                waiting.append(
+                    {"code": "publication_pending", "job_id": job_id, "phase": phase}
+                )
+            elif publication in ("pending", "failed"):
                 retries.append(
                     {"code": "publication_incomplete", "job_id": job_id, "phase": phase}
                 )

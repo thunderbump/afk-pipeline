@@ -551,7 +551,10 @@ def status_job(directory, *, probe=True):
         if not path.exists():
             continue
         record = read(path)
-        if probe and record["state"] in {"queued", "running"}:
+        if probe and (
+            record["state"] in {"queued", "running"}
+            or record.get("publication") == "pending"
+        ):
             observed = subprocess.run(
                 [
                     "systemctl",
@@ -566,12 +569,23 @@ def status_job(directory, *, probe=True):
                 check=False,
                 timeout=10,
             )
+            # Execution may be terminal while its worker is still publishing.
+            # Re-read after probing: publication can finish during the query.
+            record = read(path)
+            if record.get("publication") == "pending":
+                worker_state = observed.stdout.strip()
+                record = {
+                    **record,
+                    "worker_observation": worker_state
+                    if observed.returncode == 0
+                    and worker_state in {"active", "inactive", "failed"}
+                    else "unavailable",
+                }
             if observed.returncode == 0 and observed.stdout.strip() in {
                 "inactive",
                 "failed",
             }:
                 # The worker may have sealed its result during the systemd query.
-                record = read(path)
                 if record["state"] in {"queued", "running"}:
                     record = {
                         **record,

@@ -232,7 +232,13 @@ def selected(state, commands, job):
             reason.get("code") == "fixture_failed" for reason in decision["reasons"]
         )
         and any(
-            phase.get("state") in {"queued", "running"}
+            (
+                phase.get("state") in {"queued", "running"}
+                or (
+                    phase.get("publication") == "pending"
+                    and phase.get("worker_observation") == "active"
+                )
+            )
             for item in result["jobs"]
             for phase in item["phases"].values()
         )
@@ -303,6 +309,11 @@ def step(state, commands):
                 pause(state, "creation_worker_unknown")
                 return
             if phase["state"] in {"queued", "running"}:
+                return
+            if (
+                phase.get("publication") == "pending"
+                and phase.get("worker_observation") == "active"
+            ):
                 return
             if phase["state"] != "completed" or phase.get("publication") != "published":
                 pause(state, "creation_requires_attention", phase)

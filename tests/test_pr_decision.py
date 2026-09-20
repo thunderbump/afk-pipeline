@@ -127,6 +127,19 @@ class DecisionTests(unittest.TestCase):
         item["phases"]["review"] = {"state": "failed", "publication": "published"}
         self.assert_decision([item], "pause", "execution_not_successful")
 
+    def test_active_publication_waits_but_stopped_or_failed_publication_does_not(self):
+        for name in ("fixtures", "review"):
+            item = review()
+            phase = item["phases"][name]
+            phase.update(publication="pending", worker_observation="active")
+            self.assert_decision([item], "wait", "publication_pending")
+            phase["worker_observation"] = "inactive"
+            self.assert_decision([item], "retry_publication")
+            phase.update(publication="failed", worker_observation="active")
+            self.assert_decision([item], "retry_publication")
+            phase.update(publication="pending", worker_observation="unavailable")
+            self.assert_decision([item], "pause", "worker_ownership_unknown")
+
     def test_publication_retry_requires_successful_terminal_selected_work(self):
         item = review()
         item["phases"]["review"]["publication"] = "failed"

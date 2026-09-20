@@ -1930,3 +1930,10 @@ a new observation allowance. Failed submissions and invalid evidence still
 pause immediately. Bounded stdout/stderr tails and exit/error metadata are
 retained as mode-0600 JSON under the run's private `command-errors/` directory;
 events refer to their paths, not their contents.
+
+When a phase has a terminal result but publication is pending, `afk job` probes
+its existing worker and re-reads the phase record. `afk status` waits for active
+publication of successful results. The supervisor also waits for active
+publication of failed fixtures before selecting a repair. Inactive or unknown
+publishers and failed publication still require attention; no second publisher
+or inference worker is launched by observation.
