@@ -313,11 +313,12 @@ class JobTests(unittest.TestCase):
                 directory / "fixtures.json",
                 {"state": "passed", "publication": "published"},
             )
-            return SimpleNamespace(returncode=0, stdout="inactive")
+            return SimpleNamespace(returncode=1, stdout="")
 
         with mock.patch.object(jobs.subprocess, "run", side_effect=finish):
             phase = jobs.status_job(directory)["phases"]["fixtures"]
         self.assertEqual(phase["publication"], "published")
+        self.assertNotIn("worker_observation", phase)
 
     def test_status_detects_dead_worker_without_running_inference(self):
         directory = self.submit(fixtures_only=True)

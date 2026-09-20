@@ -592,7 +592,7 @@ def status_job(directory, *, probe=True):
                         "state": "interrupted",
                         "note": "Worker stopped without a terminal record; inspect retained work and pending GitHub status.",
                     }
-            elif observed.returncode:
+            elif observed.returncode and record["state"] in {"queued", "running"}:
                 record = {**record, "worker_observation": "unavailable"}
         progress = directory / f"{phase}-progress.json"
         if progress.exists():
