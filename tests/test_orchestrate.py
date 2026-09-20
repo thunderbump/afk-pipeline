@@ -315,6 +315,10 @@ class DriverTests(unittest.TestCase):
         self.assertFalse(created)
         self.assertEqual(driver.read(path)["stage"], "creation_wait")
         with driver.lock(path):
+            self.assertEqual(
+                driver.create(self.root, "central-example", self.root / "config.toml"),
+                (path, False),
+            )
             for operation in (
                 lambda: self.tick(),
                 lambda: driver.resume(path, commands=self.world),

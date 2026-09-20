@@ -271,12 +271,20 @@ def create(root, bead, config, max_repairs=5):
         raise ValueError("max repairs must be between 0 and 5")
     identifier = hashlib.sha256(bead.encode()).hexdigest()[:16]
     path = root / identifier / "state.json"
+
+    def existing():
+        state = read(path)
+        if state["bead_id"] != bead or state["config"] != str(config):
+            raise ValueError("existing run configuration differs")
+        return path, False
+
+    # Atomic snapshots let repeated start observe an active run without taking
+    # the worker's lifetime lock. Recheck after locking for competing creators.
+    if path.exists():
+        return existing()
     with lock(path):
         if path.exists():
-            state = read(path)
-            if state["bead_id"] != bead or state["config"] != str(config):
-                raise ValueError("existing run configuration differs")
-            return path, False
+            return existing()
         state = {
             "schema_version": 1,
             "id": identifier,
