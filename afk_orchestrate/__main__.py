@@ -47,7 +47,7 @@ def worker(path):
     # and operator transitions, including during waits and child commands.
     with driver.lock(path):
         state = driver.read(path)
-        commands = driver.Commands(state["config"])
+        commands = driver.Commands(state["config"], path.parent)
         while state["status"] == "running":
             previous = state["stage"]
             driver.step(state, commands)

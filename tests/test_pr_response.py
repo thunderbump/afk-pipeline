@@ -141,6 +141,35 @@ class ResponseTests(unittest.TestCase):
                 [],
             )
 
+    def test_repository_diagnostic_manifest_admits_nested_logs_only(self):
+        retained = self.root / "retained"
+        evidence = retained / "fixture-evidence"
+        log = evidence / "rehearsal/rehearsal.log"
+        log.parent.mkdir(parents=True)
+        log.write_text("[FAIL] follower restoration")
+        outside = self.root / "private.txt"
+        outside.write_text("not evidence")
+        (evidence / "escape.log").symlink_to(outside)
+        manifest = evidence / "diagnostic-files.json"
+        value = {
+            "schema_version": 1,
+            "head": self.head,
+            "files": [
+                "rehearsal/rehearsal.log",
+                "escape.log",
+                "../../private.txt",
+                str(outside),
+            ],
+        }
+        jobs.write(manifest, value)
+        self.assertEqual(
+            response.repository_diagnostic_files(retained, self.head), [log]
+        )
+        self.assertEqual(response.repository_diagnostic_files(retained, "0" * 40), [])
+        value["files"] = ["rehearsal/rehearsal.log"] * 13
+        jobs.write(manifest, value)
+        self.assertEqual(response.repository_diagnostic_files(retained, self.head), [])
+
     def edit(self):
         (self.repo / "file.txt").write_text("repaired\n")
 

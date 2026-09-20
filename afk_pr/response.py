@@ -1,5 +1,6 @@
 """One PR response: interpret feedback, retain a repair, and publish its history."""
 
+import json
 from pathlib import Path
 
 from afk_pr import jobs
@@ -34,6 +35,49 @@ def unchanged(github, job, branch):
     )
 
 
+def repository_diagnostic_files(retained, head):
+    """Read a repository's bounded private log manifest without admitting escapes."""
+    root = retained / "fixture-evidence"
+    manifest = root / "diagnostic-files.json"
+    try:
+        if manifest.is_symlink() or not manifest.resolve().is_relative_to(
+            retained.resolve()
+        ):
+            return []
+        with manifest.open("rb") as stream:
+            raw = stream.read(8193)
+        if len(raw) > 8192:
+            return []
+        value = json.loads(raw)
+        if (
+            value.get("schema_version") != 1
+            or value.get("head") != head
+            or not isinstance(value.get("files"), list)
+            or len(value["files"]) > 12
+        ):
+            return []
+        paths = []
+        for name in value["files"]:
+            if (
+                not isinstance(name, str)
+                or not name
+                or Path(name).is_absolute()
+                or ".." in Path(name).parts
+            ):
+                continue
+            path = root / name
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and path.resolve().is_relative_to(root.resolve())
+                and root.resolve().is_relative_to(retained.resolve())
+            ):
+                paths.append(path)
+        return paths
+    except (OSError, ValueError, TypeError, AttributeError):
+        return []
+
+
 def failed_fixture_logs(directory, job, summary):
     """Expose retained logs only for observed failed fixtures on this PR revision."""
     paths = []
@@ -56,10 +100,14 @@ def failed_fixture_logs(directory, job, summary):
                 or phase.get("candidate_unchanged") is not True
             ):
                 continue
-            candidates = sorted((retained / "worker/logs").glob("*.log")) + [
-                retained / "fixtures.stdout.log",
-                retained / "fixtures.stderr.log",
-            ]
+            candidates = (
+                repository_diagnostic_files(retained, job["head"])
+                + sorted((retained / "worker/logs").glob("*.log"))
+                + [
+                    retained / "fixtures.stdout.log",
+                    retained / "fixtures.stderr.log",
+                ]
+            )
             for path in candidates:
                 if (
                     path.is_file()

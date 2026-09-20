@@ -440,6 +440,59 @@ class DriverTests(unittest.TestCase):
         result = driver.advance(self.path, broken)
         self.assertEqual(result["reason"], "command_or_evidence_error")
 
+    def test_observation_failure_retries_then_recovers_without_repair(self):
+        self.reach_review()
+
+        def failing(*args):
+            raise driver.CommandFailure("status", "/private/failure.json")
+
+        for count in (1, 2):
+            result = driver.advance(self.path, failing)
+            self.assertEqual(result["status"], "running")
+            self.assertEqual(result["observation_failures"], count)
+            self.assertEqual(result["repairs"], 0)
+        self.assertEqual(self.tick()["status"], "ready_for_merge")
+        self.assertNotIn("observation_failures", driver.read(self.path))
+
+    def test_creation_status_retry_limit_survives_successful_job_reads(self):
+        self.tick()
+
+        def failing(*args):
+            if args[0] == "status":
+                raise driver.CommandFailure("status")
+            return self.world(*args)
+
+        for _ in range(3):
+            result = driver.advance(self.path, failing)
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["observation_failures"], 3)
+        self.assertEqual(result["stage"], "creation_wait")
+
+    def test_uncertain_submission_does_not_use_observation_retries(self):
+        def failing(*args):
+            raise driver.CommandFailure("pr", "/private/pr.json")
+
+        result = driver.advance(self.path, failing)
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["details"]["diagnostic"], "/private/pr.json")
+
+    def test_command_failure_retains_bounded_private_output(self):
+        adapter = driver.Commands(self.root / "config.toml", self.root)
+        process = subprocess.CompletedProcess(
+            [], 1, "PRIVATE_SENTINEL" * 5000, "compiler unavailable"
+        )
+        with (
+            mock.patch.object(driver.subprocess, "run", return_value=process),
+            self.assertRaises(driver.CommandFailure) as caught,
+        ):
+            adapter("status", URL)
+        path = Path(caught.exception.diagnostic)
+        record = driver.read(path)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(len(record["stdout_tail"]), 32768)
+        self.assertEqual(record["stderr_tail"], "compiler unavailable")
+        self.assertNotIn("PRIVATE_SENTINEL", str(caught.exception))
+
     def test_command_timeout_pauses_with_stage_retained(self):
         result = driver.advance(
             self.path, mock.Mock(side_effect=subprocess.TimeoutExpired("afk", 600))

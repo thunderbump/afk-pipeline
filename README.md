@@ -1911,3 +1911,22 @@ oversized, symlinked or wrong-head summaries fall back to existing excerpts with
 changing execution state. The repository owns safe diagnostic content; this contract
 is not an arbitrary-data secrecy guarantee. Do not write private values as codes.
 AFK's own outcome and exit code remain authoritative. No nested logs are uploaded.
+
+#### Failure evidence and observation retries
+
+Repositories may write `fixture-evidence/diagnostic-files.json` with
+`{"schema_version":1,"head":"<40-character candidate SHA>","files":["relative/path.log"]}`.
+The manifest is private, limited to 8 KiB and twelve file paths. Responses admit
+regular files under that evidence directory only when the retained fixture job
+matches the observed failed status, PR, head and base. Absolute paths, parent
+traversal, symlinks and escaped files are excluded. These paths precede the
+existing wrapper logs within the fourteen-file evidence allowance. AFK does not
+parse repository-specific diagnostics or publish their raw contents.
+
+A failed read-only job/status command gets three total attempts, thirty seconds
+apart in the worker. Failure counts survive worker restarts, reset when that
+command succeeds, and do not consume response attempts. Ordinary resume starts
+a new observation allowance. Failed submissions and invalid evidence still
+pause immediately. Bounded stdout/stderr tails and exit/error metadata are
+retained as mode-0600 JSON under the run's private `command-errors/` directory;
+events refer to their paths, not their contents.
