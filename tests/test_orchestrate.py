@@ -359,6 +359,26 @@ class DriverTests(unittest.TestCase):
 
 
 class CLITests(unittest.TestCase):
+    def test_launcher_passes_executable_path_without_exporting_shell_credentials(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path, _ = driver.create(
+                Path(temporary), "central-example", Path("/tmp/config")
+            )
+            with (
+                mock.patch.dict(
+                    cli.os.environ,
+                    {"PATH": "/custom/bin:/usr/bin", "SECRET": "private"},
+                    clear=True,
+                ),
+                mock.patch.object(cli.subprocess, "run") as run,
+            ):
+                cli.launch(path)
+            argv = run.call_args.args[0]
+            self.assertIn("--setenv=PATH=/custom/bin:/usr/bin", argv)
+            self.assertFalse(
+                any("SECRET" in part or "private" in part for part in argv)
+            )
+
     def test_job_is_read_only_and_available_without_a_pr(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

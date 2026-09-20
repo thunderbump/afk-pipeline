@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import time
@@ -25,6 +26,8 @@ def launch(path):
             f"--unit={unit(state['id'])}",
             "--property=Type=exec",
             "--property=KillMode=control-group",
+            "--setenv=PATH=" + os.environ.get("PATH", "/usr/bin:/bin"),
+            "--property=TimeoutStopSec=20",
             f"--working-directory={driver.ROOT}",
             sys.executable,
             "-m",
