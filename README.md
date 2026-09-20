@@ -1698,8 +1698,9 @@ each have the fixture timeout, rather than one shared end-to-end deadline.
 The EQEmu wrapper retains its own 2600-second execution default under an outer
 2700-second fixture allowance.
 
-External resource workspace cleanup is disabled until resource teardown can be
-proved. In particular, an inactive local Compose client is not proof that a
+The per-job `cleanup` command keeps external resource cleanup disabled.
+The project-wide `gc` command requires a host-selected resource adapter that
+holds resource leases while checking release and deleting artifacts. In particular, an inactive local Compose client is not proof that a
 Docker daemon-owned container has stopped. This configuration change does not
 fix that existing EQEmu timeout concern or authorize unsafe stack reuse.
 
@@ -1756,6 +1757,34 @@ call. Job evidence remains, and old workers cannot restart after deletion begins
 No automatic age-based cleanup, forced deletion or durable-evidence expiry exists.
 Historical linked worktrees are excluded. Do not store required artifacts only
 inside clones or as symlinks into them.
+
+`afk gc --project PROJECT` previews bounded retention across that project's PR
+jobs. Add `--apply` to remove eligible artifacts. `--keep N` defaults to two and
+must be at least one. It also retains each PR's latest candidate workspace and
+latest passed and failed fixture jobs. It checks worker inactivity, clean clones,
+published terminal records and candidate push receipts before deleting anything.
+Old failed fixtures can be collected; failed inference stays available for inspection.
+The JSON report includes per-job reasons, targets and allocated bytes. Retained
+bytes cover known job/workspace/validation roots, not a full host storage scan.
+Preview reports current retained bytes; apply reports bytes remaining afterward.
+
+External fixture resources may set `cleanup_adapter` to an absolute path to an
+operator-trusted Python module in host TOML. The module exports a context manager
+`cleanup_targets(directory, job, *, apply=False, resume=False)` that yields owned generated
+directories, holding resource leases until the context exits. It must refuse
+uncertain release and protect baseline data and external references. AFK never
+selects this executable from candidate policy or job metadata. Resource identity
+must still match the host registration. Missing adapters retain external jobs.
+The EQEmu adapter lives in its repository at `scripts/afk_cleanup.py`.
+
+GC retains job records, logs and action receipts, and writes `cleanup.json` before
+removal so old workers cannot restart. It does not prune Docker or remove legacy
+linked worktrees. An interrupted deletion resumes only its recorded target list, after rechecking
+worker inactivity and resource ownership. New eligibility checks include local
+refs and reflogs, including submodules, to retain unpublished commits. The EQEmu
+adapter recovers its own interrupted GC leases while holding both worker guards;
+ordinary validation leases still require the repository recovery command.
+No automatic scheduling is installed by this command.
 
 Legacy JSON is rejected for new PR submissions. It remains accepted only to locate
 historical jobs for status/publication retry. Preserve original assessment configs
