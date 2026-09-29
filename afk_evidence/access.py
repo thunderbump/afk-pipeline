@@ -140,7 +140,9 @@ class EvidenceReader:
                 opened.append(descriptor)
             try:
                 file_descriptor = os.open(
-                    relative.parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=descriptor
+                    relative.parts[-1],
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=descriptor,
                 )
             except FileNotFoundError as error:
                 if missing_unavailable:
