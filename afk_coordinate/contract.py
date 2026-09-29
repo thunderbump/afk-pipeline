@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from afk_related_work import validate_reference
+from afk_validate.policy import POLICY_FIELDS, validate_policy
 
 # These are the topology facts needed to prove that terminal history could have
 # been produced by the Coordinator. Runtime module selection and input building
@@ -67,10 +68,11 @@ def validate_request(value):
     if not isinstance(assignment_path, str) or not Path(assignment_path).is_absolute():
         raise ValueError("assignment_path must be an absolute path")
     validation = value["validation"]
-    if not isinstance(validation, dict) or set(validation) != {
-        "command",
-        "timeout_seconds",
-    }:
+    if (
+        not isinstance(validation, dict)
+        or not {"command", "timeout_seconds"} <= set(validation)
+        or set(validation) - {"command", "timeout_seconds"} - POLICY_FIELDS
+    ):
         raise ValueError("validation must contain command and timeout_seconds")
     command = validation["command"]
     if (
@@ -80,6 +82,7 @@ def validate_request(value):
     ):
         raise ValueError("validation command must be a nonempty argv array")
     positive_integer(value["validation"]["timeout_seconds"], "validation timeout")
+    validate_policy(validation)
     positive_integer(value["agent_timeout_seconds"], "agent timeout")
     if value.get("review_mode", "combined") not in {"combined", "split"}:
         raise ValueError("review_mode must be combined or split")

@@ -7,6 +7,7 @@ import stat
 from pathlib import Path
 
 from afk_change.contract import validate_repository_state
+from afk_validate.policy import require_policy_match, validate_policy
 
 
 def evidence_identity(
@@ -58,6 +59,7 @@ def load_passed_evidence(
         ):
             raise TypeError("passed Validation input and output must be objects")
 
+    validate_policy(validation_input)
     if validation_input.get("schema_version") != 1:
         raise ValueError("Validation input must use schema_version 1")
     workspace = validation_input.get("workspace")
@@ -146,6 +148,7 @@ def validate_repairable_failure(
     repository: dict[str, object] | None = None,
     *,
     reader=None,
+    expected_policy=None,
     log_limit: int = 25 * 1024 * 1024,
 ) -> tuple[dict[str, object], dict[str, object]]:
     """Return sealed input/output for one ordinary, stable nonzero failure.
@@ -167,8 +170,11 @@ def validate_repairable_failure(
             validation_output, dict
         ):
             raise TypeError("failed Validation input and output must be objects")
+    validate_policy(validation_input)
     if validation_input.get("schema_version") != 1:
         raise ValueError("Validation input must use schema_version 1")
+    if expected_policy is not None:
+        require_policy_match(validation_input, expected_policy)
     input_workspace = validation_input.get("workspace")
     command = validation_input.get("command")
     timeout = validation_input.get("timeout_seconds")
@@ -220,6 +226,12 @@ def validate_repairable_failure(
         or process.get("signal") is not None
     ):
         raise ValueError("failed Validation was not an ordinary nonzero result")
+
+    if (
+        "repairable_exit_codes" in validation_input
+        and process["exit_code"] not in validation_input["repairable_exit_codes"]
+    ):
+        raise ValueError("Validation exit code is not eligible for repair")
 
     recorded_repository = validation_output.get("repository")
     if (

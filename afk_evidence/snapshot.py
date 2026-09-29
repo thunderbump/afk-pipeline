@@ -27,6 +27,7 @@ from afk_validate.evidence import (
     load_passed_evidence,
     validate_repairable_failure,
 )
+from afk_validate.policy import POLICY_FIELDS, require_policy_match
 
 from .access import (
     MAX_RELATED_WORK_BYTES,
@@ -186,6 +187,7 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
                 validate_repairable_failure(
                     invocation_directory(record),
                     reader=reader,
+                    expected_policy=request["validation"],
                     log_limit=MAX_VALIDATION_LOG_BYTES,
                 )
 
@@ -246,6 +248,16 @@ def read_run(run_root, selection="latest", trusted_context=None) -> RunSnapshot:
             if record["outcome"] == "abandoned":
                 continue
             try:
+                if (
+                    record["component"] == "validation"
+                    and POLICY_FIELDS & request["validation"].keys()
+                ):
+                    require_policy_match(
+                        reader.json(
+                            _invocation_path(proof_roots, record, "input.json")
+                        ),
+                        request["validation"],
+                    )
                 component_output = reader.json(
                     _invocation_path(proof_roots, record, "output.json")
                 )

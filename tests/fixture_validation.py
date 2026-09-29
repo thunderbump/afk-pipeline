@@ -15,5 +15,18 @@ if scenario == "hang":
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(143))
     while True:
         time.sleep(1)
+elif scenario == "slow-cleanup":
+    marker = Path(sys.argv[2])
+
+    def cleanup(*_):
+        time.sleep(3)
+        marker.with_suffix(".cleaned").write_text("cleanup complete")
+        print("final cleanup complete", flush=True)
+        raise SystemExit(143)
+
+    signal.signal(signal.SIGTERM, cleanup)
+    marker.write_text("ready")
+    while True:
+        time.sleep(1)
 else:
     raise SystemExit(f"unknown validation fixture scenario: {scenario}")

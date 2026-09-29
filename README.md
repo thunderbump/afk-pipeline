@@ -603,6 +603,27 @@ what its exact repository-owned command proves. Acceptance Routing uses only the
 configured v2 catalog; the Bead cannot add an executor, owner, evidence route,
 or outside-help reason.
 
+Validation mappings optionally accept `termination_grace_seconds` and
+`repairable_exit_codes`. These also work in standalone Coordinator validation
+configuration and `afk_validate` input. Grace must be an integer from 1 through
+3600 seconds and defaults to the existing two seconds. It is the additional
+SIGTERM-to-SIGKILL allowance after timeout or interruption, not extra work time.
+The existing final process-reap bound is unchanged.
+
+`repairable_exit_codes` is a list of unique integers from 1 through 255. With
+`[1]`, only ordinary exit 1 can enter automatic code repair; exit 2 still fails
+validation but stops the Run. An empty list disables automatic validation repair.
+Omitting the field preserves the existing ordinary-positive-exit behavior.
+Timeouts, signals, unstable/dirty workspaces and missing evidence remain
+ineligible. Both options are frozen in validation input; repair routing checks
+that policy against the Coordinator configuration, including on resume.
+
+For example, add `"termination_grace_seconds": 30` and
+`"repairable_exit_codes": [1]` to an existing validation mapping. Select the
+actual grace from the repository command's bounded cleanup needs. This does not
+isolate candidate tools, stop an external worker after abrupt caller loss, or
+change PR fixture execution. Independent worker deadlines remain necessary.
+
 Every accepted preparation has a unique `<run_root>/<bead-id>/<run-id>/`
 artifact root. It contains value-safe `bead.json`, `assignment.json`,
 `coordinator-request.json`, versioned `preparation.json`, a deterministic
