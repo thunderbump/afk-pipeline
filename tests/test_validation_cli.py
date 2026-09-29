@@ -104,6 +104,124 @@ class ValidationCliTest(unittest.TestCase):
         self.assertFalse((result / "output.json.tmp").exists())
         self.assertGreaterEqual(output["duration_seconds"], 0)
 
+    def test_configured_grace_preserves_slow_cleanup_on_timeout_and_interrupt(self):
+        from afk_validate.evidence import validate_repairable_failure
+
+        for interrupt in (False, True):
+            with self.subTest(interrupt=interrupt):
+                marker = self.root / f"cleanup-{interrupt}"
+                result = self.root / f"grace-result-{interrupt}"
+                validation = self.validation(
+                    [sys.executable, str(FIXTURE), "slow-cleanup", str(marker)],
+                    timeout_seconds=20 if interrupt else 1,
+                )
+                validation.update(
+                    termination_grace_seconds=5, repairable_exit_codes=[143]
+                )
+                input_path = self.root / "grace-input.json"
+                input_path.write_text(json.dumps(validation))
+                process = subprocess.Popen(
+                    [
+                        sys.executable,
+                        "-m",
+                        "afk_validate",
+                        str(input_path),
+                        str(result),
+                    ],
+                    cwd=ROOT,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                )
+                if interrupt:
+                    for _ in range(200):
+                        if marker.exists():
+                            break
+                        time.sleep(0.01)
+                    self.assertTrue(marker.exists())
+                    process.send_signal(signal.SIGINT)
+                _out, err = process.communicate(timeout=15)
+                self.assertEqual(process.returncode, 1, err)
+                output = json.loads((result / "output.json").read_text())
+                self.assertEqual(
+                    output["outcome"], "interrupted" if interrupt else "timed_out"
+                )
+                self.assertEqual(output["process"], {"exit_code": 143, "signal": None})
+                self.assertTrue(marker.with_suffix(".cleaned").exists())
+                self.assertIn(
+                    "final cleanup complete", (result / "stdout.log").read_text()
+                )
+                self.assertEqual(
+                    json.loads((result / "input.json").read_text()), validation
+                )
+                with self.assertRaises(ValueError):
+                    validate_repairable_failure(result)
+
+    def test_command_cannot_rewrite_recorded_repair_policy(self):
+        from afk_validate.evidence import validate_repairable_failure
+
+        input_copy = self.root / "result/input.json"
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import json; from pathlib import Path; "
+                f"p=Path({str(input_copy)!r}); x=json.loads(p.read_text()); "
+                "x.pop('repairable_exit_codes'); p.write_text(json.dumps(x)); raise SystemExit(2)"
+            ),
+        ]
+        validation = self.validation(command)
+        validation["repairable_exit_codes"] = [1]
+        result, completed = self.run_validation(validation)
+        self.assertEqual(completed.returncode, 1)
+        output = json.loads((result / "output.json").read_text())
+        self.assertIn("input changed", output["process"]["error"])
+        with self.assertRaises(ValueError):
+            validate_repairable_failure(result)
+
+    def test_replaced_input_fifo_cannot_block_completion(self):
+        path = self.root / "fifo-result/input.json"
+        command = [
+            sys.executable,
+            "-c",
+            (
+                "import os; from pathlib import Path; "
+                f"p=Path({str(path)!r}); p.unlink(); os.mkfifo(p); raise SystemExit(2)"
+            ),
+        ]
+        validation = self.validation(command)
+        validation["repairable_exit_codes"] = [1]
+        input_path = self.root / "fifo-input.json"
+        input_path.write_text(json.dumps(validation))
+        completed = subprocess.run(
+            [sys.executable, "-m", "afk_validate", str(input_path), str(path.parent)],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 1, completed.stderr)
+        output = json.loads((path.parent / "output.json").read_text())
+        self.assertIn("input changed", output["process"]["error"])
+
+    def test_malformed_optional_policy_refuses_to_start_command(self):
+        marker = self.root / "must-not-run"
+        for name, values in {
+            "termination_grace_seconds": [0, -1, True, 1.5, 3601, None],
+            "repairable_exit_codes": [None, [0], [256], [True], [1, 1], "1"],
+        }.items():
+            for value in values:
+                with self.subTest(name=name, value=value):
+                    validation = self.validation(
+                        [sys.executable, "-c", f"open({str(marker)!r}, 'w').close()"]
+                    )
+                    validation[name] = value
+                    result, completed = self.run_validation(validation)
+                    self.assertEqual(completed.returncode, 2)
+                    self.assertFalse(result.exists())
+                    self.assertFalse(marker.exists())
+
     def test_closed_progress_stdout_after_child_start_does_not_prevent_sealing(self):
         validation = self.validation(
             [

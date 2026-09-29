@@ -2,9 +2,12 @@ import json
 import subprocess
 import sys
 import time
+from contextlib import closing
 from pathlib import Path
 
+from afk_evidence.access import EvidenceReader, EvidenceUnavailable
 from afk_runtime import (
+    TERMINATION_GRACE_SECONDS,
     process_result,
     progress,
     repository_state,
@@ -13,6 +16,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
+from afk_validate.policy import validate_policy
 
 USAGE = "usage: python3 -m afk_validate VALIDATION_JSON RESULT_DIRECTORY"
 
@@ -62,10 +66,21 @@ def main() -> int:
         validation["timeout_seconds"],
         stdout_path,
         stderr_path,
+        termination_grace_seconds=validation.get(
+            "termination_grace_seconds", TERMINATION_GRACE_SECONDS
+        ),
     )
     progress("validation child completed")
     exit_code = execution["exit_code"]
     runner_error = execution["error"]
+    # The command cannot change the recorded caller policy while it runs.
+    try:
+        with closing(EvidenceReader((result_directory,))) as reader:
+            input_unchanged = reader.json(result_directory / "input.json") == validation
+    except (OSError, ValueError, EvidenceUnavailable):
+        input_unchanged = False
+    if not input_unchanged:
+        runner_error = runner_error or "Validation input changed during execution"
 
     progress("observing repository after validation")
     observation_error = None
@@ -126,6 +141,7 @@ def validate(validation: object) -> None:
     timeout = validation.get("timeout_seconds")
     if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout <= 0:
         raise ValueError("validation timeout_seconds must be a positive integer")
+    validate_policy(validation)
 
 
 if __name__ == "__main__":

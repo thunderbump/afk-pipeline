@@ -139,6 +139,7 @@ def main():
                     if not repairable_validation(
                         run_directory / validation["directory"],
                         Path(assignment["workspace"]),
+                        request["validation"],
                     ):
                         progress(
                             "failed Validation is not repairable; sealing terminal failure"
@@ -229,7 +230,9 @@ def main():
                 component == "validation"
                 and outcome == "failed"
                 and repairable_validation(
-                    result_directory, Path(assignment["workspace"])
+                    result_directory,
+                    Path(assignment["workspace"]),
+                    request["validation"],
                 )
             ):
                 if not response_allowance_available(request, state):
@@ -282,7 +285,9 @@ def start_continuation(
         return roots[0] / record["directory"] / name
 
     def verifiers(roots):
-        failed, iteration, _facts = exhaustion_verifiers(reader, roots, locate)
+        failed, iteration, _facts = exhaustion_verifiers(
+            reader, roots, locate, request["validation"]
+        )
         return failed, iteration
 
     observed = observe_lineage(
@@ -320,6 +325,7 @@ def start_continuation(
         invocation_roots,
         locate,
         check_workspace=True,
+        policy=request["validation"],
     )
     completed_responses = sum(
         record["component"] == "response" and record["outcome"] == "completed"
@@ -394,13 +400,15 @@ def validate_terminal_pair(state, output_path):
         raise ValueError("terminal output does not match coordinator checkpoint")
 
 
-def exhaustion_verifiers(reader, roots, locate):
+def exhaustion_verifiers(reader, roots, locate, policy=None):
     """Build Coordinator-specific deep proofs around shared structural rules."""
     facts = {}
 
     def verify_failed_validation(record):
         directory = locate(roots, record, "output.json").parent
-        facts["validation"] = validate_repairable_failure(directory, reader=reader)
+        facts["validation"] = validate_repairable_failure(
+            directory, reader=reader, expected_policy=policy
+        )
 
     def verify_iteration(record):
         directory = locate(roots, record, "output.json").parent
@@ -420,9 +428,10 @@ def require_exhausted(
     roots,
     locate,
     check_workspace=True,
+    policy=None,
 ):
     """Delegate retained exhaustion proof to the shared evidence authority."""
-    failed, iteration, facts = exhaustion_verifiers(reader, roots, locate)
+    failed, iteration, facts = exhaustion_verifiers(reader, roots, locate, policy)
     require_exhausted_structure(
         state,
         expected_max_responses,
@@ -484,10 +493,12 @@ def response_allowance_available(request, state):
     return completed < request["max_responses"]
 
 
-def repairable_validation(result_directory, workspace):
+def repairable_validation(result_directory, workspace, policy):
     try:
         observed = repository_state(workspace)
-        validate_repairable_failure(result_directory, workspace, observed)
+        validate_repairable_failure(
+            result_directory, workspace, observed, expected_policy=policy
+        )
     except (OSError, TypeError, ValueError, KeyError, subprocess.SubprocessError):
         return False
     return True

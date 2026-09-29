@@ -32,6 +32,7 @@ from afk_runtime import (
     timestamp,
     write_json,
 )
+from afk_validate.policy import POLICY_FIELDS, validate_policy
 
 DEFAULT_CONFIG = Path.home() / ".config" / "afk" / "config.json"
 SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*\Z")
@@ -357,6 +358,11 @@ def run(bead_id, config_path):
             "validation": {
                 "command": project["validation"]["command"],
                 "timeout_seconds": project["validation"]["timeout_seconds"],
+                **{
+                    key: project["validation"][key]
+                    for key in POLICY_FIELDS
+                    if key in project["validation"]
+                },
             },
             **config["coordinator"],
         }
@@ -1092,12 +1098,16 @@ def validate_project(slug, value):
     if not isinstance(value["base_ref"], str) or not value["base_ref"]:
         raise PreparationError(f"project:{slug} base_ref must be a nonempty string")
     validation = value["validation"]
-    if not isinstance(validation, dict) or set(validation) != {
-        "command",
-        "evidence",
-        "timeout_seconds",
-    }:
+    if (
+        not isinstance(validation, dict)
+        or not {"command", "evidence", "timeout_seconds"} <= set(validation)
+        or set(validation) - {"command", "evidence", "timeout_seconds"} - POLICY_FIELDS
+    ):
         raise PreparationError(f"project:{slug} validation is malformed")
+    try:
+        validate_policy(validation)
+    except ValueError as error:
+        raise PreparationError(f"project:{slug} validation {error}") from error
     argv(validation["command"], f"project:{slug} validation command")
     if (
         not isinstance(validation["evidence"], str)

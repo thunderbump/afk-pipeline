@@ -606,6 +606,18 @@ class RunPreparerCliTest(unittest.TestCase):
         self.assertFalse((self.root / "runs").exists())
         self.assertFalse((self.root / "worktrees").exists())
 
+    def test_optional_validation_policies_reach_frozen_coordinator_request(self):
+        config = json.loads(self.config.read_text())
+        config["projects"]["fixture"]["validation"].update(
+            termination_grace_seconds=5, repairable_exit_codes=[1]
+        )
+        self.config.write_text(json.dumps(config))
+        completed = self.invoke("run", self.bead["id"], "--config", str(self.config))
+        artifact = self.artifact_from(completed.stdout)
+        request = json.loads((artifact / "coordinator-request.json").read_text())
+        self.assertEqual(request["validation"]["termination_grace_seconds"], 5)
+        self.assertEqual(request["validation"]["repairable_exit_codes"], [1])
+
     def test_validation_evidence_is_required_before_run_creation(self):
         config = json.loads(self.config.read_text())
         config["projects"]["fixture"]["validation"].pop("evidence")
