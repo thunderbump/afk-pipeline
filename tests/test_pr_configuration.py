@@ -13,6 +13,7 @@ from unittest import mock
 
 from afk_pr import config, creation, jobs, lifecycle, workspace
 from afk_pr.__main__ import main
+from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
 
 URL = "https://github.com/example/repository/pull/1"
 REMOTE = "https://github.com/example/repository.git"
@@ -185,6 +186,78 @@ class ConfigurationTests(unittest.TestCase):
         self.git(a, "config", "test.private", "yes")
         self.assertEqual(self.git(b, "status", "--porcelain"), "")
         self.assertFalse((a / ".git/objects/info/alternates").exists())
+
+    def test_fixture_policy_defaults_and_committed_eqemu_policy_are_snapshotted(self):
+        d = self.submit(fixtures_only=True)
+        default = jobs.read(d / "job.json")["validation"]
+        self.assertEqual(default["termination_grace_seconds"], 60)
+        self.assertEqual(default["repairable_exit_codes"], [1])
+        (self.source / "afk.toml").write_text(
+            'schema_version = 1\n[fixtures]\ncommand = ["true"]\n'
+            "timeout_seconds = 20400\ntermination_grace_seconds = 780\n"
+            "repairable_exit_codes = [1]\n"
+        )
+        self.git(self.source, "add", ".")
+        self.git(self.source, "commit", "-m", "EQEmu policy")
+        self.base = self.git(self.source, "rev-parse", "HEAD")
+        self.pr["base"]["sha"] = self.base
+        d = self.submit(fixtures_only=True)
+        policy = jobs.read(d / "job.json")["validation"]
+        self.assertEqual(policy["timeout_seconds"], 20400)
+        self.assertEqual(policy["termination_grace_seconds"], 780)
+        self.assertEqual(policy["repairable_exit_codes"], [1])
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[projects.example.fixtures]\ncommand = ["true"]\n'
+            "termination_grace_seconds = 12\nrepairable_exit_codes = []\n"
+        )
+        d = self.submit(fixtures_only=True)
+        job = jobs.read(d / "job.json")
+        self.assertEqual(job["policy"]["source"], "host_override")
+        self.assertEqual(job["validation"]["termination_grace_seconds"], 12)
+        self.assertEqual(job["validation"]["repairable_exit_codes"], [])
+
+    def test_review_worker_preserves_slow_cleanup_diagnostics_without_passing(self):
+        fields = slow_cleanup_policy()
+        self.host.write_text(
+            self.host.read_text()
+            + "\n[projects.example.fixtures]\n"
+            + "\n".join(f"{key} = {json.dumps(value)}" for key, value in fields.items())
+        )
+        directory = self.submit(fixtures_only=True)
+        with mock.patch("afk_pr.workspace.subprocess.run", side_effect=self.transport):
+            assert_slow_cleanup(self, directory, self.gh)
+
+    def test_invalid_fixture_policy_refuses_before_launch(self):
+        bad = {
+            "termination_grace_seconds": (0, -1, True, 1.5, 3601, None),
+            "repairable_exit_codes": (None, [0], [256], [True], [1, 1], "1"),
+        }
+        for field, values in bad.items():
+            for value in values:
+                with (
+                    self.subTest(field=field, value=value),
+                    self.assertRaisesRegex(ValueError, field),
+                ):
+                    config.policy(
+                        self.gh,
+                        "example/repository",
+                        self.base,
+                        {"fixtures": {"command": ["true"], field: value}},
+                    )
+        for settings in (
+            "termination_grace_seconds = 0",
+            "repairable_exit_codes = [true]",
+        ):
+            self.host.write_text(
+                f'schema_version = 1\nstate_root = "{self.root}/state"\n'
+                f'[projects.example]\nrepository = "{REMOTE}"\n'
+                '[projects.example.fixtures]\ncommand = ["true"]\n' + settings
+            )
+            launcher = mock.Mock()
+            with self.assertRaises(ValueError):
+                jobs.submit(URL, self.host, github=self.gh, launcher=launcher)
+            launcher.assert_not_called()
 
     def test_exact_old_head_survives_moved_ref_and_unavailable_sha_fails(self):
         d = self.submit(fixtures_only=True)

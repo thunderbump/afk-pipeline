@@ -8,6 +8,7 @@ from unittest import mock
 
 from afk_pr import jobs, response
 from afk_pr.github import GitHub
+from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
 
 URL = "https://github.com/example/repository/pull/12"
 
@@ -172,6 +173,18 @@ class ResponseTests(unittest.TestCase):
 
     def edit(self):
         (self.repo / "file.txt").write_text("repaired\n")
+
+    def test_response_child_inherits_policy_and_finishes_slow_cleanup(self):
+        self.job["validation"].update(slow_cleanup_policy())
+        jobs.write(self.directory / "job.json", self.job)
+        self.assertEqual(self.run_response(self.edit)["state"], "completed")
+        progress = jobs.read(self.directory / "response-progress.json")
+        child = self.directory.parent / progress["fixture_job"]
+        self.assertEqual(
+            jobs.read(child / "job.json")["validation"], self.job["validation"]
+        )
+        with mock.patch.object(jobs, "checkout", return_value=self.repo):
+            assert_slow_cleanup(self, child, self.gh)
 
     def test_repair_pushes_normal_commit_and_queues_exact_candidate(self):
         result = self.run_response(self.edit)

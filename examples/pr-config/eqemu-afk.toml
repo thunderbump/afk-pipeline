@@ -1,6 +1,8 @@
 schema_version = 1
 
 [fixtures]
-command = ["./scripts/validate-afk"]
-timeout_seconds = 2700
-description = "Tier 1, canonical Zone Harness and actor runtime validation"
+command = ["/usr/local/bin/eqemu-validate"]
+timeout_seconds = 20400
+termination_grace_seconds = 780
+repairable_exit_codes = [1]
+description = "Foreground build and utility tests with build-unit-v1 and owned worker cleanup"

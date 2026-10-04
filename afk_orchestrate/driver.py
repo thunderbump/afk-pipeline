@@ -168,7 +168,7 @@ def action_id(state, command):
 
 
 def repairable_validation(result):
-    """Accept completed, published nonzero fixture exits, never uncertain execution.
+    """Accept configured candidate failures, never infrastructure or uncertain execution.
 
     Status remains a read-only eligibility report. Only this supervisor chooses
     to spend a repair on failed validation; respond reads the published evidence.
@@ -201,7 +201,14 @@ def repairable_validation(result):
                 or process["error"] is not None
             ):
                 return False
-            if record.get("state") == "failed" and code != 0:
+            codes = item["job"].get("validation", {}).get("repairable_exit_codes")
+            if record.get("state") == "failed" and code == 1:
+                if (
+                    not isinstance(codes, list)
+                    or any(type(value) is not int for value in codes)
+                    or code not in codes
+                ):
+                    return False
                 failed.add(item["job"]["id"])
             elif record.get("state") != "passed" or code != 0:
                 return False
