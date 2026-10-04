@@ -647,8 +647,8 @@ def retry_publication(directory):
 
 def fixture_excerpt(directory, job):
     """Prefer the repository public summary, falling back to redacted log tails."""
-    from afk_export import ExportError, sanitize_public_artifact_text
     from afk_pr.diagnostics import public_summary
+    from afk_publication_text import ExportError, sanitize_public_artifact_text
 
     summary = public_summary(directory, job)
     if summary:

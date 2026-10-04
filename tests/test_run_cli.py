@@ -16,6 +16,11 @@ from afk_review.contract import REVIEW_AUDIT
 from tests.inference_cli_fixture import install_pi
 
 ROOT = Path(__file__).parents[1]
+# Retained implementation controls do not exercise the supported public CLI.
+PRIVATE_DISPATCH = (
+    f"import sys; sys.path.insert(0, {str(ROOT)!r}); "
+    "from afk_run import main; raise SystemExit(main())"
+)
 PLAN_FIXTURE = ROOT / "tests" / "fixture_plan_agent.py"
 
 
@@ -1519,7 +1524,12 @@ class RunPreparerCliTest(unittest.TestCase):
 
     def invoke(self, *arguments):
         return subprocess.run(
-            [str(ROOT / "afk"), *arguments],
+            [
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
+                *arguments,
+            ],
             check=False,
             **self.invocation_options(),
         )

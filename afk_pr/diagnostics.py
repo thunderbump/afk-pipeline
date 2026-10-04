@@ -49,7 +49,7 @@ def validate(value, head):
 
 def public_summary(directory, job):
     """Invalid/absent summaries fall back to the existing bounded log publication."""
-    from afk_export import ExportError, sanitize_public_artifact_text
+    from afk_publication_text import ExportError, sanitize_public_artifact_text
 
     path = directory / "fixture-evidence/public-summary.json"
     try:

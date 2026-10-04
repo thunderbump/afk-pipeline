@@ -82,8 +82,8 @@ def status(path):
 
 
 def main(argv=None):
+    from afk_pr.beads import PreparationError
     from afk_pr.config import DEFAULT_CONFIG, load_config
-    from afk_run import PreparationError
 
     parser = argparse.ArgumentParser(prog="afk orchestrate")
     commands = parser.add_subparsers(dest="command", required=True)

@@ -142,7 +142,7 @@ def finish(
     read_bead=read_configured_bead,
     close_task=close_configured_bead,
 ):
-    from afk_run import PreparationError
+    from afk_pr.beads import PreparationError
 
     repo, _ = identity(url)
     config = load_config(config_path)

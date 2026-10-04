@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +20,11 @@ from afk_plan_accept.contract import (
 from afk_review.contract import REVIEW_AUDIT
 
 ROOT = Path(__file__).parents[1]
+# Retained implementation controls do not exercise the supported public CLI.
+PRIVATE_DISPATCH = (
+    f"import sys; sys.path.insert(0, {str(ROOT)!r}); "
+    "from afk_run import main; raise SystemExit(main())"
+)
 
 
 class ExportCliTests(unittest.TestCase):
@@ -3086,7 +3092,13 @@ class ExportCliTests(unittest.TestCase):
 
     def test_help_documents_the_export_interface(self):
         result = subprocess.run(
-            [str(ROOT / "afk"), "export", "--help"],
+            [
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
+                "export",
+                "--help",
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -3098,7 +3110,15 @@ class ExportCliTests(unittest.TestCase):
 
     def export(self, source, destination, *arguments):
         return subprocess.run(
-            [str(ROOT / "afk"), "export", str(source), str(destination), *arguments],
+            [
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
+                "export",
+                str(source),
+                str(destination),
+                *arguments,
+            ],
             cwd=ROOT,
             text=True,
             capture_output=True,
@@ -3108,7 +3128,9 @@ class ExportCliTests(unittest.TestCase):
     def export_v1(self, source, destination, *arguments):
         return subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(source),
                 str(destination),
@@ -3125,7 +3147,9 @@ class ExportCliTests(unittest.TestCase):
     def export_v2(self, source, destination, *arguments):
         return subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(source),
                 str(destination),
@@ -3142,7 +3166,9 @@ class ExportCliTests(unittest.TestCase):
     def export_v3(self, source, destination, *arguments):
         return subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(source),
                 str(destination),
