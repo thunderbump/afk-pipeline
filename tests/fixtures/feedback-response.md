@@ -28,18 +28,20 @@ new regressions and unnecessary scope expansion as well as repeated findings.
 No such live comparison was run for this implementation, and the expected
 improvement in convergence/cost remains unmeasured.
 
-## Deterministic transport control
+## Historical transport control
 
-The public Response CLI fixture starts with Review claiming unknown ownership.
-Assessment confirms the defect and independently assigns current scope with its
-own rationale. Response must receive the original Review claim, the defect
-rationale and the final scope/rationale together. A dismissed finding and a
-confirmed finding with unknown ownership must stay excluded. Original Review
-and Assessment output bytes must remain unchanged after the worker finishes.
-Existing scope contract tests also exclude confirmed related work.
+The retired standalone Response CLI fixture started with Review claiming unknown
+ownership. Assessment confirmed the defect and independently assigned current
+scope with its own rationale. Its expected Response input contained the original
+Review claim, the defect rationale and the final scope/rationale together.
+Dismissed findings and confirmed findings with unknown or related ownership were
+excluded; original Review and Assessment bytes stayed unchanged. Those
+standalone fixture and scope tests have retired.
 
-The same CLI tests exercise the separate validation-repair path: version 1,
-failed Validation evidence, no actionable findings, and no invented Review
-finding. The assessed-feedback path uses version 2. Output validation still
-requires exactly one nonempty response per selected index. These checks prove
-handoff and routing behavior, not the quality of the model's repair reasoning.
+Those retired CLI tests also exercised the separate validation-repair path,
+version 1, with failed Validation evidence, no actionable findings and no
+invented Review finding. The assessed-feedback path used version 2. Its output
+contract required exactly one nonempty response per selected index. These
+historical checks described handoff and routing behavior, not the quality of
+the model's repair reasoning. Current PR `respond` reads the captured PR story
+and does not depend on standalone Review/Assessment stages.
