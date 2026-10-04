@@ -241,11 +241,21 @@ use independent commands to resolve the problem and then resume:
 ./afk orchestrate resume RUN_ID
 # Explicitly choose the PR's current head after manual intervention:
 ./afk orchestrate resume RUN_ID --review-current-head
+# Extend an exhausted run's repair limit without changing its repair count:
+./afk orchestrate resume RUN_ID --add-repairs 5
 ```
 
-Ordinary resume retains the selected job and submission identity. Current-head
-resume starts a fresh review and keeps the repair count. A running worker locks
-its run; stop `afk-orchestrate-RUN_ID.service` with `systemctl --user stop` before
+Ordinary resume retains the selected job, submission identity, repair count and
+repair limit. Current-head resume starts a fresh review and keeps the repair
+count. `--add-repairs N` accepts 1 through 5 and atomically adds that allowance
+to the saved limit before the worker is launched; it does not reset the current
+repair count, stage, generation or action identities. Each explicit use is a new
+addition, so repeating `--add-repairs 5` on a later resume grants five more
+attempts. The old limit, new limit and addition are retained in the run events,
+including when worker launch fails.
+
+A running worker locks its run, so concurrent resume and budget changes are
+refused. Stop `afk-orchestrate-RUN_ID.service` with `systemctl --user stop` before
 changing it. Stopping the driver does not stop detached PR jobs. Inspect them
 before resuming. A ready result records the observed revision; it is not a
 permanent statement about a changing PR.
