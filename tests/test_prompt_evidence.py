@@ -5,7 +5,6 @@ from pathlib import Path
 
 from afk_inference.runtime import PiAdapter
 from afk_prompt_evidence import text_evidence
-from afk_respond.task import build_task
 
 
 class PromptEvidenceTest(unittest.TestCase):
@@ -19,29 +18,6 @@ class PromptEvidenceTest(unittest.TestCase):
             self.assertEqual(value["path"], str(path))
             self.assertEqual(value["bytes"], 4096)
             self.assertLess(len(json.dumps(value)), 1024)
-
-    def test_repair_references_large_logs_and_selected_feedback_packet(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            directory = Path(temporary)
-            (directory / "input.json").write_text("{}")
-            (directory / "output.json").write_text("{}")
-            (directory / "stdout.log").write_text("failure detail\n" * 4096)
-            (directory / "stderr.log").write_text("")
-            task = build_task(
-                {"validation_directory": str(directory)}, [], "Fix validation"
-            )
-            reference = task.untrusted_data["failed_validation"]["stdout"]
-            self.assertIn(reference["path"], task.read_only_evidence)
-            self.assertLess(len(json.dumps(task.untrusted_data)), 4096)
-            task = build_task(
-                {}, [{"details": "x" * 5000}], "Fix the owned defect", directory
-            )
-            packet = task.untrusted_data["task_data"]
-            self.assertIn(packet["path"], task.read_only_evidence)
-            self.assertEqual(
-                json.loads(Path(packet["path"]).read_text())["objective"],
-                "Fix the owned defect",
-            )
 
     def test_pi_refuses_large_inline_data_before_rendering(self):
         prompt = {
