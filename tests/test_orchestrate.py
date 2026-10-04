@@ -696,9 +696,7 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(pr_main(["orchestrate", "status", "1" * 16]), 0)
             run.assert_called_once_with(["status", "1" * 16])
         with (
-            mock.patch(
-                "afk_pr.config.state_root", return_value=Path("/tmp/state")
-            ),
+            mock.patch("afk_pr.config.state_root", return_value=Path("/tmp/state")),
             mock.patch(
                 "afk_pr.__main__.status_job", return_value={"job": {"id": "1" * 16}}
             ) as read,

@@ -278,8 +278,9 @@ class ConfigurationTests(unittest.TestCase):
         old = self.root / "old.json"
         old.write_text(json.dumps({"run_root": str(self.root)}))
         for loader in (config.load_config, config.state_root):
-            with self.subTest(loader=loader.__name__), self.assertRaisesRegex(
-                ValueError, "JSON is not accepted"
+            with (
+                self.subTest(loader=loader.__name__),
+                self.assertRaisesRegex(ValueError, "JSON is not accepted"),
             ):
                 loader(old)
 
