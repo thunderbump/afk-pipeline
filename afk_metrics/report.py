@@ -18,8 +18,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from afk_coordinate.contract import validate_component_output
-from afk_export import (
+from afk_records.coordinator import validate_component_output
+from afk_records.source import (
     MAX_JSON_BYTES,
     ExportError,
     ExportUsageError,

@@ -12,7 +12,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from afk_export import (
+from afk_records.source import (
     MAX_BUNDLE_FILES,
     MAX_INCLUDED_BYTES,
     MAX_MANIFEST_BYTES,
