@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from afk_agent import MAX_AUTO_RETRIES, agent_response
-from afk_export import event_counts
+from tests.retained_bundle_fixture import event_counts
 
 
 class AgentResponseRetryTest(unittest.TestCase):

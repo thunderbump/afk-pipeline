@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-import afk_export
 from afk_metrics.__main__ import _human
 from afk_metrics.publication import (
     PublicationError,
@@ -18,14 +17,16 @@ from afk_metrics.publication import (
     publish,
 )
 from afk_metrics.report import build_report
-from tests import test_export_cli
+from afk_records import source as records
+from tests import retained_bundle_fixture as bundle_fixture
+from tests import test_retained_records
 
 
 class MetricsPublicationTests(unittest.TestCase):
     def fixture(self, root: Path, schema=3):
-        source = test_export_cli.ExportCliTests().sealed_preparer(root)
+        source = test_retained_records.RetainedRecordTests().sealed_preparer(root)
         bundle = root / "bundle"
-        afk_export.export_run(source, bundle, schema_version=schema)
+        bundle_fixture.write_bundle_fixture(source, bundle, schema_version=schema)
         request = {
             "schema_version": 1,
             "project": "operations-webui",
@@ -103,9 +104,9 @@ class MetricsPublicationTests(unittest.TestCase):
             # This is a command-worker Attempt. Its started history row is still
             # expected inference evidence, but no receipt may be fabricated.
             inference = source / "coordinator/04-review/inference"
-            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            test_retained_records.RetainedRecordTests().add_inference_receipt(inference)
             bundle = root / "bundle-with-review"
-            afk_export.export_run(source, bundle)
+            bundle_fixture.write_bundle_fixture(source, bundle)
             request["runs"][0]["bundle"] = str(bundle)
             publication = build_publication(request)
             self.assertEqual(publication["schema_version"], 2)
@@ -146,9 +147,9 @@ class MetricsPublicationTests(unittest.TestCase):
     def test_large_pi_records_publish_usage_and_report_safe_limit_failures(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            source = test_retained_records.RetainedRecordTests().sealed_preparer(root)
             inference = source / "coordinator/04-review/inference"
-            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            test_retained_records.RetainedRecordTests().add_inference_receipt(inference)
             message = {
                 "id": "large-message",
                 "role": "assistant",
@@ -180,7 +181,7 @@ class MetricsPublicationTests(unittest.TestCase):
             ).hexdigest()
             receipt_path.write_text(json.dumps(receipt) + "\n")
             bundle = root / "bundle"
-            afk_export.export_run(source, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
             request = {
                 "schema_version": 1,
                 "project": "operations-webui",
@@ -217,12 +218,12 @@ class MetricsPublicationTests(unittest.TestCase):
     def test_unreferenced_sealed_receipt_fails_publication_accounting(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            source = test_retained_records.RetainedRecordTests().sealed_preparer(root)
             orphan = source / "coordinator/99-orphan/inference"
             orphan.parent.mkdir()
-            test_export_cli.ExportCliTests().add_inference_receipt(orphan)
+            test_retained_records.RetainedRecordTests().add_inference_receipt(orphan)
             bundle = root / "bundle"
-            afk_export.export_run(source, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
             request = {
                 "schema_version": 1,
                 "project": "operations-webui",
@@ -243,9 +244,9 @@ class MetricsPublicationTests(unittest.TestCase):
     def test_missing_stage_with_bookkeeping_only_receipt_has_unavailable_usage(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            source = test_export_cli.ExportCliTests().sealed_preparer(root)
+            source = test_retained_records.RetainedRecordTests().sealed_preparer(root)
             inference = source / "coordinator/04-review/inference"
-            test_export_cli.ExportCliTests().add_inference_receipt(inference)
+            test_retained_records.RetainedRecordTests().add_inference_receipt(inference)
             events = inference / "attempts/1/events.jsonl"
             events.write_text('{"type":"compaction_end","result":{}}\n')
             receipt_path = inference / "receipt.json"
@@ -255,7 +256,7 @@ class MetricsPublicationTests(unittest.TestCase):
             ).hexdigest()
             receipt_path.write_text(json.dumps(receipt) + "\n")
             bundle = root / "bundle"
-            afk_export.export_run(source, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
             publication = build_publication(
                 {
                     "schema_version": 1,
@@ -340,7 +341,9 @@ class MetricsPublicationTests(unittest.TestCase):
                 tempfile.TemporaryDirectory() as temporary,
             ):
                 root = Path(temporary)
-                source = test_export_cli.ExportCliTests().sealed_preparer(root)
+                source = test_retained_records.RetainedRecordTests().sealed_preparer(
+                    root
+                )
                 validation_path = source / "coordinator/02-validation/output.json"
                 validation = json.loads(validation_path.read_text())
                 if duration is not None:
@@ -351,11 +354,13 @@ class MetricsPublicationTests(unittest.TestCase):
                 review["duration_seconds"] = 4.25
                 review_path.write_text(json.dumps(review))
                 inference = source / "coordinator/04-review/inference"
-                test_export_cli.ExportCliTests().add_inference_receipt(inference)
+                test_retained_records.RetainedRecordTests().add_inference_receipt(
+                    inference
+                )
                 # This authenticated Pi stream has only agent_end, without a
                 # supported usage/cost event. Its elapsed time is still known.
                 bundle = root / "bundle"
-                afk_export.export_run(source, bundle)
+                bundle_fixture.write_bundle_fixture(source, bundle)
                 publication = build_publication(
                     {
                         "schema_version": 1,
@@ -533,7 +538,7 @@ class MetricsPublicationTests(unittest.TestCase):
             _source, bundle, request = self.fixture(root)
             manifest_path = bundle / "manifest.json"
             manifest = json.loads(manifest_path.read_text())
-            manifest["files"][0]["bytes"] = afk_export.V2_MAX_BUNDLE_BYTES
+            manifest["files"][0]["bytes"] = records.V2_MAX_BUNDLE_BYTES
             manifest_path.write_text(json.dumps(manifest))
             with (
                 mock.patch(
@@ -549,7 +554,7 @@ class MetricsPublicationTests(unittest.TestCase):
             root = Path(temporary)
             _source, _bundle, request = self.fixture(root)
             calls = []
-            actual_normalize = afk_export.normalize_run_v2
+            actual_normalize = records.normalize_run_v2
 
             def record_normalization(*args, **kwargs):
                 calls.append(kwargs.get("include_artifacts", True))
@@ -652,7 +657,7 @@ class MetricsPublicationTests(unittest.TestCase):
     def test_abandoned_inference_change_during_projection_is_rejected(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fixtures = test_export_cli.ExportCliTests()
+            fixtures = test_retained_records.RetainedRecordTests()
             source = fixtures.sealed_preparer(root)
             history = [
                 fixtures.history()[0],
@@ -716,7 +721,7 @@ class MetricsPublicationTests(unittest.TestCase):
             ).hexdigest()
             receipt_path.write_text(json.dumps(receipt) + "\n")
             bundle = root / "bundle"
-            afk_export.export_run(source, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
             request = {
                 "schema_version": 1,
                 "project": "operations-webui",
@@ -835,7 +840,9 @@ class MetricsPublicationTests(unittest.TestCase):
                     **kwargs,
                 ):
                     _inference.parent.mkdir(parents=True, exist_ok=True)
-                    test_export_cli.ExportCliTests().add_inference_receipt(_inference)
+                    test_retained_records.RetainedRecordTests().add_inference_receipt(
+                        _inference
+                    )
                     invocation_path = _inference / "invocation.json"
                     invocation = json.loads(invocation_path.read_text())
                     invocation["purpose"] = _purpose
@@ -872,7 +879,7 @@ class MetricsPublicationTests(unittest.TestCase):
             root = Path(temporary)
             source, _bundle, request = self.fixture(root)
             target = source / "coordinator/04-review/transient-inference"
-            test_export_cli.ExportCliTests().add_inference_receipt(target)
+            test_retained_records.RetainedRecordTests().add_inference_receipt(target)
             invocation_path = target / "invocation.json"
             invocation = json.loads(invocation_path.read_text())
             invocation["purpose"] = "finding_assessment"

@@ -8,7 +8,6 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from afk_export import ExportError, read_bytes, receipt_bound_inference_artifacts
 from afk_inference import Capability, FixtureAdapter, InferenceRuntime, ScriptedResult
 from afk_metrics.__main__ import _human
 from afk_metrics.report import (
@@ -25,7 +24,12 @@ from afk_metrics.report import (
     parse_pi_events,
     summarize_source,
 )
-from tests import test_export_cli
+from afk_records.source import (
+    ExportError,
+    read_bytes,
+    receipt_bound_inference_artifacts,
+)
+from tests import test_retained_records
 
 ROOT = Path(__file__).parents[1]
 
@@ -350,7 +354,7 @@ class MetricsIntegrityTests(unittest.TestCase):
             (root / "inference").mkdir()
             with (
                 mock.patch(
-                    "afk_export._receipt_bound_inference_artifacts",
+                    "afk_records.source._receipt_bound_inference_artifacts",
                     side_effect=KeyError("duration_seconds"),
                 ),
                 self.assertRaisesRegex(ExportError, "invalid Inference Receipt"),
@@ -507,7 +511,7 @@ class MetricsIntegrityTests(unittest.TestCase):
                 return data
 
             with (
-                mock.patch("afk_export.os.read", side_effect=mutate_after_read),
+                mock.patch("afk_records.source.os.read", side_effect=mutate_after_read),
                 self.assertRaisesRegex(ExportError, "changed while being read"),
             ):
                 read_bytes(path, 100)
@@ -799,7 +803,7 @@ class MetricsReportTests(unittest.TestCase):
     def test_fixture_run_comparison_matches_and_flags_confounded_base(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            fixtures = test_export_cli.ExportCliTests()
+            fixtures = test_retained_records.RetainedRecordTests()
             first = fixtures.sealed_preparer(root / "first")
             second = fixtures.sealed_preparer(root / "second")
 
@@ -1122,7 +1126,7 @@ class MetricsReportTests(unittest.TestCase):
             retained.parent.mkdir(parents=True)
             (original.parent / "input.json").write_text("{}")
             (retained.parent / "input.json").write_text("{}")
-            helper = test_export_cli.ExportCliTests()
+            helper = test_retained_records.RetainedRecordTests()
             helper.add_inference_receipt(original)
             helper.add_inference_receipt(retained)
             observed = {

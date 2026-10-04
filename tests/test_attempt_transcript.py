@@ -1,11 +1,11 @@
 import json
 import unittest
 
-from afk_attempt.transcript import (
+from afk_records.source import REDACTED_SECRET, sanitize_public_artifact_text
+from afk_records.transcript import (
     build_attempt_transcript,
     encode_attempt_transcript,
 )
-from afk_export import REDACTED_SECRET, sanitize_public_artifact_text
 
 
 def event(**value):

@@ -1,4 +1,4 @@
-"""Reproduce portable metrics cases using synthetic evidence and real exporters."""
+"""Reproduce portable metrics cases using synthetic evidence and retained readers."""
 
 import hashlib
 import json
@@ -10,10 +10,10 @@ import tempfile
 from pathlib import Path
 from unittest import mock
 
-import afk_export
-from afk_coordinate.contract import expected_input_sources
 from afk_metrics.publication import build_publication
-from tests import test_export_cli
+from afk_records.coordinator import expected_input_sources
+from tests import retained_bundle_fixture as bundle_fixture
+from tests import test_retained_records
 
 FIXTURES = Path(__file__).parent / "fixtures/metrics-publication/populated"
 
@@ -23,7 +23,7 @@ def write_json(path, value):
 
 
 def add_pi(inference, purpose, events):
-    test_export_cli.ExportCliTests().add_inference_receipt(inference)
+    test_retained_records.RetainedRecordTests().add_inference_receipt(inference)
     invocation_path = inference / "invocation.json"
     invocation = json.loads(invocation_path.read_text())
     invocation.update(purpose=purpose)
@@ -215,7 +215,7 @@ def review_variant_matrix():
 
 def populate_split_review(source, sequence=4, *, failed=False):
     """Build real authenticated split receipts, including duplicate/empty lenses."""
-    helper = test_export_cli.ExportCliTests()
+    helper = test_retained_records.RetainedRecordTests()
     coordinator = source / "coordinator"
     directory = coordinator / f"{sequence:02d}-review"
     for path in (source / "coordinator-request.json", coordinator / "input.json"):
@@ -352,11 +352,13 @@ def generate_split_cases(root, destination):
     """Export populated split fixtures through the same publication seam consumers use."""
     requests = []
     for name in ("split-completed", "split-partial", "split-continuation"):
-        source = test_export_cli.ExportCliTests().sealed_preparer(root / name)
+        source = test_retained_records.RetainedRecordTests().sealed_preparer(
+            root / name
+        )
         coordinator = source / "coordinator"
         preparation = json.loads((source / "preparation.json").read_text())
         preparation["run"]["id"] = name
-        history = test_export_cli.ExportCliTests().history()
+        history = test_retained_records.RetainedRecordTests().history()
         if name == "split-continuation":
             history = append_response_cycle(source, no_action=False)
         populate_split_review(source, failed=name == "split-partial")
@@ -459,7 +461,7 @@ def generate_split_cases(root, destination):
             )
         write_json(source / "preparation.json", preparation)
         bundle = destination / f"bundle-{name}"
-        afk_export.export_run(source, bundle, schema_version=3)
+        bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
         requests.append(
             {"source": str(source), "bundle": str(bundle), "selection": "latest"}
         )
@@ -471,19 +473,19 @@ def generate_split_cases(root, destination):
 
 
 def generate_baselines(destination):
-    """Reproduce the unmeasured v2/v3 intake examples using today's producer."""
+    """Reproduce the unmeasured v2/v3 intake examples using the retained-reader fixture writer."""
     destination.mkdir()
     with tempfile.TemporaryDirectory() as temporary:
         requests = []
         for schema in (2, 3):
-            source = test_export_cli.ExportCliTests().sealed_preparer(
+            source = test_retained_records.RetainedRecordTests().sealed_preparer(
                 Path(temporary) / str(schema)
             )
             preparation = json.loads((source / "preparation.json").read_text())
             preparation["run"]["id"] = f"synthetic-run-v{schema}"
             write_json(source / "preparation.json", preparation)
             bundle = destination / f"bundle-v{schema}"
-            afk_export.export_run(source, bundle, schema_version=schema)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=schema)
             requests.append(
                 {"source": str(source), "bundle": str(bundle), "selection": "latest"}
             )
@@ -506,7 +508,7 @@ def generate(destination):
         requests = []
         for scenario in ("partial", "unavailable"):
             case = root / scenario
-            source = test_export_cli.ExportCliTests().sealed_preparer(case)
+            source = test_retained_records.RetainedRecordTests().sealed_preparer(case)
             for assignment_path in (
                 source / "assignment.json",
                 source / "coordinator/assignment.json",
@@ -571,7 +573,7 @@ def generate(destination):
             bundle = destination / (
                 "bundle-partial" if scenario == "partial" else "bundle-v3"
             )
-            afk_export.export_run(source, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
             if scenario == "partial":
                 # Reproduce a command-worker Attempt: history proves that the
                 # stage started, while no inference receipt exists. Restore the
@@ -587,7 +589,7 @@ def generate(destination):
                     assignment["command"] = ["agent", "--token", "[redacted-secret]"]
                     write_json(assignment_path, assignment)
                 legacy = destination / "producer-only-v2"
-                afk_export.export_run(source, legacy, schema_version=2)
+                bundle_fixture.write_bundle_fixture(source, legacy, schema_version=2)
                 with mock.patch(
                     "afk_metrics.publication._source_revision", return_value=None
                 ):
@@ -624,9 +626,11 @@ def generate(destination):
             requests.append(
                 {"source": str(source), "bundle": str(bundle), "selection": "original"}
             )
-        source = test_export_cli.ExportCliTests().sealed_preparer(root / "abandoned")
+        source = test_retained_records.RetainedRecordTests().sealed_preparer(
+            root / "abandoned"
+        )
         coordinator = source / "coordinator"
-        history = test_export_cli.ExportCliTests().history()
+        history = test_retained_records.RetainedRecordTests().history()
         for sequence, outcome in ((7, "abandoned"), (8, "failed")):
             history.append(
                 {
@@ -675,7 +679,7 @@ def generate(destination):
         )
         write_json(source / "preparation.json", value)
         bundle = destination / "bundle-abandoned"
-        afk_export.export_run(source, bundle, schema_version=3)
+        bundle_fixture.write_bundle_fixture(source, bundle, schema_version=3)
         requests.append(
             {"source": str(source), "bundle": str(bundle), "selection": "original"}
         )
@@ -700,7 +704,9 @@ def generate(destination):
             ("verified-no-action-response", True),
             ("shared-continuation-stage", False),
         ):
-            edge = test_export_cli.ExportCliTests().sealed_preparer(root / name)
+            edge = test_retained_records.RetainedRecordTests().sealed_preparer(
+                root / name
+            )
             for assignment_path in (
                 edge / "assignment.json",
                 edge / "coordinator/assignment.json",
@@ -809,7 +815,7 @@ def generate(destination):
                 # its one authenticated coordinator path. It must be projected
                 # once for the selected continuation Run.
             bundle = destination / f"bundle-{name}"
-            afk_export.export_run(edge, bundle, schema_version=3)
+            bundle_fixture.write_bundle_fixture(edge, bundle, schema_version=3)
             coverage_requests.append(
                 {"source": str(edge), "bundle": str(bundle), "selection": "latest"}
             )
