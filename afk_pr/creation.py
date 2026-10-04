@@ -14,6 +14,7 @@ from afk_pr.config import (
     job_settings,
     load_config,
     policy,
+    state_root,
 )
 from afk_pr.config import (
     repository as repository_identity,
@@ -70,16 +71,16 @@ def submit_creation(
 
     if not SAFE_ID.fullmatch(bead_id):
         raise ValueError("invalid central Bead ID")
-    config = load_config(config_path, historical=bool(retry))
     if retry:
         if not re.fullmatch(r"[0-9a-f]{16}", retry):
             raise ValueError("invalid job ID")
-        directory = config["run_root"] / "pr-reviews" / retry
+        directory = state_root(config_path) / "pr-reviews" / retry
         job = jobs.read(directory / "job.json")
         if job.get("bead_id") != bead_id or job.get("kind") != "creation":
             raise ValueError("publication job does not match Bead")
         jobs.retry_publication(directory)
         return jobs.status_job(directory)
+    config = load_config(config_path)
     root = Path(config["run_root"]) / "pr-reviews"
     bead = read_configured_bead(bead_id, config)
     slug = ownership(bead_id, bead["labels"])

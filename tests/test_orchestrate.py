@@ -596,9 +596,7 @@ class CLITests(unittest.TestCase):
             root = Path(temporary)
             item = {"job": {"id": "1" * 16, "pr_url": None}, "phases": {}}
             with (
-                mock.patch(
-                    "afk_pr.config.load_config", return_value={"run_root": root}
-                ),
+                mock.patch("afk_pr.config.state_root", return_value=root),
                 mock.patch("afk_pr.__main__.status_job", return_value=item) as probe,
                 mock.patch("sys.stdout", new_callable=io.StringIO) as output,
             ):
@@ -608,7 +606,7 @@ class CLITests(unittest.TestCase):
 
     def test_job_rejects_traversal_before_loading_config(self):
         with (
-            mock.patch("afk_pr.config.load_config") as load,
+            mock.patch("afk_pr.config.state_root") as load,
             mock.patch("sys.stdout", new_callable=io.StringIO),
         ):
             self.assertEqual(pr_main(["job", "../job"]), 1)
@@ -620,9 +618,7 @@ class CLITests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with (
-                mock.patch(
-                    "afk_pr.config.load_config", return_value={"run_root": root}
-                ),
+                mock.patch("afk_pr.config.state_root", return_value=root),
                 mock.patch.object(
                     cli, "launch", side_effect=OSError("launch failed")
                 ) as launch,
@@ -700,10 +696,7 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(pr_main(["orchestrate", "status", "1" * 16]), 0)
             run.assert_called_once_with(["status", "1" * 16])
         with (
-            mock.patch(
-                "afk_pr.config.load_config",
-                return_value={"run_root": Path("/tmp/state")},
-            ),
+            mock.patch("afk_pr.config.state_root", return_value=Path("/tmp/state")),
             mock.patch(
                 "afk_pr.__main__.status_job", return_value={"job": {"id": "1" * 16}}
             ) as read,

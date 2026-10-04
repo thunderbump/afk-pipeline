@@ -12,7 +12,7 @@ from afk_pr.jobs import PHASES, read, status_job, submit, worker
 
 def main(argv=None):
     from afk_pr.beads import PreparationError
-    from afk_pr.config import DEFAULT_CONFIG, load_config
+    from afk_pr.config import DEFAULT_CONFIG, load_config, state_root
 
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "orchestrate":
@@ -154,8 +154,8 @@ def main(argv=None):
 
             if not re.fullmatch(r"[0-9a-f]{16}", args.job_id):
                 raise ValueError("invalid job ID")
-            config = load_config(args.config, historical=True)
-            result = status_job(config["run_root"] / "pr-reviews" / args.job_id)
+            root = state_root(args.config)
+            result = status_job(root / "pr-reviews" / args.job_id)
             if result["job"]["id"] != args.job_id:
                 raise ValueError("job identity mismatch")
             print(json.dumps(result, indent=2))
@@ -175,11 +175,11 @@ def main(argv=None):
 
             if not re.fullmatch(r"[0-9a-f]{16}", args.job_id):
                 raise ValueError("invalid job ID")
-            config = load_config(args.config, historical=True)
+            root = state_root(args.config)
             print(
                 json.dumps(
                     cleanup(
-                        config["run_root"] / "pr-reviews" / args.job_id,
+                        root / "pr-reviews" / args.job_id,
                         dry_run=args.dry_run,
                     ),
                     indent=2,
@@ -198,8 +198,8 @@ def main(argv=None):
         if args.command == "status" and args.job:
             from afk_pr.decision import observe
 
-            config = load_config(args.config, historical=True)
-            result = observe(args.pr_url, config["run_root"], args.job)
+            root = state_root(args.config)
+            result = observe(args.pr_url, root, args.job)
             print(json.dumps(result, indent=2))
             return 0
         if args.command == "context":
@@ -214,8 +214,7 @@ def main(argv=None):
                 expected_head=args.expected_head,
             )
         else:
-            config = load_config(args.config, historical=True)
-            root = Path(config["run_root"]) / "pr-reviews"
+            root = state_root(args.config) / "pr-reviews"
             if args.command in {"review", "respond"}:
                 import re
 

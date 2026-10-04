@@ -1832,12 +1832,12 @@ adapter recovers its own interrupted GC leases while holding both worker guards;
 ordinary validation leases still require the repository recovery command.
 No automatic scheduling is installed by this command.
 
-Legacy JSON is rejected for new PR submissions. It remains accepted only to locate
-historical jobs for status/publication retry. Preserve original assessment configs
-and paths. A new state root cannot discover an old unpublished local job: inspect
-old roots before changing the default, keep active work on its original root and
-never delete records to bypass duplicate detection. The stage-pipeline JSON loader
-is unchanged until the separate retirement task removes its users.
+Current PR and orchestration commands accept host TOML only, including job status,
+cleanup and publication retry. Existing saved jobs remain available through the
+TOML `state_root`; no JSON translator or fallback is used. A new state root cannot
+discover an old unpublished local job: inspect old roots before changing the
+default, keep active work on its original root and never delete records to bypass
+duplicate detection.
 
 An existing repository `[validation]` section belongs to the retained validation runner. PR commands do not interpret it; it may coexist with `[fixtures]`. Configure PR fixtures explicitly or provide the conventional executable entrypoint.
 
