@@ -8,8 +8,9 @@ actual evidence when replaying a retained case. Do not use an old Assessment as
 ground truth. The Operations worklogs `2026-09-08-review-cycle-analysis` and
 `2026-09-08-review-context-experiment` contain the investigation and adjudication.
 
-The deterministic tests verify actual prompt delivery, schemas and independent
-validity/ownership routing. They do not prove that a model makes these judgments.
+The former standalone Review/Assessment prompt and scope tests have retired.
+These historical evaluation cases remain reference material, not a claim of
+current executable coverage or a supported standalone command.
 For a future live evaluation, keep model and context fixed, preserve responses,
 and compare validity and ownership separately against the expectations below.
 
