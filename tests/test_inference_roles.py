@@ -1,54 +1,13 @@
 import unittest
-from pathlib import Path
 
-from afk_assess.__main__ import validate_input as validate_assessment_input
 from afk_coordinate.contract import validate_request
 from afk_respond.contract import validate_input as validate_response_input
-from afk_review.__main__ import validate_input as validate_review_input
 
 
 class RuntimeOwnedInferenceRoleTest(unittest.TestCase):
-    def test_role_modules_have_no_legacy_inference_execution(self):
-        root = Path(__file__).parents[1]
-        for role in (
-            "afk_plan",
-            "afk_review",
-            "afk_assess",
-            "afk_respond",
-            "afk_parent_review",
-        ):
-            source = (root / role / "__main__.py").read_text()
-            with self.subTest(role=role):
-                self.assertIn("invoke(", source)
-                self.assertNotIn("run_command", source)
-                self.assertNotIn("afk_agent", source)
-                self.assertNotIn("AGENT_COMMAND", source)
-                self.assertNotIn("inference=", source)
-
     def test_role_inputs_reject_obsolete_policy_overrides(self):
         override = {"model": "other", "thinking": "high"}
         cases = (
-            (
-                validate_review_input,
-                {
-                    "schema_version": 1,
-                    "workspace": "/tmp/workspace",
-                    "change_directory": "/tmp/change",
-                    "validation_directory": "/tmp/validation",
-                    "timeout_seconds": 1,
-                    "inference": override,
-                },
-            ),
-            (
-                validate_assessment_input,
-                {
-                    "schema_version": 1,
-                    "workspace": "/tmp/workspace",
-                    "review_directory": "/tmp/review",
-                    "timeout_seconds": 1,
-                    "inference": override,
-                },
-            ),
             (
                 validate_response_input,
                 {

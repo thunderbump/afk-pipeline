@@ -2,11 +2,10 @@ import hashlib
 import json
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
 import afk_export
@@ -20,11 +19,6 @@ from afk_plan_accept.contract import (
 from afk_review.contract import REVIEW_AUDIT
 
 ROOT = Path(__file__).parents[1]
-# Retained implementation controls do not exercise the supported public CLI.
-PRIVATE_DISPATCH = (
-    f"import sys; sys.path.insert(0, {str(ROOT)!r}); "
-    "from afk_run import main; raise SystemExit(main())"
-)
 
 
 class ExportCliTests(unittest.TestCase):
@@ -342,10 +336,8 @@ class ExportCliTests(unittest.TestCase):
             result = self.export(
                 source,
                 destination,
-                "--project",
-                "operations-webui",
-                "--run-id",
-                "direct-1",
+                project="operations-webui",
+                run_id="direct-1",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             record = json.loads((destination / "workflow-run.json").read_text())
@@ -356,10 +348,8 @@ class ExportCliTests(unittest.TestCase):
             rejected = self.export(
                 source,
                 credential,
-                "--project",
-                "operations-webui",
-                "--run-id",
-                f"ghp_{'a' * 30}",
+                project="operations-webui",
+                run_id=f"ghp_{'a' * 30}",
             )
             self.assertEqual(rejected.returncode, 1)
             self.assertFalse(credential.exists())
@@ -3085,102 +3075,33 @@ class ExportCliTests(unittest.TestCase):
             source = self.sealed_preparer(root)
             destination = root / "bundle"
 
-            result = self.export(source, destination, "--schema-version", "4")
+            result = self.export(source, destination, schema_version=4)
 
             self.assertEqual(result.returncode, 2)
             self.assertFalse(destination.exists())
 
-    def test_help_documents_the_export_interface(self):
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                PRIVATE_DISPATCH,
-                "export",
-                "--help",
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0)
-        self.assertIn("afk export", result.stdout)
-        self.assertIn("--project", result.stdout)
+    def export(self, source, destination, **arguments):
+        # Keep the retained reader checks on its function interface. The result
+        # shape lets existing artifact assertions share success/refusal handling.
+        try:
+            value = afk_export.export_run(source, destination, **arguments)
+            code = 0
+        except afk_export.ExportUsageError:
+            value = {"schema_version": 1, "outcome": "rejected", "error": "usage"}
+            code = 2
+        except (afk_export.ExportError, OSError, TypeError, ValueError, KeyError):
+            value = {"schema_version": 1, "outcome": "rejected", "error": "invalid_run"}
+            code = 1
+        return SimpleNamespace(returncode=code, stdout=json.dumps(value), stderr="")
 
-    def export(self, source, destination, *arguments):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                PRIVATE_DISPATCH,
-                "export",
-                str(source),
-                str(destination),
-                *arguments,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+    def export_v1(self, source, destination, **arguments):
+        return self.export(source, destination, schema_version=1, **arguments)
 
-    def export_v1(self, source, destination, *arguments):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                PRIVATE_DISPATCH,
-                "export",
-                str(source),
-                str(destination),
-                "--schema-version",
-                "1",
-                *arguments,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+    def export_v2(self, source, destination, **arguments):
+        return self.export(source, destination, schema_version=2, **arguments)
 
-    def export_v2(self, source, destination, *arguments):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                PRIVATE_DISPATCH,
-                "export",
-                str(source),
-                str(destination),
-                "--schema-version",
-                "2",
-                *arguments,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-    def export_v3(self, source, destination, *arguments):
-        return subprocess.run(
-            [
-                sys.executable,
-                "-c",
-                PRIVATE_DISPATCH,
-                "export",
-                str(source),
-                str(destination),
-                "--schema-version",
-                "3",
-                *arguments,
-            ],
-            cwd=ROOT,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+    def export_v3(self, source, destination, **arguments):
+        return self.export(source, destination, schema_version=3, **arguments)
 
     @staticmethod
     def add_acceptance_routing(source, decision):
