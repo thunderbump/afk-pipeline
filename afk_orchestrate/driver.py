@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SHA = re.compile(r"[0-9a-f]{40}")
 JOB = re.compile(r"[0-9a-f]{16}")
+MAX_ADDED_REPAIRS = 5
 
 
 def now():
@@ -483,9 +484,23 @@ def advance(path, commands=None):
         return state
 
 
-def resume(path, *, review_current_head=False, commands=None):
+def resume(path, *, review_current_head=False, add_repairs=None, commands=None):
+    if add_repairs is not None and (
+        type(add_repairs) is not int or not 1 <= add_repairs <= MAX_ADDED_REPAIRS
+    ):
+        raise ValueError(f"added repairs must be between 1 and {MAX_ADDED_REPAIRS}")
     with lock(path):
         state = read(path)
+        if add_repairs is not None:
+            old_limit = state["max_repairs"]
+            state["max_repairs"] = old_limit + add_repairs
+            record(
+                state,
+                "repair_allowance_added",
+                old_limit=old_limit,
+                new_limit=state["max_repairs"],
+                added_allowance=add_repairs,
+            )
         commands = commands or Commands(state["config"], path.parent)
         if review_current_head:
             context = commands("context", state["pr_url"])["pull_request"]
@@ -499,6 +514,8 @@ def resume(path, *, review_current_head=False, commands=None):
             transition(state, "review_submit")
             record(state, "operator_selected_current_head", head=state["head"])
         elif state["status"] == "ready_for_merge":
+            if add_repairs is not None:
+                write(path, state)
             return state
         state.pop("observation_failures", None)
         state.pop("observation_failure_command", None)
