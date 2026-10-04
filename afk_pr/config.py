@@ -1,7 +1,6 @@
 """Resolve host locations and committed repository policy for explicit PR passes."""
 
 import base64
-import json
 import os
 import re
 from pathlib import Path
@@ -55,20 +54,18 @@ def repository(value):
     return match[1].lower()
 
 
-def load_config(path=DEFAULT_CONFIG, *, historical=False):
+def _host_toml(path):
     path = Path(path)
-    if path.suffix == ".json":
-        if not historical:
-            raise ValueError(
-                "Legacy JSON is not accepted for new PR jobs; migrate to host config.toml. JSON remains available for historical status/publication retry."
-            )
-        value = json.loads(path.read_text())
-        return {"run_root": location(value["run_root"], "run_root")}
+    if path.suffix.lower() == ".json":
+        raise ValueError("Host configuration must be TOML; JSON is not accepted")
     try:
-        value = tomllib.loads(path.read_text())
+        return path, tomllib.loads(path.read_text())
     except (OSError, tomllib.TOMLDecodeError) as error:
         raise ValueError(f"Cannot read host TOML {path}: {error}") from error
-    state = location(
+
+
+def _state_root(value):
+    return location(
         value.get(
             "state_root",
             str(
@@ -78,8 +75,17 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
         ),
         "state_root",
     )
-    if historical:
-        return {"run_root": state}
+
+
+def state_root(path=DEFAULT_CONFIG):
+    """Resolve only the durable state location from the active host TOML."""
+    _, value = _host_toml(path)
+    return _state_root(value)
+
+
+def load_config(path=DEFAULT_CONFIG):
+    path, value = _host_toml(path)
+    state = _state_root(value)
     keys(
         value,
         {

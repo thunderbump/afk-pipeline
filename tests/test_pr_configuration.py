@@ -110,15 +110,12 @@ class ConfigurationTests(unittest.TestCase):
         )
         return Path(result["directory"])
 
-    def test_historical_location_ignores_unrelated_invalid_settings(self):
+    def test_state_location_ignores_unrelated_invalid_settings(self):
         self.host.write_text(
             self.host.read_text()
             + '\n[fixture_resources.bad]\nstack_path = "relative"\n'
         )
-        self.assertEqual(
-            config.load_config(self.host, historical=True)["run_root"],
-            self.root / "state",
-        )
+        self.assertEqual(config.state_root(self.host), self.root / "state")
         with self.assertRaises(ValueError):
             config.load_config(self.host)
 
@@ -280,11 +277,11 @@ class ConfigurationTests(unittest.TestCase):
             config.load_config(self.host)
         old = self.root / "old.json"
         old.write_text(json.dumps({"run_root": str(self.root)}))
-        with self.assertRaisesRegex(ValueError, "Legacy JSON"):
-            config.load_config(old)
-        self.assertEqual(
-            config.load_config(old, historical=True)["run_root"], self.root
-        )
+        for loader in (config.load_config, config.state_root):
+            with self.subTest(loader=loader.__name__), self.assertRaisesRegex(
+                ValueError, "JSON is not accepted"
+            ):
+                loader(old)
 
     def test_repo_fallback_requires_committed_executable_and_override_is_visible(self):
         self.git(self.source, "rm", "afk.toml")

@@ -83,7 +83,7 @@ def status(path):
 
 def main(argv=None):
     from afk_pr.beads import PreparationError
-    from afk_pr.config import DEFAULT_CONFIG, load_config
+    from afk_pr.config import DEFAULT_CONFIG, state_root
 
     parser = argparse.ArgumentParser(prog="afk orchestrate")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -109,8 +109,7 @@ def main(argv=None):
             worker(args.path)
             return 0
         config_path = args.config.expanduser().resolve()
-        config = load_config(config_path, historical=True)
-        root = config["run_root"] / "orchestrations"
+        root = state_root(config_path) / "orchestrations"
         if args.command == "start":
             path, created = driver.create(
                 root, args.bead_id, config_path, args.max_repairs

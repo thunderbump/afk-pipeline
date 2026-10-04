@@ -325,8 +325,7 @@ class DecisionTests(unittest.TestCase):
     def test_cli_only_observes_and_returns_success_for_pause_advice(self):
         with (
             mock.patch(
-                "afk_pr.config.load_config",
-                return_value={"run_root": Path("/tmp/unused")},
+                "afk_pr.config.state_root", return_value=Path("/tmp/unused")
             ),
             mock.patch.object(
                 decision,
