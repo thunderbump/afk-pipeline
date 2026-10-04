@@ -16,10 +16,11 @@ from pathlib import Path
 from afk_pr.config import job_settings, settings
 from afk_pr.github import GitHub, identity
 from afk_pr.lifecycle import guarded
-from afk_runtime import run_command, timestamp
+from afk_runtime import REAP_GRACE_SECONDS, run_command, timestamp
 
 ROOT = Path(__file__).resolve().parents[1]
 PHASES = ("fixtures", "review", "response", "creation")
+GIT_TIMEOUT_SECONDS = 600
 
 
 def write(path, value):
@@ -86,7 +87,7 @@ def git(repository, *args):
         capture_output=True,
         text=True,
         check=False,
-        timeout=600,
+        timeout=GIT_TIMEOUT_SECONDS,
         env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
     )
     if result.returncode:
@@ -104,6 +105,23 @@ def github_remote(value):
 
 def launch(directory, phase, timeout):
     job = read(directory / "job.json")
+    # Two command bounds cover slot wait and execution. Keep acquisition,
+    # cooperative cancellation, reap and publication inside the service lifetime.
+    publication_margin = 900
+    lifetime = 2 * timeout + publication_margin
+    stop_grace = 20
+    if phase == "fixtures":
+        from afk_pr.workspace import MAX_ACQUISITION_COMMANDS
+
+        grace = job["validation"].get("termination_grace_seconds", 60)
+        stop_grace = grace + REAP_GRACE_SECONDS + publication_margin
+        lifetime += (
+            MAX_ACQUISITION_COMMANDS * job.get("acquisition_timeout", 600)
+            # Clean-head checks before and after execution each use two Git calls.
+            + 4 * GIT_TIMEOUT_SECONDS
+            + grace
+            + REAP_GRACE_SECONDS
+        )
     subprocess.run(
         [
             "systemd-run",
@@ -113,9 +131,9 @@ def launch(directory, phase, timeout):
             f"--unit=afk-pr-{job['id']}-{phase}",
             "--property=Type=exec",
             "--property=KillMode=control-group",
-            f"--property=RuntimeMaxSec={2 * timeout + 900}",
+            f"--property=RuntimeMaxSec={lifetime}",
             "--setenv=PATH=" + os.environ.get("PATH", "/usr/bin:/bin"),
-            "--property=TimeoutStopSec=20",
+            f"--property=TimeoutStopSec={stop_grace}",
             f"--working-directory={ROOT}",
             sys.executable,
             "-m",
@@ -342,14 +360,21 @@ def fixtures(directory, job):
             directory / "fixtures.stdout.log",
             directory / "fixtures.stderr.log",
             # Repository supervision must stop children and clean owned Docker resources.
-            termination_grace_seconds=60,
+            termination_grace_seconds=job["validation"].get(
+                "termination_grace_seconds", 60
+            ),
         )
         clean = git(workspace, "rev-parse", "HEAD") == job["head"] and not git(
             workspace, "status", "--porcelain", "--untracked-files=no"
         )
         state = (
             "passed"
-            if process["exit_code"] == 0 and not process["error"] and clean
+            if (
+                process["exit_code"] == 0
+                and not process["error"]
+                and not process.get("interrupted", False)
+                and clean
+            )
             else "failed"
         )
         if process["timed_out"]:

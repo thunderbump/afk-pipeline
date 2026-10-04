@@ -13,6 +13,14 @@ DEFAULT_CONFIG = (
     Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "afk/config.toml"
 )
 DEFAULTS = tomllib.loads(Path(__file__).with_name("defaults.toml").read_text())
+FIXTURE_FIELDS = {
+    "command",
+    "description",
+    "timeout_seconds",
+    "github_auth",
+    "termination_grace_seconds",
+    "repairable_exit_codes",
+}
 
 
 def keys(value, allowed, name):
@@ -129,6 +137,8 @@ def load_config(path=DEFAULT_CONFIG, *, historical=False):
         if identity in seen:
             raise ValueError("duplicate registered GitHub repository")
         seen.add(identity)
+        if "fixtures" in project:
+            fixture_policy(project["fixtures"])
     stacks = set()
     for name, resource in resources.items():
         keys(
@@ -177,9 +187,22 @@ def settings(path, url):
 
 
 def fixture_policy(value):
-    keys(
-        value, {"command", "description", "timeout_seconds", "github_auth"}, "fixtures"
-    )
+    keys(value, FIXTURE_FIELDS, "fixtures")
+    grace = value.get("termination_grace_seconds", 60)
+    if type(grace) is not int or not 1 <= grace <= 3600:
+        raise ValueError(
+            "termination_grace_seconds must be an integer from 1 through 3600"
+        )
+    codes = value.get("repairable_exit_codes", [1])
+    if (
+        not isinstance(codes, list)
+        or len(codes) > 255
+        or any(type(code) is not int or not 1 <= code <= 255 for code in codes)
+        or len(set(codes)) != len(codes)
+    ):
+        raise ValueError(
+            "repairable_exit_codes must be a list of unique integers from 1 through 255"
+        )
     command = value.get("command", ["./scripts/validate"])
     if (
         not isinstance(command, list)
@@ -207,6 +230,8 @@ def fixture_policy(value):
             "fixture timeout",
         ),
         "github_auth": auth,
+        "termination_grace_seconds": grace,
+        "repairable_exit_codes": list(codes),
     }
 
 
@@ -235,11 +260,7 @@ def policy(github, repo, sha, project):
         raise ValueError("base_branch must be a nonempty string")
     override = project.get("fixtures")
     fixtures = override if override is not None else value.get("fixtures", {})
-    keys(
-        fixtures,
-        {"command", "description", "timeout_seconds", "github_auth"},
-        "fixtures",
-    )
+    keys(fixtures, FIXTURE_FIELDS, "fixtures")
     if "command" not in fixtures:
         scripts = next(
             (e for e in tree if e["path"] == "scripts" and e["type"] == "tree"), None

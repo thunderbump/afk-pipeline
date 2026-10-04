@@ -1606,12 +1606,11 @@ The independent commands also have an optional caller:
 
 `start` returns a run ID and starts a user systemd worker. It creates the PR,
 waits for matching fixtures, reviews, and responds to structured findings or
-completed validation failures. Published fixture failures with a nonzero exit
-use the same repair budget, including build errors, failed tests and crashes.
-The response reads their existing PR diagnostics. Stale or missing evidence,
-unpublished results, timeouts, interruptions and uncertain execution still pause.
-A normal nonzero exit does not identify the root cause: an environment failure
-can consume a repair attempt too. It stops at `ready_for_merge` only after a
+completed candidate validation failures. Published fixture exit 1 uses the same
+repair budget only when the job's `repairable_exit_codes` includes 1. Exit 2,
+other exits, direct signals, stale or missing evidence, unpublished results,
+timeouts, interruptions and uncertain execution pause. The response reads the
+existing PR diagnostics. It stops at `ready_for_merge` only after a
 clean review and passing fixtures. It allows at most five responses, configurable downward with
 `--max-repairs 0..5`. Merge and Bead closure remain explicit `finish` operations.
 No command reads orchestration state or requires this caller.
@@ -1684,7 +1683,12 @@ command = ["./scripts/validate"]
 github_auth = true
 ```
 
-`description` and `timeout_seconds` are optional fixture settings. See the
+`description`, `timeout_seconds`, `termination_grace_seconds` and
+`repairable_exit_codes` are optional fixture settings. Grace defaults to 60 seconds
+and accepts integers from 1 through 3600. The repair set defaults to `[1]`; `[]`
+disables validation repairs. Repair codes must be unique integers from 1 through
+255, but only candidate exit 1 can repair in the current PR supervisor. Listing
+infrastructure exit 2 or another exit cannot override that classification. See the
 [Operations](examples/pr-config/operations-afk.toml) and
 [EQEmu](examples/pr-config/eqemu-afk.toml) examples. Without a command, a committed
 executable `scripts/validate` is the only fallback. Missing or malformed fixture
@@ -1695,8 +1699,15 @@ Creation reads policy at the GitHub default branch's captured SHA. Optional
 `base_branch` chooses another creation branch once; policy still comes from that
 captured default-branch commit. Review/respond read policy at the exact PR base
 SHA. The candidate cannot choose its own fixture policy. Resolved argv, timeout,
-auth requirement and provenance are saved in the job, and fixture children inherit
-them. A temporary `[projects.<slug>.fixtures]` host override supplies the same
+cleanup grace, repair set, auth requirement and provenance are saved in the job,
+and fixture children inherit
+them. The managed fixture service reserves both slot wait and command timeout,
+the ten possible acquisition command bounds, the four Git identity/status check
+bounds, configured cancellation grace, process reap and the existing 900-second
+publication margin. Its systemd stop allowance also includes configured grace,
+reap and publication time. A managed service stop can terminate the Python worker
+before it publishes a phase record; retained diagnostics then require inspection
+and unpublished evidence cannot repair. A temporary `[projects.<slug>.fixtures]` host override supplies the same
 fixture fields until repo policy reaches its trusted base. Its `host_override`
 provenance is visible; it replaces the complete fixture selection, not an opaque
 recursive merge. Remove it when the committed repo policy is available.
@@ -1716,8 +1727,8 @@ sets VALIDATION_WORKER_HOME, AKKSTACK_DIR and job-local
 VALIDATION_AFK_EVIDENCE_DIR. Existing repository worker/stack locks remain in use.
 Different named resources can run independently. Queue wait and command execution
 each have the fixture timeout, rather than one shared end-to-end deadline.
-The EQEmu wrapper retains its own 2600-second execution default under an outer
-2700-second fixture allowance.
+The EQEmu example selects the foreground `build-unit-v1` command with an outer
+20400-second fixture timeout and 780 seconds for cooperative cancellation.
 
 The per-job `cleanup` command keeps external resource cleanup disabled.
 The project-wide `gc` command requires a host-selected resource adapter that

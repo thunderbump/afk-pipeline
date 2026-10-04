@@ -9,6 +9,7 @@ from unittest import mock
 
 from afk_pr import creation, jobs
 from afk_pr.github import GitHub
+from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
 
 URL = "https://github.com/example/repository/pull/12"
 
@@ -174,6 +175,20 @@ class CreationTests(unittest.TestCase):
     def prepared(self):
         submitted = self.submit()
         return Path(submitted["directory"])
+
+    def test_creation_child_inherits_policy_and_finishes_slow_cleanup(self):
+        self.project["validation"].update(slow_cleanup_policy())
+        directory = self.prepared()
+        result = self.implement(directory)
+        jobs.write(directory / "creation.json", result)
+        self.publish(directory)
+        progress = jobs.read(directory / "creation-progress.json")
+        child = directory.parent / progress["fixture_job"]
+        self.assertEqual(
+            jobs.read(child / "job.json")["validation"],
+            jobs.read(directory / "job.json")["validation"],
+        )
+        assert_slow_cleanup(self, child, self.gh)
 
     def test_submission_is_background_and_repeat_does_not_reimplement(self):
         result = self.submit()

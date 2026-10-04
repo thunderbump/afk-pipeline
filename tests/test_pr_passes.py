@@ -247,9 +247,10 @@ class JobTests(unittest.TestCase):
     def test_timeout_and_changed_candidate_cannot_pass(self):
         directory = self.submit(fixtures_only=True)
         job = jobs.read(directory / "job.json")
-        for timed_out, head, expected in [
-            (True, SHA, "timed_out"),
-            (False, "c" * 40, "failed"),
+        for timed_out, interrupted, head, expected in [
+            (True, False, SHA, "timed_out"),
+            (False, True, SHA, "failed"),
+            (False, False, "c" * 40, "failed"),
         ]:
             with (
                 mock.patch.object(jobs, "checkout", return_value=self.root),
@@ -261,6 +262,7 @@ class JobTests(unittest.TestCase):
                         "exit_code": 0,
                         "error": None,
                         "timed_out": timed_out,
+                        "interrupted": interrupted,
                     },
                 ) as run,
             ):
@@ -423,6 +425,21 @@ class JobTests(unittest.TestCase):
         self.assertIn("systemd-run", command)
         self.assertIn("--property=KillMode=control-group", command)
         self.assertNotIn("--wait", command)
+
+    def test_managed_fixture_lifetime_includes_selected_cleanup_and_acquisition(self):
+        directory = self.submit(fixtures_only=True)
+        job = jobs.read(directory / "job.json")
+        job["validation"].update(timeout_seconds=1, termination_grace_seconds=780)
+        job["acquisition_timeout"] = 600
+        jobs.write(directory / "job.json", job)
+        with mock.patch.object(jobs.subprocess, "run") as run:
+            jobs.launch(directory, "fixtures", 1)
+        command = run.call_args.args[0]
+        self.assertIn("--property=RuntimeMaxSec=10084", command)
+        self.assertIn("--property=TimeoutStopSec=1682", command)
+        with mock.patch.object(jobs.subprocess, "run") as run:
+            jobs.launch(directory, "review", 1)
+        self.assertIn("--property=TimeoutStopSec=20", run.call_args.args[0])
 
     def test_publication_retry_preserves_result_sealed_during_probe(self):
         directory = self.submit(fixtures_only=True)

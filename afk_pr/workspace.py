@@ -4,6 +4,10 @@ import os
 import subprocess
 from pathlib import Path
 
+# Clone, PR fetch, up to three checks/fetches per pinned commit, checkout,
+# and recursive submodule initialization. Keep this bound with acquire's steps.
+MAX_ACQUISITION_COMMANDS = 10
+
 
 def acquire(directory, job, phase):
     from afk_pr import jobs

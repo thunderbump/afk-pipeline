@@ -56,6 +56,7 @@ class World:
                 "head": head,
                 "base": self.base,
                 "kind": kind,
+                "validation": {"repairable_exit_codes": [1]},
                 "expected_phases": ["fixtures", "review"]
                 if kind == "review"
                 else [kind],
@@ -312,13 +313,39 @@ class DriverTests(unittest.TestCase):
 
     def test_failed_validation_overrides_clean_review_and_recovers(self):
         self.reach_review()
-        self.fail_fixture(self.world.jobs[driver.read(self.path)["active_job"]], -6)
+        self.fail_fixture(self.world.jobs[driver.read(self.path)["active_job"]], 1)
         state = self.tick()
         self.assertEqual((state["stage"], state["repairs"]), ("response_submit", 1))
         self.tick()
         self.tick()
         self.tick()
         self.assertEqual(self.tick()["status"], "ready_for_merge")
+
+    def test_only_configured_candidate_failure_can_consume_repair(self):
+        self.reach_review()
+        saved = driver.read(self.path)
+        identifier = saved["active_job"]
+        original = copy.deepcopy(self.world.jobs[identifier])
+        for code, allowed in (
+            (1, []),
+            (1, [2]),
+            (1, None),
+            (1, [True]),
+            (2, [1, 2]),
+            (3, [3]),
+            (143, [143]),
+            (-6, [1]),
+        ):
+            with self.subTest(code=code, allowed=allowed):
+                driver.write(self.path, saved)
+                item = copy.deepcopy(original)
+                item["job"]["validation"]["repairable_exit_codes"] = allowed
+                self.fail_fixture(item, code)
+                self.world.jobs[identifier] = item
+                state = self.tick()
+                self.assertEqual(state["status"], "paused")
+                self.assertEqual(state["repairs"], 0)
+        self.assertFalse(any(call[0] == "respond" for call in self.world.calls))
 
     def test_response_validation_failure_uses_new_head_and_action(self):
         self.world.findings = [{"message": "Fix"}]
