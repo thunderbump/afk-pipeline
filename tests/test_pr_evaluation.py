@@ -82,7 +82,7 @@ class EvaluationTests(unittest.TestCase):
             )
 
         with (
-            mock.patch("afk_run.read_bead", return_value=self.bead),
+            mock.patch("afk_pr.beads.read_bead", return_value=self.bead),
             mock.patch.object(
                 evaluation.workspace,
                 "acquire",
@@ -144,10 +144,12 @@ class EvaluationTests(unittest.TestCase):
         )
 
     def test_missing_bead_fails_before_inference_or_allocating_evidence(self):
-        from afk_run import PreparationError
+        from afk_pr.beads import PreparationError
 
         with (
-            mock.patch("afk_run.read_bead", side_effect=PreparationError("missing")),
+            mock.patch(
+                "afk_pr.beads.read_bead", side_effect=PreparationError("missing")
+            ),
             self.assertRaises(PreparationError),
         ):
             evaluation.evaluate("central-missing", self.host, github=self.gh)
@@ -182,7 +184,7 @@ class EvaluationTests(unittest.TestCase):
         (self.root / "secrets/dolt_beads_password.txt").write_text(
             "fixture-only-password\n"
         )
-        with mock.patch("afk_run.read_bead", return_value=self.bead) as read:
+        with mock.patch("afk_pr.beads.read_bead", return_value=self.bead) as read:
             from afk_pr.beads import read_configured_bead
             from afk_pr.config import load_config
 

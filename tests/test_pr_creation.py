@@ -112,7 +112,7 @@ class CreationTests(unittest.TestCase):
     def submit(self, **kwargs):
         with (
             mock.patch("afk_pr.creation.load_config", return_value=self.config),
-            mock.patch("afk_run.read_bead", return_value=self.bead) as read,
+            mock.patch("afk_pr.beads.read_bead", return_value=self.bead) as read,
             mock.patch.object(jobs, "git", side_effect=self.git),
             mock.patch(
                 "afk_pr.creation.policy",
@@ -430,7 +430,7 @@ class CreationTests(unittest.TestCase):
 
     def test_ambiguous_project_label_is_rejected(self):
         self.bead["labels"].append("project:other")
-        from afk_run import PreparationError
+        from afk_pr.beads import PreparationError
 
         with self.assertRaisesRegex(PreparationError, "exactly one"):
             self.submit()

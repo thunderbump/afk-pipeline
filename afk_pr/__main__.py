@@ -3,6 +3,7 @@
 import argparse
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from afk_pr.github import GitHub, identity
@@ -10,11 +11,19 @@ from afk_pr.jobs import PHASES, read, status_job, submit, worker
 
 
 def main(argv=None):
+    from afk_pr.beads import PreparationError
     from afk_pr.config import DEFAULT_CONFIG, load_config
-    from afk_run import PreparationError
 
-    parser = argparse.ArgumentParser(prog="afk")
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments and arguments[0] == "orchestrate":
+        from afk_orchestrate.__main__ import main as orchestration_main
+
+        return orchestration_main(arguments[1:])
+    parser = argparse.ArgumentParser(
+        prog="afk", description="Independent PR commands and optional orchestration."
+    )
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("orchestrate", help="supervise independent PR commands")
     assessment = commands.add_parser(
         "assess", help="optional remaining-scope assessment against a selected Bead"
     )
@@ -103,7 +112,7 @@ def main(argv=None):
     background = commands.add_parser("worker", help=argparse.SUPPRESS)
     background.add_argument("directory", type=Path)
     background.add_argument("phase", choices=PHASES)
-    args = parser.parse_args(argv)
+    args = parser.parse_args(arguments)
     try:
         if args.command == "assess":
             from afk_pr.assessment import assess

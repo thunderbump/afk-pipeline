@@ -14,6 +14,11 @@ from afk_evidence import RunValidationError, TrustedContext, read_run
 from afk_related_work import build_snapshot, reference
 
 ROOT = Path(__file__).parents[1]
+# Retained implementation controls do not exercise the supported public CLI.
+PRIVATE_DISPATCH = (
+    f"import sys; sys.path.insert(0, {str(ROOT)!r}); "
+    "from afk_run import main; raise SystemExit(main())"
+)
 ATTEMPT_FIXTURE = ROOT / "tests" / "fixture_agent.py"
 INFERENCE_FIXTURE = ROOT / "tests" / "inference_coordinate_fixture.py"
 
@@ -533,7 +538,9 @@ class CoordinatorCliTest(unittest.TestCase):
 
         exported = subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(run),
                 str(bundle),
@@ -579,7 +586,9 @@ class CoordinatorCliTest(unittest.TestCase):
             )
         rejected = subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(run),
                 str(self.root / "malformed-bundle"),
@@ -1992,7 +2001,9 @@ class CoordinatorCliTest(unittest.TestCase):
         bundle = self.root / "validation-repair-bundle"
         exported = subprocess.run(
             [
-                str(ROOT / "afk"),
+                sys.executable,
+                "-c",
+                PRIVATE_DISPATCH,
                 "export",
                 str(run),
                 str(bundle),

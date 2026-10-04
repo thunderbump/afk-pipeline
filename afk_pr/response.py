@@ -236,7 +236,7 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
 
 def publish_response(directory, job, result, github):
     """Retry only the summary; never repeat inference, commits, push, or fixtures."""
-    from afk_export import ExportError, sanitize_public_artifact_text
+    from afk_publication_text import ExportError, sanitize_public_artifact_text
 
     path = directory / "response-progress.json"
     progress = jobs.read(path) if path.exists() else {}

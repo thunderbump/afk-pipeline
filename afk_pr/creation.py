@@ -66,7 +66,7 @@ def find_pr(github, job):
 def submit_creation(
     bead_id, config_path, *, retry=None, github=None, launcher=jobs.launch
 ):
-    from afk_run import SAFE_ID, ownership, safe_bead
+    from afk_pr.beads import SAFE_ID, ownership, safe_bead
 
     if not SAFE_ID.fullmatch(bead_id):
         raise ValueError("invalid central Bead ID")
@@ -251,8 +251,8 @@ def implement(directory, job):
 
 def publish_creation(directory, job, result, github):
     """Create/recover the PR and fixture handoff; never replay model work or push."""
-    from afk_export import ExportError, sanitize_public_artifact_text
-    from afk_run import objective
+    from afk_pr.beads import objective
+    from afk_publication_text import ExportError, sanitize_public_artifact_text
 
     path = directory / "creation-progress.json"
     if not path.exists():

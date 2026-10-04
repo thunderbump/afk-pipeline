@@ -696,11 +696,19 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(state["stage"], "review_submit")
 
     def test_top_level_dispatches_optional_driver_and_independent_job(self):
-        from afk_run import main
-
         with mock.patch.object(cli, "main", return_value=0) as run:
-            self.assertEqual(main(["orchestrate", "status", "1" * 16]), 0)
+            self.assertEqual(pr_main(["orchestrate", "status", "1" * 16]), 0)
             run.assert_called_once_with(["status", "1" * 16])
-        with mock.patch("afk_pr.__main__.main", return_value=0) as run:
-            self.assertEqual(main(["job", "1" * 16]), 0)
-            run.assert_called_once_with(["job", "1" * 16])
+        with (
+            mock.patch(
+                "afk_pr.config.load_config",
+                return_value={"run_root": Path("/tmp/state")},
+            ),
+            mock.patch(
+                "afk_pr.__main__.status_job", return_value={"job": {"id": "1" * 16}}
+            ) as read,
+            mock.patch("sys.stdout", new_callable=io.StringIO) as output,
+        ):
+            self.assertEqual(pr_main(["job", "1" * 16]), 0)
+            read.assert_called_once_with(Path("/tmp/state/pr-reviews") / ("1" * 16))
+            self.assertEqual(json.loads(output.getvalue())["job"]["id"], "1" * 16)

@@ -7,8 +7,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from afk_pr.__main__ import main
+from afk_pr.beads import PreparationError
 from afk_pr.finish import FinishGitHub, finish
-from afk_run import PreparationError, main
 
 URL = "https://github.com/example/project/pull/1"
 

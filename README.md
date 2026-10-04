@@ -3,6 +3,20 @@
 Small executable modules for running agent work, validating and reviewing its
 result, responding to feedback, and coordinating the accepted sequence.
 
+## Supported commands
+
+The public `afk` launcher supports current PR commands `pr`, `evaluate`,
+`review`, `respond`, `status`, `context`, `finish`, `assess`, `job`, `cleanup`,
+`gc`, and optional `orchestrate`. Run `afk --help` or read
+[Explicit PR passes](#explicit-pr-passes) for current usage. These commands
+load current Beads and publication helpers without the old dispatcher or
+standalone stage graph.
+
+The standalone Run/stage walkthroughs before Explicit PR passes describe
+retained historical implementation pending scoped retirement. Public
+`afk run`, `afk continue`, `afk export`, and standalone stage commands are
+unsupported; those walkthroughs are not current launcher instructions.
+
 ## Local Run Evidence
 
 `afk_evidence.read_run(run_root, selection, trusted_context)` is the shared,

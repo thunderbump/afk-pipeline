@@ -343,7 +343,7 @@ class ConfigurationTests(unittest.TestCase):
             "status": "open",
         }
         with (
-            mock.patch("afk_run.read_bead", return_value=bead),
+            mock.patch("afk_pr.beads.read_bead", return_value=bead),
             mock.patch.object(creation, "remote_head", return_value=None),
         ):
             result = creation.submit_creation(

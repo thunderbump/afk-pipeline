@@ -75,7 +75,7 @@ def snapshot(bead):
 
 
 def evaluate(bead_id, config_path, *, github=None, inference=invoke):
-    from afk_run import PreparationError, ownership
+    from afk_pr.beads import PreparationError, ownership
 
     config = load_config(config_path)
     bead = read_configured_bead(bead_id, config)

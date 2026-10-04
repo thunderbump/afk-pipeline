@@ -8,7 +8,8 @@ from unittest.mock import Mock, patch
 
 from afk_inference import Capability, FixtureAdapter, ScriptedResult, invoke
 from afk_pr import assessment
-from afk_run import PreparationError, main
+from afk_pr.__main__ import main
+from afk_pr.beads import PreparationError
 
 URL = "https://github.com/example/repo/pull/1"
 SHA = "a" * 40
