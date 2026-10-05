@@ -225,6 +225,8 @@ def start(directory, phases, *, github, launcher=launch):
     """Persist work before launching independent managed workers."""
     job = read(directory / "job.json")
     job["expected_phases"] = phases
+    if "fixtures" in phases:
+        job["fixture_evidence_version"] = 1
     write(directory / "job.json", job)
     for phase in phases:
         write(
@@ -264,13 +266,21 @@ def start(directory, phases, *, github, launcher=launch):
             KeyError,
             subprocess.SubprocessError,
         ) as error:
+            outcome = {
+                "state": "failed",
+                "publication": "pending",
+                "error": type(error).__name__,
+            }
+            if phase == "fixtures":
+                from afk_pr.validation import seal
+
+                write(
+                    directory / "fixtures-seal.json",
+                    {"sha256": seal(directory, job, outcome)},
+                )
             write(
                 directory / f"{phase}.json",
-                {
-                    "state": "failed",
-                    "publication": "pending",
-                    "error": type(error).__name__,
-                },
+                outcome,
             )
             publish(directory, phase, github=github)
 
@@ -325,6 +335,10 @@ def acquire_fixture_slot(directory, job):
 
 def fixtures(directory, job):
     with acquire_fixture_slot(directory, job):
+        from afk_pr.validation import contract
+
+        expected = job.get("fixture_contract")
+        contract_before = contract(job) if expected is not None else None
         workspace = checkout(directory, job, "fixtures")
         command = list(job["validation"]["command"])
         resource = job.get("fixture_resource")
@@ -367,6 +381,9 @@ def fixtures(directory, job):
         clean = git(workspace, "rev-parse", "HEAD") == job["head"] and not git(
             workspace, "status", "--porcelain", "--untracked-files=no"
         )
+        contract_unchanged = (
+            expected is not None and contract_before == expected == contract(job)
+        )
         state = (
             "passed"
             if (
@@ -374,12 +391,18 @@ def fixtures(directory, job):
                 and not process["error"]
                 and not process.get("interrupted", False)
                 and clean
+                and (expected is None or contract_unchanged)
             )
             else "failed"
         )
         if process["timed_out"]:
             state = "timed_out"
-        return {"state": state, "process": process, "candidate_unchanged": clean}
+        return {
+            "state": state,
+            "process": process,
+            "candidate_unchanged": clean,
+            "contract_unchanged": contract_unchanged if expected is not None else None,
+        }
 
 
 def review(directory, job):
@@ -491,6 +514,13 @@ def worker(directory, phase):
             finished_at=timestamp(),
             publication="pending",
         )
+        if phase == "fixtures":
+            from afk_pr.validation import seal
+
+            write(
+                directory / "fixtures-seal.json",
+                {"sha256": seal(directory, job, outcome)},
+            )
         write(directory / f"{phase}.json", outcome)
         publish(directory, phase)
 
@@ -501,6 +531,11 @@ def publish(directory, phase, *, github=None):
     result = read(directory / f"{phase}.json")
     if result["state"] in {"queued", "running"}:
         raise ValueError("phase has no terminal result to publish")
+    if phase == "fixtures":
+        from afk_pr.validation import sealed_execution
+
+        if not sealed_execution(directory, job, result):
+            raise ValueError("Fixture execution evidence changed; publication refused")
     try:
         if phase == "creation":
             from afk_pr.creation import publish_creation
@@ -558,6 +593,13 @@ def publish(directory, phase, *, github=None):
         subprocess.SubprocessError,
     ) as error:
         result.update(publication="failed", publication_error=type(error).__name__)
+    if phase == "fixtures" and result.get("publication") == "published":
+        from afk_pr.validation import publication_seal
+
+        write(
+            directory / "fixtures-publication-seal.json",
+            {"sha256": publication_seal(result)},
+        )
     write(directory / f"{phase}.json", result)
 
 
@@ -687,6 +729,25 @@ def fixture_excerpt(directory, job):
 
 def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
     """Schedule the exact pushed commit, even if another commit arrives later."""
+    from afk_pr.validation import reservation, select
+
+    selected = {**job, "head": candidate}
+    with reservation(directory, selected):
+        identifier, expected = select(directory, selected)
+        progress = read(directory / f"{phase}-progress.json")
+        if identifier:
+            progress["fixture_job"] = identifier
+            progress["fixture_reused"] = True
+            progress["fixture_contract"] = expected
+            write(directory / f"{phase}-progress.json", progress)
+            return identifier
+        return new_fixtures(
+            directory, job, candidate, github, launcher, phase=phase, contract=expected
+        )
+
+
+def new_fixtures(directory, job, candidate, github, launcher, *, phase, contract):
+    """Reserve an attributed child before starting its worker, under the PR lock."""
     child = {
         **job,
         "id": uuid.uuid4().hex[:16],
@@ -696,6 +757,7 @@ def queue_fixtures(directory, job, candidate, github, launcher, *, phase):
         f"{phase}_job": job["id"],
         "created_at": timestamp(),
         "expected_phases": ["fixtures"],
+        "fixture_contract": contract,
     }
     # The receipt reserves the parent job; this child already links back to it.
     child.pop("action_id", None)

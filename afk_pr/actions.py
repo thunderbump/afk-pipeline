@@ -131,7 +131,20 @@ def submit_action(
                 return {"action": receipt, "directory": str(directory)}
             receipt["state"] = "submitting"
             jobs.write(path, receipt)
-            jobs.start(directory, phases, github=github, launcher=launcher)
+            if respond:
+                jobs.start(directory, phases, github=github, launcher=launcher)
+            else:
+                from afk_pr.validation import reservation, select
+
+                job = jobs.read(directory / "job.json")
+                with reservation(directory, job):
+                    identifier, expected = select(directory, job)
+                    job["fixture_contract"] = expected
+                    if identifier:
+                        job["fixture_job"] = identifier
+                        phases = [phase for phase in phases if phase != "fixtures"]
+                    jobs.write(directory / "job.json", job)
+                    jobs.start(directory, phases, github=github, launcher=launcher)
         except Exception as error:
             receipt.update(
                 state="paused",

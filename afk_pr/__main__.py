@@ -57,7 +57,7 @@ def main(argv=None):
     review.add_argument(
         "--fixtures-only",
         action="store_true",
-        help="use existing PR reviewers; always run fixtures",
+        help="validate without model review; reuse matching AFK validation when available",
     )
     review.add_argument(
         "--retry-publication",

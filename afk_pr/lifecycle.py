@@ -128,6 +128,28 @@ def cleanup(directory, *, dry_run=False):
 def eligibility(directory, job, phases, targets):
     from afk_pr import jobs
 
+    if job.get("fixture_job"):
+        from afk_pr.validation import contract, eligible
+
+        identifier = job["fixture_job"]
+        if not isinstance(identifier, str) or not re.fullmatch(
+            r"[0-9a-f]{16}", identifier
+        ):
+            return "invalid reused fixture identity"
+        child = directory.parent / identifier
+        try:
+            child_job = jobs.read(child / "job.json")
+            child_result = jobs.read(child / "fixtures.json")
+            if (
+                not eligible(child, child_job, contract(job))
+                or child_result.get("state") != "passed"
+                or child_result.get("publication") != "published"
+                or not quiescent(identifier, "fixtures")
+            ):
+                return "reused fixture success or inactivity is unconfirmed"
+        except (OSError, ValueError, KeyError):
+            return "reused fixture evidence is missing"
+
     # Required evidence must remain self-contained, not point into a clone.
     if any(p.is_symlink() for p in directory.rglob("*")):
         return "job evidence contains symlinks; inspect retained artifacts"
@@ -175,12 +197,20 @@ def eligibility(directory, job, phases, targets):
                 child_job = jobs.read(child / "job.json")
                 child_result = jobs.read(child / "fixtures.json")
                 if (
-                    child_job.get(f"{phase}_job") != job["id"]
+                    (
+                        progress.get("fixture_reused") is not True
+                        and child_job.get(f"{phase}_job") != job["id"]
+                    )
                     or child_job.get("head") != head
                     or child_result.get("state") != "passed"
                     or child_result.get("publication") != "published"
                 ):
                     return "fixture child did not pass and publish for this candidate"
+                if progress.get("fixture_reused") is True:
+                    from afk_pr.validation import contract, eligible
+
+                    if not eligible(child, child_job, contract({**job, "head": head})):
+                        return "reused fixture contract or integrity is unproven"
                 if not quiescent(child_id, "fixtures"):
                     return "fixture child inactivity is unconfirmed"
         if (
