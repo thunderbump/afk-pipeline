@@ -78,6 +78,12 @@ select model/thinking policy by purpose in [the inference runtime](afk_inference
 Each invocation records the selected Pi adapter family `pi` and contract version
 `1`; host TOML does not override that policy.
 
+Implementation (`attempt`), review and feedback response use `gpt-6.1-sol` with
+medium reasoning. Finding assessment keeps `gpt-5.6-sol` medium; completion
+assessment, Bead evaluation, acceptance planning and parent acceptance review
+keep `gpt-5.6-luna` low. Pi must resolve the exact selected model through
+`openai-codex`; an unavailable model fails the invocation without a fallback.
+
 ## Optional retained-Run metrics
 
 Generate a read-only local report from one or more retained prepared Runs:
