@@ -8,6 +8,7 @@ from pathlib import Path
 from unittest import mock
 
 from afk_inference import Capability, InferenceRuntime, PiAdapter
+from afk_inference import invoke as invoke_inference
 from afk_inference import runtime as runtime_module
 
 FIXTURES = Path(__file__).parent / "fixtures/pi_protocol"
@@ -60,6 +61,82 @@ class PiInferenceAdapterTest(unittest.TestCase):
         return FakeProcess(
             (FIXTURES / fixture).read_bytes(), b"pi stderr\n", returncode, failure
         )
+
+    def test_coding_roles_freeze_model_reasoning_tools_and_receipt_identity(self):
+        for purpose, capability, tools in (
+            ("attempt", Capability.WRITE, "read,bash,edit,write,grep,find,ls"),
+            ("review", Capability.READ_ONLY, "read,grep,find,ls"),
+            (
+                "feedback_response",
+                Capability.WRITE,
+                "read,bash,edit,write,grep,find,ls",
+            ),
+        ):
+            with self.subTest(purpose=purpose), tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                with mock.patch(
+                    "afk_inference.runtime.subprocess.Popen",
+                    return_value=self.process("successful.jsonl"),
+                ) as popen:
+                    result = invoke_inference(
+                        purpose=purpose,
+                        trusted_task_instructions="Return one JSON object.",
+                        untrusted_task_data={},
+                        requested_capability=capability,
+                        execution_root=root,
+                        timeout_seconds=2,
+                        evidence_directory=root / "evidence",
+                        validator=json.loads,
+                    )
+                self.assertEqual(result.outcome, "succeeded")
+                popen.assert_called_once()
+                argv = popen.call_args.args[0]
+                for flag, expected in (
+                    ("--provider", "openai-codex"),
+                    ("--model", "gpt-6.1-sol"),
+                    ("--thinking", "medium"),
+                    ("--tools", tools),
+                ):
+                    self.assertEqual(argv[argv.index(flag) + 1], expected)
+                receipt = json.loads((root / "evidence/receipt.json").read_text())
+                self.assertEqual(receipt["identity"]["model"], "gpt-6.1-sol")
+                self.assertEqual(receipt["identity"]["thinking"], "medium")
+                self.assertEqual(
+                    receipt["policy"]["requested_capability"], capability.value
+                )
+                invocation = json.loads((root / "evidence/invocation.json").read_text())
+                self.assertEqual(invocation["adapter"]["model"], "gpt-6.1-sol")
+
+    def test_unknown_model_failure_is_retained_without_retry_or_fallback(self):
+        stderr = b'Model "openai-codex/unknown-model" not found\n'
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            with mock.patch(
+                "afk_inference.runtime.subprocess.Popen",
+                return_value=FakeProcess(stderr=stderr, returncode=1),
+            ) as popen:
+                result = InferenceRuntime().invoke(
+                    purpose="attempt",
+                    trusted_task_instructions="Return one JSON object.",
+                    untrusted_task_data={},
+                    requested_capability=Capability.WRITE,
+                    execution_root=root,
+                    timeout_seconds=2,
+                    evidence_directory=root / "evidence",
+                    validator=json.loads,
+                    adapter=PiAdapter(model="unknown-model", thinking="medium"),
+                )
+            popen.assert_called_once()
+            self.assertEqual(result.outcome, "adapter_failed")
+            self.assertEqual(result.receipt["attempt_count"], 1)
+            self.assertEqual(result.receipt["identity"]["model"], "unknown-model")
+            self.assertEqual(
+                result.receipt["protocol"], {"status": "adapter_failed", "exit_code": 1}
+            )
+            self.assertEqual(
+                (root / "evidence/attempts/1/stderr.log").read_bytes(), stderr
+            )
+            self.assertIsNone(result.value)
 
     def test_private_rendering_fixed_argv_and_capability_profiles(self):
         for capability, expected in (
