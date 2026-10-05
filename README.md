@@ -190,6 +190,11 @@ Run the complete repository check:
 ./scripts/validate
 ```
 
+The pinned Ruff hooks check style without modifying tracked files. Formatting
+errors fail validation and can enter the orchestrator's ordinary bounded repair
+path. Validation that changes the candidate still requires operator attention.
+To apply formatting before committing, use `ruff format .` with Ruff 0.16.0.
+
 ## Explicit PR passes
 
 After one-time host setup, normal calls need only the task or PR:
