@@ -225,6 +225,8 @@ def start(directory, phases, *, github, launcher=launch):
     """Persist work before launching independent managed workers."""
     job = read(directory / "job.json")
     job["expected_phases"] = phases
+    if "fixtures" in phases:
+        job["fixture_evidence_version"] = 1
     write(directory / "job.json", job)
     for phase in phases:
         write(
@@ -264,13 +266,21 @@ def start(directory, phases, *, github, launcher=launch):
             KeyError,
             subprocess.SubprocessError,
         ) as error:
+            outcome = {
+                "state": "failed",
+                "publication": "pending",
+                "error": type(error).__name__,
+            }
+            if phase == "fixtures":
+                from afk_pr.validation import seal
+
+                write(
+                    directory / "fixtures-seal.json",
+                    {"sha256": seal(directory, job, outcome)},
+                )
             write(
                 directory / f"{phase}.json",
-                {
-                    "state": "failed",
-                    "publication": "pending",
-                    "error": type(error).__name__,
-                },
+                outcome,
             )
             publish(directory, phase, github=github)
 
@@ -504,6 +514,13 @@ def worker(directory, phase):
             finished_at=timestamp(),
             publication="pending",
         )
+        if phase == "fixtures":
+            from afk_pr.validation import seal
+
+            write(
+                directory / "fixtures-seal.json",
+                {"sha256": seal(directory, job, outcome)},
+            )
         write(directory / f"{phase}.json", outcome)
         publish(directory, phase)
 
@@ -514,6 +531,11 @@ def publish(directory, phase, *, github=None):
     result = read(directory / f"{phase}.json")
     if result["state"] in {"queued", "running"}:
         raise ValueError("phase has no terminal result to publish")
+    if phase == "fixtures":
+        from afk_pr.validation import sealed_execution
+
+        if not sealed_execution(directory, job, result):
+            raise ValueError("Fixture execution evidence changed; publication refused")
     try:
         if phase == "creation":
             from afk_pr.creation import publish_creation
@@ -572,10 +594,11 @@ def publish(directory, phase, *, github=None):
     ) as error:
         result.update(publication="failed", publication_error=type(error).__name__)
     if phase == "fixtures" and result.get("publication") == "published":
-        from afk_pr.validation import seal
+        from afk_pr.validation import publication_seal
 
         write(
-            directory / "fixtures-seal.json", {"sha256": seal(directory, job, result)}
+            directory / "fixtures-publication-seal.json",
+            {"sha256": publication_seal(result)},
         )
     write(directory / f"{phase}.json", result)
 

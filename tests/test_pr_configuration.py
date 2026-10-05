@@ -13,7 +13,11 @@ from unittest import mock
 
 from afk_pr import config, creation, jobs, lifecycle, workspace
 from afk_pr.__main__ import main
-from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
+from tests.pr_fixture_policy import (
+    assert_slow_cleanup,
+    seal_fixture_result,
+    slow_cleanup_policy,
+)
 
 URL = "https://github.com/example/repository/pull/1"
 REMOTE = "https://github.com/example/repository.git"
@@ -360,6 +364,7 @@ class ConfigurationTests(unittest.TestCase):
         jobs.write(d / "fixtures.json", {"state": "passed", "publication": "published"})
         (d / "fixtures.stdout.log").write_text("passed")
         (d / "fixtures.stderr.log").write_text("")
+        seal_fixture_result(d)
         return d, path
 
     def test_cleanup_retains_active_dirty_failed_and_external_resource(self):

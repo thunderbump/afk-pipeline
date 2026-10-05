@@ -415,6 +415,11 @@ active validation is shared and waited for. A matching published candidate failu
 is retained as failure, so the supervisor can repair it without another build.
 Reuse verifies the candidate, base, repository, resolved command/policy/resource,
 adapter identity, candidate integrity, publication and sealed job/result/logs.
+The worker seals execution before publication, including unknown-contract fresh
+execution. Status verifies that binding independently of reuse eligibility.
+Failed publication can be retried without another execution. Publication updates
+have a separate metadata seal; retry verifies and preserves the execution seal,
+and refuses edited results/logs before any GitHub write.
 Identity is checked before and after fixture execution; drift cannot pass or spend
 a candidate-repair allowance. Missing, tampered, interrupted, timed-out or stopped
 unpublished evidence is not reusable. Historical jobs without identity/seals still

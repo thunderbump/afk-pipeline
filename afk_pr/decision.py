@@ -87,9 +87,9 @@ def decide(context, selected):
                 or "fixtures" not in child.get("expected_phases", [])
             ):
                 pause("fixture_child_missing_or_mismatched", job_id)
-        if (
+        if item.get("validation_evidence") == "invalid" or (
             "fixtures" in expected
-            and job.get("fixture_contract")
+            and ("fixture_contract" in job or "fixture_evidence_version" in job)
             and item.get("validation_evidence") != "valid"
         ):
             pause("validation_contract_or_evidence_changed", job_id, "fixtures")
@@ -284,15 +284,14 @@ def observe(url, run_root, job_ids, *, github=None):
                 r"[0-9a-f]{16}", fixture_id
             ):
                 pending.append(fixture_id)
-            if item["job"].get("fixture_contract") and "fixtures" in item["job"].get(
-                "expected_phases", []
-            ):
-                from afk_pr.validation import contract, eligible
+            if "fixtures" in item["phases"]:
+                from afk_pr.validation import owning_evidence
 
-                expected = contract(item["job"])
                 item["validation_evidence"] = (
                     "valid"
-                    if eligible(root / job_id, item["job"], expected)
+                    if owning_evidence(
+                        root / job_id, item["job"], item["phases"]["fixtures"]
+                    )
                     else "invalid"
                 )
             for phase in ("response", "creation"):

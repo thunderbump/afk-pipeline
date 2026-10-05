@@ -485,6 +485,96 @@ class ValidationReuseTests(unittest.TestCase):
         )
         self.assertEqual(self.executions(), 1)
 
+    def test_unknown_contract_fresh_execution_is_valid_but_never_reused(self):
+        self.policy["identity_command"] = [sys.executable, "-c", "raise SystemExit(2)"]
+        first = self.submit()
+        self.complete(first)
+        self.assertIsNone(jobs.read(first / "job.json")["fixture_contract"])
+        self.assertEqual(self.observed(first)["decision"]["recommendation"], "continue")
+        second = self.submit()
+        self.assertNotIn("fixture_job", jobs.read(second / "job.json"))
+        self.complete(second)
+        self.assertEqual(self.executions(), 2)
+
+    def test_removing_contract_cannot_bypass_new_execution_integrity(self):
+        (self.source / "value").write_text("bad")
+        self.git(self.source, "commit", "-am", "broken candidate")
+        self.git(self.source, "push", str(self.remote), "feature")
+        self.context()
+        _, child = self.creation()
+        self.complete(child)
+        saved_job = jobs.read(child / "job.json")
+        saved_result = jobs.read(child / "fixtures.json")
+        jobs.write(child / "job.json", {**saved_job, "fixture_contract": None})
+        (child / "fixtures.stdout.log").write_text("tampered execution")
+        changed = copy.deepcopy(saved_result)
+        changed["state"] = "passed"
+        changed["process"]["exit_code"] = 0
+        jobs.write(child / "fixtures.json", changed)
+        observed = self.observed(child)
+        self.assertEqual(observed["decision"]["recommendation"], "pause", observed)
+        self.assertIn(
+            "validation_contract_or_evidence_changed",
+            {reason["code"] for reason in observed["decision"]["reasons"]},
+        )
+
+    def test_publication_failure_recovers_without_execution_or_seal_changes(self):
+        parent, child = self.creation()
+        self.gh.fixture_summary.side_effect = RuntimeError(
+            "temporary publication failure"
+        )
+        self.complete(child)
+        self.assertEqual(jobs.read(child / "fixtures.json")["publication"], "failed")
+        original_seal = (child / "fixtures-seal.json").read_bytes()
+        observed = self.observed(parent)
+        self.assertEqual(
+            observed["decision"]["recommendation"], "retry_publication", observed
+        )
+        self.assertEqual(
+            observed["decision"]["publication_retry_job_ids"], [child.name]
+        )
+        self.gh.fixture_summary.side_effect = None
+        jobs.retry_publication(child)
+        self.assertEqual(
+            self.observed(parent)["decision"]["recommendation"], "continue"
+        )
+        self.assertEqual((child / "fixtures-seal.json").read_bytes(), original_seal)
+        reviewed = self.submit()
+        self.complete(reviewed)
+        self.assertEqual(self.executions(), 1)
+
+    def test_republication_refuses_result_or_log_tampering_instead_of_resealing(self):
+        (self.source / "value").write_text("bad")
+        self.git(self.source, "commit", "-am", "broken candidate")
+        self.git(self.source, "push", str(self.remote), "feature")
+        self.context()
+        _, child = self.creation()
+        self.complete(child)
+        original = jobs.read(child / "fixtures.json")
+        original_seal = (child / "fixtures-seal.json").read_bytes()
+        for alteration in ("result", "log"):
+            with self.subTest(alteration=alteration):
+                changed = copy.deepcopy(original)
+                if alteration == "result":
+                    changed["state"] = "passed"
+                    changed["process"]["exit_code"] = 0
+                else:
+                    (child / "fixtures.stdout.log").write_text(
+                        "fabricated successful output"
+                    )
+                jobs.write(child / "fixtures.json", changed)
+                status_calls = self.gh.fixture_status.call_count
+                with self.assertRaisesRegex(ValueError, "execution evidence changed"):
+                    jobs.retry_publication(child)
+                self.assertEqual(self.gh.fixture_status.call_count, status_calls)
+                self.assertEqual(
+                    (child / "fixtures-seal.json").read_bytes(), original_seal
+                )
+                self.assertEqual(
+                    self.observed(child)["decision"]["recommendation"], "pause"
+                )
+        self.assertEqual(self.executions(), 1)
+
     def test_identity_drift_during_execution_cannot_pass_or_be_reused(self):
         identity = self.root / "identity"
         identity.write_text("release-v1")

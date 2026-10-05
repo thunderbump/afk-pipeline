@@ -145,15 +145,82 @@ def reservation(directory, job):
 
 
 def seal(directory, job, record):
-    """Detect later edits to the selected job, result or retained execution logs."""
+    """Bind execution before publication; remote-write metadata cannot renew trust."""
     files = {}
     for name in ("fixtures.stdout.log", "fixtures.stderr.log"):
         path = directory / name
+        if not path.exists() and not path.is_symlink():
+            files[name] = None
+            continue
         if path.is_symlink() or not path.is_file():
             return None
         with path.open("rb") as stream:
             files[name] = hashlib.file_digest(stream, "sha256").hexdigest()
-    return digest({"job": job, "result": record, "logs": files})
+    execution = {
+        key: value
+        for key, value in record.items()
+        if key
+        not in {
+            "publication",
+            "publication_error",
+            "url",
+            "worker_observation",
+            "progress",
+            "note",
+        }
+    }
+    return digest({"job": job, "result": execution, "logs": files})
+
+
+def publication_seal(record):
+    return digest({key: record.get(key) for key in ("publication", "url")})
+
+
+def sealed_execution(directory, job, record):
+    """New owning results require integrity even when their contract is unknown."""
+    from afk_pr import jobs
+
+    sealed = directory / "fixtures-seal.json"
+    modern = (
+        "fixture_contract" in job
+        or "fixture_evidence_version" in job
+        or sealed.exists()
+        or sealed.is_symlink()
+    )
+    if not modern:
+        return True  # Historical owning outcomes retain their existing status contract.
+    if record.get("state") in {"queued", "running"}:
+        return True
+    try:
+        if directory.is_symlink() or sealed.is_symlink():
+            return False
+        value = jobs.read(sealed)
+        current = seal(directory, job, record)
+        return current is not None and value.get("sha256") == current
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
+def owning_evidence(directory, job, record):
+    """Execution validity is separate from published reuse eligibility."""
+    from afk_pr import jobs
+
+    if not sealed_execution(directory, job, record):
+        return False
+    if job.get("fixture_contract") and contract(job) != job["fixture_contract"]:
+        return False
+    if (
+        record.get("publication") == "published"
+        and (directory / "fixtures-seal.json").exists()
+    ):
+        try:
+            path = directory / "fixtures-publication-seal.json"
+            if path.is_symlink():
+                return False
+            return jobs.read(path).get("sha256") == publication_seal(record)
+        except (OSError, ValueError, TypeError, AttributeError):
+            return False
+    return True
 
 
 def eligible(directory, job, expected, *, probe=True):
@@ -201,6 +268,8 @@ def eligible(directory, job, expected, *, probe=True):
             or record.get("contract_unchanged") is not True
         ):
             return False
+        if not owning_evidence(directory, job, record):
+            return False
         if record.get("publication") == "pending":
             return record.get("worker_observation") == "active"
         if record.get("publication") != "published" or not record.get("url"):
@@ -215,8 +284,10 @@ def eligible(directory, job, expected, *, probe=True):
             or (record["state"] == "passed") != (process["exit_code"] == 0)
         ):
             return False
-        saved = jobs.read(directory / "fixtures-seal.json")
-        return saved.get("sha256") == seal(directory, job, record) is not None
+        return all(
+            (directory / name).is_file()
+            for name in ("fixtures.stdout.log", "fixtures.stderr.log")
+        )
     except (
         OSError,
         ValueError,
