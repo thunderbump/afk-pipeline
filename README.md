@@ -312,7 +312,7 @@ command = ["./scripts/validate"]
 github_auth = true
 ```
 
-`description`, `timeout_seconds`, `termination_grace_seconds` and
+`description`, `timeout_seconds`, `termination_grace_seconds`, `identity_command` and
 `repairable_exit_codes` are optional fixture settings. Grace defaults to 60 seconds
 and accepts integers from 1 through 3600. The repair set defaults to `[1]`; `[]`
 disables validation repairs. Repair codes must be unique integers from 1 through
@@ -340,6 +340,17 @@ and unpublished evidence cannot repair. A temporary `[projects.<slug>.fixtures]`
 fixture fields until repo policy reaches its trusted base. Its `host_override`
 provenance is visible; it replaces the complete fixture selection, not an opaque
 recursive merge. Remove it when the committed repo policy is available.
+
+An external validator can supply `identity_command`, a read-only argv returning
+`{"schema_version":1,"identity":"sha256:..."}`. The opaque identity must bind its
+effective release, complete profile and declared input contract. AFK retains only
+its digest. The probe starts no validation job and needs no privilege. Its stdout
+is bounded to 4096 bytes, its nonempty identity to 256 UTF-8 bytes, and execution
+to ten seconds. Failure, unknown versions or malformed output disable reuse.
+Repository-relative entrypoints such as `./scripts/validate` are bound to the exact
+candidate/base and full resolved policy. PATH/absolute validator commands and
+external fixture resources require an identity probe for reuse. A stable command
+path alone never proves an external validator release unchanged.
 
 ### Acquisition and shared fixtures
 
@@ -376,8 +387,11 @@ starting another implementation. A paused job remains attached to the Bead; insp
 its explanation and workspace, or create a successor Bead for a new attempt.
 
 `review` captures the description, commits, ordinary comments, all reviewers,
-inline discussion, checks/annotations and statuses. It launches independent
-read-only inference and deterministic fixture services. `--fixtures-only` omits
+inline discussion, checks/annotations and statuses. It launches read-only
+inference, and selects matching retained AFK validation for this PR revision when
+available. A new candidate, changed base, effective policy or adapter identity
+starts fresh deterministic validation. Without matching evidence it launches
+independent fixture and inference services. `--fixtures-only` omits
 AFK inference, leaving existing reviewers to supply feedback. Review posts a
 COMMENT review and never pushes code. Multiple-reviewer expansion remains possible;
 the current default is one `afk` reviewer.
@@ -388,6 +402,23 @@ that the PR head/base and branch remain unchanged before pushing normally. Fork
 response branches remain unsupported. New pushes schedule fixtures at that exact
 commit; no-change responses post an explanation without another fixture run.
 No pass merges or automatically invokes another model pass.
+
+Creation, response and review serialize their fixture handoffs per PR. Matching
+active validation is shared and waited for. A matching published candidate failure
+is retained as failure, so the supervisor can repair it without another build.
+Reuse verifies the candidate, base, repository, resolved command/policy/resource,
+adapter identity, candidate integrity, publication and sealed job/result/logs.
+Identity is checked before and after fixture execution; drift cannot pass or spend
+a candidate-repair allowance. Missing, tampered, interrupted, timed-out or stopped
+unpublished evidence is not reusable. Historical jobs without identity/seals still
+report their retained results but require new validation for reuse.
+
+A review selecting earlier validation records its original `fixture_job`. It has
+no synthetic fixture phase; `status --job` follows that job and preserves its
+logs, public link, outcome and ownership. Publication retry targets the original
+fixture owner. Each code-changing response validates its new revision once, and
+the next review reuses that evidence. There is no extra final build: readiness
+waits for the final revision's matching published validation and structured review.
 
 Fixture results have a commit status and updateable summary with bounded redacted
 log excerpts. Detailed logs, inference evidence, task snapshots and progress stay

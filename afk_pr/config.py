@@ -14,6 +14,7 @@ DEFAULT_CONFIG = (
 DEFAULTS = tomllib.loads(Path(__file__).with_name("defaults.toml").read_text())
 FIXTURE_FIELDS = {
     "command",
+    "identity_command",
     "description",
     "timeout_seconds",
     "github_auth",
@@ -216,6 +217,13 @@ def fixture_policy(value):
         or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in command)
     ):
         raise ValueError("fixtures.command must be a nonempty argv array")
+    probe = value.get("identity_command")
+    if probe is not None and (
+        not isinstance(probe, list)
+        or not probe
+        or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in probe)
+    ):
+        raise ValueError("fixtures.identity_command must be a nonempty argv array")
     description = value.get("description", "Repository fixtures: " + " ".join(command))
     if (
         not isinstance(description, str)
@@ -230,6 +238,7 @@ def fixture_policy(value):
         raise ValueError("fixtures.github_auth must be boolean")
     return {
         "command": command,
+        **({"identity_command": probe} if probe is not None else {}),
         "evidence": description,
         "timeout_seconds": positive(
             value.get("timeout_seconds", DEFAULTS["fixture_timeout_seconds"]),

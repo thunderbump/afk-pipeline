@@ -194,6 +194,7 @@ def repairable_validation(result):
             code = process.get("exit_code")
             if (
                 record.get("candidate_unchanged") is not True
+                or record.get("contract_unchanged") is False
                 or type(code) is not int
                 or process.get("timed_out") is not False
                 or process.get("interrupted") is not False
