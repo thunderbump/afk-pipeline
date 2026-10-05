@@ -234,9 +234,10 @@ repair budget only when the job's `repairable_exit_codes` includes 1. Exit 2,
 other exits, direct signals, stale or missing evidence, unpublished results,
 timeouts, interruptions and uncertain execution pause. The response reads the
 existing PR diagnostics. It stops at `ready_for_merge` only after a
-clean review and passing fixtures. It allows at most five responses, configurable downward with
-`--max-repairs 0..5`. Merge and Bead closure remain explicit `finish` operations.
-No command reads orchestration state or requires this caller.
+clean review and passing fixtures. A run initially allows at most five responses,
+configurable downward with `--max-repairs 0..5`. Merge and Bead closure remain
+explicit `finish` operations. No command reads orchestration state or requires
+this caller.
 
 There is one run per Bead under the configured `run_root/orchestrations`.
 Repeated `start` returns that run without restarting it. After inspecting a pause,
@@ -244,16 +245,22 @@ use independent commands to resolve the problem and then resume:
 
 ```sh
 ./afk orchestrate resume RUN_ID
+# Grant 1 through 5 more repair attempts to an exhausted run:
+./afk orchestrate resume RUN_ID --add-repairs 5
 # Explicitly choose the PR's current head after manual intervention:
 ./afk orchestrate resume RUN_ID --review-current-head
 ```
 
 Ordinary resume retains the selected job and submission identity. Current-head
-resume starts a fresh review and keeps the repair count. A running worker locks
-its run; stop `afk-orchestrate-RUN_ID.service` with `systemctl --user stop` before
-changing it. Stopping the driver does not stop detached PR jobs. Inspect them
-before resuming. A ready result records the observed revision; it is not a
-permanent statement about a changing PR.
+resume starts a fresh review and keeps the repair count. `--add-repairs 1..5`
+increases `max_repairs` without resetting repairs or changing the selected work;
+each explicit use grants another allowance. The extension and its old and new
+limits are recorded before worker launch, so a launch failure does not revoke it.
+A running worker locks its run and rejects resume changes; stop
+`afk-orchestrate-RUN_ID.service` with `systemctl --user stop` before changing it.
+Stopping the driver does not stop detached PR jobs. Inspect them before resuming.
+A ready result records the observed revision; it is not a permanent statement
+about a changing PR.
 
 For explicit scheduling or a bounded test, `start --no-start` saves state without
 launching a worker, and `orchestrate step RUN_ID` performs one transition. All
