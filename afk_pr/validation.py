@@ -64,8 +64,11 @@ def contract(job):
     """Unknown external validator identity disables reuse, without blocking execution.
 
     Repository entrypoints are bound to the exact candidate and trusted base.
-    External adapters must supply a bounded, read-only identity command covering
-    their effective release, profile and inputs. Only its digest is retained.
+    Configuring an external identity command requires its owner to keep the sealed
+    release, profile and inputs stable throughout invocation, using deployment
+    admission/quiescence or an equivalent lease. Endpoint probes detect observed
+    drift; they alone cannot exclude a transient A-to-B-to-A contract change.
+    Only the identity digest is retained.
     """
     policy = job.get("validation", {})
     if not isinstance(policy, dict):

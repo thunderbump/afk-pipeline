@@ -352,6 +352,13 @@ candidate/base and full resolved policy. PATH/absolute validator commands and
 external fixture resources require an identity probe for reuse. A stable command
 path alone never proves an external validator release unchanged.
 
+Configuring `identity_command` requires the adapter owner to keep that sealed
+execution contract stable throughout each invocation. Deployment admission and
+quiescence, or an equivalent lease, must enforce this requirement. The before/after
+probes detect observed drift; endpoint equality alone cannot exclude a transient
+A-to-B-to-A change. EQEmu activation must refuse active AFK services, hold exclusive
+helper admission through the switch and preserve immutable installed releases.
+
 ### Acquisition and shared fixtures
 
 Each phase gets a full independent clone, detached at the recorded candidate SHA,
