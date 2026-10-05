@@ -672,3 +672,5 @@ publication of successful results. The supervisor also waits for active
 publication of failed fixtures before selecting a repair. Inactive or unknown
 publishers and failed publication still require attention; no second publisher
 or inference worker is launched by observation.
+
+<!-- afk-ss4i-live-repair-20261004: initial -->
