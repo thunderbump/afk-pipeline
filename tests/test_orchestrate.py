@@ -437,6 +437,61 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(self.tick()["status"], "ready_for_merge")
         self.assertEqual(len(self.world.receipts), 2)
 
+    def test_exhausted_run_can_add_repairs_without_changing_identity(self):
+        self.world.findings = [{"message": "Still broken"}]
+        self.reach_review()
+        exhausted = driver.read(self.path)
+        exhausted.update(
+            status="paused",
+            reason="repair_limit_reached",
+            repairs=5,
+            max_repairs=5,
+        )
+        driver.write(self.path, exhausted)
+        identity = {
+            key: exhausted[key]
+            for key in ("stage", "generation", "active_job", "head", "base")
+        }
+
+        resumed = driver.resume(self.path, add_repairs=2, commands=self.world)
+
+        self.assertEqual(resumed["repairs"], 5)
+        self.assertEqual(resumed["max_repairs"], 7)
+        self.assertEqual({key: resumed[key] for key in identity}, identity)
+        addition = resumed["events"][-2]
+        self.assertEqual(
+            (
+                addition["event"],
+                addition["old_limit"],
+                addition["new_limit"],
+                addition["added_allowance"],
+            ),
+            ("repair_allowance_added", 5, 7, 2),
+        )
+        self.assertEqual(self.tick()["repairs"], 6)
+
+    def test_repeated_addition_and_ordinary_resume_have_explicit_semantics(self):
+        original = driver.read(self.path)
+        ordinary = driver.resume(self.path, commands=self.world)
+        self.assertEqual(ordinary["max_repairs"], original["max_repairs"])
+        self.assertFalse(
+            any(
+                event["event"] == "repair_allowance_added"
+                for event in ordinary["events"]
+            )
+        )
+        first = driver.resume(self.path, add_repairs=3, commands=self.world)
+        second = driver.resume(self.path, add_repairs=3, commands=self.world)
+        self.assertEqual(first["max_repairs"], 8)
+        self.assertEqual(second["max_repairs"], 11)
+
+    def test_invalid_added_repairs_are_rejected_without_state_change(self):
+        before = self.path.read_bytes()
+        for value in (0, -1, 6, 1.5, True, "2"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                driver.resume(self.path, add_repairs=value, commands=self.world)
+            self.assertEqual(self.path.read_bytes(), before)
+
     def test_existing_pr_without_creation_receipt_can_be_explicitly_adopted(self):
         result = driver.advance(
             self.path, lambda *args: {"bead_id": "central-example", "pr_url": URL}
@@ -477,6 +532,7 @@ class DriverTests(unittest.TestCase):
             for operation in (
                 lambda: self.tick(),
                 lambda: driver.resume(path, commands=self.world),
+                lambda: driver.resume(path, add_repairs=1, commands=self.world),
                 lambda: cli.worker(path),
             ):
                 with self.assertRaises(BlockingIOError):
@@ -590,6 +646,27 @@ class CLITests(unittest.TestCase):
             self.assertFalse(
                 any("SECRET" in part or "private" in part for part in argv)
             )
+
+    def test_resume_launch_failure_preserves_added_allowance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            orchestration_root = root / "orchestrations"
+            path, _ = driver.create(
+                orchestration_root, "central-example", Path("/tmp/config")
+            )
+            run_id = path.parent.name
+            with (
+                mock.patch("afk_pr.config.state_root", return_value=root),
+                mock.patch.object(cli, "launch", side_effect=OSError("launch failed")),
+                mock.patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                self.assertEqual(
+                    cli.main(["resume", run_id, "--add-repairs", "2"]), 1
+                )
+            state = driver.read(path)
+            self.assertEqual((state["repairs"], state["max_repairs"]), (0, 7))
+            self.assertEqual(state["events"][-2]["event"], "repair_allowance_added")
+            self.assertEqual(state["events"][-1]["event"], "resumed")
 
     def test_job_is_read_only_and_available_without_a_pr(self):
         with tempfile.TemporaryDirectory() as temporary:
