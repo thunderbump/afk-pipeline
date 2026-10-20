@@ -81,6 +81,8 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     if args.identity:
+        if args.mode == "metadata-sleep":
+            time.sleep(10)
         print(
             json.dumps(
                 {

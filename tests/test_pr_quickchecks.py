@@ -200,6 +200,89 @@ class QuickCheckTests(unittest.TestCase):
                 session.close()
         self.assertTrue(session.blocker)
 
+    def test_metadata_registration_failure_terminates_and_reaps_started_child(self):
+        session = self.session("metadata-sleep")
+        original_lease, spawn = quickchecks.lease, subprocess.Popen
+        accesses, children = 0, []
+
+        def fail_registration(path):
+            nonlocal accesses
+            accesses += 1
+            if accesses == 2:
+                raise OSError("fixture ownership registration failure")
+            return original_lease(path)
+
+        def retain_child(*args, **kwargs):
+            child = spawn(*args, **kwargs)
+            children.append(child)
+            return child
+
+        with (
+            mock.patch("afk_pr.quickchecks.lease", side_effect=fail_registration),
+            mock.patch("afk_pr.quickchecks.subprocess.Popen", side_effect=retain_child),
+        ):
+            self.assertEqual(quickchecks.run(session.path)["status"], "unavailable")
+        self.assertEqual(len(children), 1)
+        self.assertIsNotNone(children[0].poll())
+        state = jobs.read(session.path)
+        self.assertIsNone(state["child"])
+        self.assertTrue(state["cleanup_confirmed"])
+        session.close()
+        self.assertFalse(session.blocker)
+
+    def test_unreaped_metadata_child_blocks_readmission_and_keeps_exact_ownership(self):
+        session = self.session("metadata-sleep")
+        original_lease, spawn = quickchecks.lease, subprocess.Popen
+        accesses, children = 0, []
+
+        def fail_registration(path):
+            nonlocal accesses
+            accesses += 1
+            if accesses == 2:
+                raise OSError("fixture ownership registration failure")
+            return original_lease(path)
+
+        def retain_child(*args, **kwargs):
+            child = spawn(*args, **kwargs)
+            children.append(child)
+            return child
+
+        try:
+            with (
+                mock.patch("afk_pr.quickchecks.lease", side_effect=fail_registration),
+                mock.patch(
+                    "afk_pr.quickchecks.subprocess.Popen", side_effect=retain_child
+                ),
+                mock.patch(
+                    "afk_pr.quickchecks.stop_owned",
+                    side_effect=OSError("fixture termination failure"),
+                ),
+            ):
+                self.assertEqual(quickchecks.run(session.path)["status"], "unavailable")
+            original = jobs.read(session.path)["child"]
+            self.assertEqual(original["pid"], children[0].pid)
+            self.assertEqual(
+                original["started"], quickchecks.process_identity(children[0].pid)
+            )
+            self.assertFalse(jobs.read(session.path)["cleanup_confirmed"])
+            self.assertFalse(jobs.read(session.path)["pending"])
+            # Local ownership is a separate admission condition even if a
+            # metadata-only operation is recorded as having no remote VM.
+            with quickchecks.lease(session.path) as state:
+                state["cleanup_confirmed"] = True
+            self.assertEqual(quickchecks.run(session.path)["status"], "unavailable")
+            self.assertEqual(jobs.read(session.path)["calls"], 1)
+            self.assertEqual(jobs.read(session.path)["child"], original)
+            self.assertIsNone(children[0].poll())
+            session.close()
+            children[0].wait(timeout=2)
+            self.assertTrue(session.blocker)
+        finally:
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=2)
+
     def test_runtime_grants_only_fixed_command_to_writing_implementation_purposes(self):
         session = self.session()
         arguments = {

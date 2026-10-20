@@ -119,7 +119,10 @@ class Session:
                 state["active"] = False
                 child = state["child"]
                 self.blocker = (
-                    self.blocker or state["pending"] or not state["cleanup_confirmed"]
+                    self.blocker
+                    or state["pending"]
+                    or bool(child)
+                    or not state["cleanup_confirmed"]
                 )
             if child:
                 stop_owned(child["pid"], child["started"])
@@ -175,6 +178,7 @@ def run(path):
             return unavailable("The owning inference is no longer active")
         if (
             state["pending"]
+            or state["child"] is not None
             or not state["cleanup_confirmed"]
             or state["calls"] >= MAX_CALLS
         ):
@@ -210,6 +214,7 @@ def run(path):
             with stdout.open("wb") as out, stderr.open("wb") as err:
                 if name == "quick":
                     cleanup = False
+                started = None
                 process = subprocess.Popen(
                     [*policy["command"], *args],
                     cwd=directory,
@@ -218,30 +223,47 @@ def run(path):
                     stderr=err,
                     start_new_session=False,
                 )
-                started = process_identity(process.pid)
-                with lease(path) as current:
-                    current["child"] = {"pid": process.pid, "started": started}
-                    admitted = current["active"]
                 try:
+                    started = process_identity(process.pid)
+                    with lease(path) as current:
+                        current["child"] = {"pid": process.pid, "started": started}
+                        admitted = current["active"]
                     if not admitted:
                         raise TimeoutError(
                             "Owning inference closed during command launch"
                         )
                     code = process.wait(timeout=timeout)
-                except (TimeoutError, subprocess.TimeoutExpired):
-                    stop_owned(process.pid, started)
-                    process.wait(timeout=2)
-                    raise TimeoutError(
-                        "Development command timed out; remote cleanup remains unconfirmed"
-                    ) from None
-                except BaseException:
-                    stop_owned(process.pid, started)
-                    process.wait(timeout=2)
+                except BaseException as error:
+                    if started is None:
+                        # This function still owns the unreaped Popen child even
+                        # when reading or registering its start identity failed.
+                        process.terminate()
+                        try:
+                            process.wait(timeout=CLEANUP_GRACE)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=2)
+                    else:
+                        stop_owned(process.pid, started)
+                        process.wait(timeout=2)
+                    if isinstance(error, (TimeoutError, subprocess.TimeoutExpired)):
+                        raise TimeoutError(
+                            "Development command timed out; remote cleanup remains unconfirmed"
+                        ) from None
                     raise
                 finally:
+                    running = process.poll() is None
+                    if running:
+                        cleanup = False
                     with lease(path) as current:
-                        if process.poll() is not None:
-                            current["child"] = None
+                        current["child"] = (
+                            {
+                                "pid": process.pid,
+                                "started": started or process_identity(process.pid),
+                            }
+                            if running
+                            else None
+                        )
             for log in (stdout, stderr):
                 log.chmod(0o600)
                 if log.stat().st_size > 4 * 1024**2:
@@ -389,7 +411,9 @@ def run(path):
         result = unavailable(str(error)[:1000])
     finally:
         with lease(path) as current:
-            current.update(pending=False, cleanup_confirmed=cleanup)
+            current.update(
+                pending=False, cleanup_confirmed=cleanup and current["child"] is None
+            )
         jobs.write(
             directory / "feedback.json",
             result or unavailable("Development call interrupted"),
