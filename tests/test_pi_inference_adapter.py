@@ -1,6 +1,7 @@
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -137,6 +138,66 @@ class PiInferenceAdapterTest(unittest.TestCase):
                 (root / "evidence/attempts/1/stderr.log").read_bytes(), stderr
             )
             self.assertIsNone(result.value)
+
+    def test_dev_check_bash_timeout_reaches_both_coding_roles_without_extending_deadline(
+        self,
+    ):
+        for purpose in ("attempt", "feedback_response"):
+            for budget, tool_timeout in ((1800, 1800), (1619.604, 1620), (0.25, 1)):
+                with (
+                    self.subTest(purpose=purpose, budget=budget),
+                    tempfile.TemporaryDirectory() as temporary,
+                ):
+                    parent = Path(temporary)
+                    root = parent / "source"
+                    root.mkdir()
+                    lease = parent / "lease.json"
+                    lease.write_text("{}")
+                    command = (
+                        sys.executable,
+                        str(Path(runtime_module.__file__).resolve().parents[1] / "afk"),
+                        "dev-check",
+                        str(lease),
+                    )
+                    process = self.process("successful.jsonl")
+                    with mock.patch(
+                        "afk_inference.runtime.subprocess.Popen", return_value=process
+                    ) as popen:
+                        result = InferenceRuntime().invoke(
+                            purpose=purpose,
+                            trusted_task_instructions="Edit source.",
+                            untrusted_task_data={},
+                            requested_capability=Capability.WRITE,
+                            execution_root=root,
+                            timeout_seconds=budget,
+                            evidence_directory=parent / "evidence",
+                            validator=json.loads,
+                            adapter=PiAdapter(model="model-frozen", thinking="medium"),
+                            development_check_command=command,
+                        )
+                    self.assertEqual(result.outcome, "succeeded")
+                    argv = popen.call_args.args[0]
+                    instructions = argv[argv.index("--system-prompt") + 1]
+                    self.assertIn(json.dumps(command), instructions)
+                    self.assertIn(
+                        f"Set the bash tool's timeout argument to {tool_timeout} seconds",
+                        instructions,
+                    )
+                    self.assertIn(
+                        "smaller remaining inference/lease budget", instructions
+                    )
+                    self.assertIn("two-call limit", instructions)
+                    self.assertIn("do not poll or background", instructions)
+                    self.assertEqual(
+                        result.receipt["timing"]["timeout_seconds"], budget
+                    )
+                    self.assertTrue(process.communicate_timeouts)
+                    self.assertTrue(
+                        all(
+                            0 < timeout <= budget
+                            for timeout in process.communicate_timeouts
+                        )
+                    )
 
     def test_private_rendering_fixed_argv_and_capability_profiles(self):
         for capability, expected in (
