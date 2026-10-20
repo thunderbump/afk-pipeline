@@ -14,6 +14,7 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -487,6 +488,7 @@ class InferenceRuntime:
         adapter: FixtureAdapter | PiAdapter,
         task_contract_version: int = 1,
         read_only_evidence: tuple[str, ...] = (),
+        development_check_command: tuple[str, ...] | None = None,
     ) -> InferenceResult:
         if (
             not isinstance(task_contract_version, int)
@@ -498,6 +500,37 @@ class InferenceRuntime:
         system_instructions = evidence_system_instructions(
             capability, read_only_evidence
         )
+        if development_check_command is not None:
+            expected = (
+                sys.executable,
+                str(Path(__file__).resolve().parents[1] / "afk"),
+                "dev-check",
+            )
+            if (
+                capability != Capability.WRITE
+                or purpose not in {"attempt", "feedback_response"}
+                or not isinstance(development_check_command, tuple)
+                or len(development_check_command) != 4
+                or development_check_command[:3] != expected
+                or not Path(development_check_command[3]).is_absolute()
+                or not Path(development_check_command[3]).is_file()
+                or Path(development_check_command[3])
+                .resolve()
+                .is_relative_to(Path(execution_root).resolve())
+            ):
+                raise ValueError(
+                    "Development-check authority must name this runtime's fixed CLI and active lease"
+                )
+            system_instructions += (
+                " Additionally, you may use bash to run exactly this trusted development-check argv synchronously: "
+                + json.dumps(development_check_command)
+                + ". Do not background it, edit its lease/helper/evidence, or alter its arguments. "
+                "The command delegates read-only source checks to the configured isolated worker and returns private diagnostics. "
+                "This grants no other host execution, file-write, repository, fixture or publication permission. "
+                "Use at most two calls within this inference's existing wall time. Read its feedback, edit, and rerun if useful. "
+                "Feedback applies only to its exact input snapshot and becomes stale after edits; it is never final acceptance. "
+                "If unavailable, report the limitation. Candidate Cargo/native execution on the host remains forbidden."
+            )
         root = Path(execution_root).resolve()
         evidence = Path(evidence_directory).resolve()
         self._validate(
@@ -558,6 +591,11 @@ class InferenceRuntime:
                 "evidence_directory": str(evidence),
                 "timeout_seconds": timeout_seconds,
                 "adapter": adapter.descriptor(),
+                **(
+                    {"development_check_command": list(development_check_command)}
+                    if development_check_command is not None
+                    else {}
+                ),
             }
             _prepare_evidence(
                 evidence,

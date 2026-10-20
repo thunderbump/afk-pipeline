@@ -164,6 +164,34 @@ class ConfigurationTests(unittest.TestCase):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 config.formatter_policy({**valid, **change})
 
+    def test_host_quickcheck_selection_is_pinned_optional_and_budget_bounded(self):
+        self.assertNotIn(
+            "quickcheck", jobs.read(self.submit(fixtures_only=True) / "job.json")
+        )
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[projects.example.quickcheck]\ncommand = ["/opt/trusted/quick-worker-snapshot"]\nrecipe_sha256 = "'
+            + "c" * 64
+            + '"\nimplementation_sha256 = "'
+            + "d" * 64
+            + '"\n'
+        )
+        job = jobs.read(self.submit(respond=True) / "job.json")
+        self.assertEqual(
+            job["quickcheck"]["command"], ["/opt/trusted/quick-worker-snapshot"]
+        )
+        self.assertEqual(job["quickcheck"]["timeout_seconds"], 3630)
+        self.assertEqual(config.quickcheck_policy(job["quickcheck"]), job["quickcheck"])
+        for change in (
+            {"command": ["./candidate"]},
+            {"timeout_seconds": 3631},
+            {"timeout_seconds": True},
+            {"max_calls": 100},
+            {"recipe_sha256": ""},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                config.quickcheck_policy({**job["quickcheck"], **change})
+
     def test_old_validation_section_coexists_with_explicit_fixture_override(self):
         (self.source / "afk.toml").write_text(
             'schema_version = 1\n[validation]\ncommand = ["old-runner"]\n'

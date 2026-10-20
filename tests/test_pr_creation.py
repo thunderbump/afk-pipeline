@@ -1,4 +1,5 @@
 import copy
+import json
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,7 @@ from afk_pr.github import GitHub
 from tests.formatting_fixture import FORMATTED, UNFORMATTED
 from tests.formatting_fixture import policy as formatter_policy
 from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
+from tests.quickcheck_fixture import policy as quickcheck_policy
 
 URL = "https://github.com/example/repository/pull/12"
 
@@ -246,6 +248,80 @@ class CreationTests(unittest.TestCase):
         workspace = self.invocation["execution_root"]
         self.assertEqual((workspace / "rust/actors/lib.rs").read_bytes(), UNFORMATTED)
         self.assertEqual(self.real_git(workspace, "rev-parse", "HEAD"), self.base)
+        self.assertFalse(self.pushes)
+
+    def test_same_implementation_can_fix_quick_feedback_before_first_publication(self):
+        directory = self.prepared()
+        job = jobs.read(directory / "job.json")
+        job.update(quickcheck=quickcheck_policy(), review_timeout=180)
+        jobs.write(directory / "job.json", job)
+        reports = []
+
+        def check_and_repair(invocation):
+            source = invocation["execution_root"] / "sample.cpp"
+            source.write_text("BROKEN\n")
+            command = invocation["development_check_command"]
+            reports.append(
+                json.loads(
+                    subprocess.run(
+                        command, capture_output=True, text=True, check=False, timeout=10
+                    ).stdout
+                )
+            )
+            source.write_text("fixed\n")
+            reports.append(
+                json.loads(
+                    subprocess.run(
+                        command, capture_output=True, text=True, check=False, timeout=10
+                    ).stdout
+                )
+            )
+
+        result = self.implement(directory, before_return=check_and_repair)
+        self.assertEqual(result["state"], "completed")
+        self.assertEqual(
+            [r["development_status"] for r in reports], ["source_failed", "completed"]
+        )
+        candidate = jobs.read(directory / "creation-progress.json")["candidate"]
+        self.assertEqual(
+            self.real_git(self.bare, "show", candidate + ":sample.cpp"), "fixed"
+        )
+        self.assertEqual(
+            self.real_git(
+                self.bare, "rev-list", "--count", self.base + ".." + candidate
+            ),
+            "1",
+        )
+        self.assertEqual(
+            jobs.read(directory / "creation-quickchecks/lease.json")["calls"], 2
+        )
+        self.assertFalse(
+            jobs.read(directory / "creation-quickchecks/lease.json")["active"]
+        )
+
+    def test_creation_does_not_commit_or_push_after_unconfirmed_development_cleanup(
+        self,
+    ):
+        directory = self.prepared()
+        job = jobs.read(directory / "job.json")
+        job.update(quickcheck=quickcheck_policy("no-cleanup"), review_timeout=180)
+        jobs.write(directory / "job.json", job)
+
+        def check(invocation):
+            subprocess.run(
+                invocation["development_check_command"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertEqual(
+            self.implement(directory, before_return=check)["state"], "failed"
+        )
+        self.assertEqual(
+            self.real_git(self.invocation["execution_root"], "rev-parse", "HEAD"),
+            self.base,
+        )
         self.assertFalse(self.pushes)
 
     def test_submission_is_background_and_repeat_does_not_reimplement(self):
