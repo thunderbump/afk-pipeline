@@ -135,6 +135,13 @@ def main():
             for entry in snapshot["files"]
         ],
     }
+    identity["indexed_paths"] = sorted(
+        name.decode()
+        for name in subprocess.check_output(
+            ["git", "-C", str(args.repo), "ls-files", "--cached", "-z"]
+        ).split(b"\0")
+        if name and selected(name.decode())
+    )
     if args.snapshot_identity:
         print(json.dumps(identity))
         return

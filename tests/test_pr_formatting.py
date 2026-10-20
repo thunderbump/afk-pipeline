@@ -93,6 +93,31 @@ class FormattingTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "output limit"):
             formatting.json_file(path)
 
+    def test_supported_512_long_path_identity_reaches_format_and_apply(self):
+        nested = self.repo / "rust/actors" / ("d" * 100)
+        nested.mkdir()
+        for number in range(510):
+            (nested / (f"{number:06d}" + "x" * 115 + ".rs")).write_bytes(b"\n")
+        jobs.git(self.repo, "add", "--all")
+        index = (self.repo / ".git/index").read_bytes()
+        self.assertIsNone(self.run_format())
+        path = self.directory / "creation-formatting/input.stdout.json"
+        self.assertGreater(path.stat().st_size, 256 * 1024)
+        identity = formatting.json_file(path, limit=formatting.SNAPSHOT_IDENTITY_LIMIT)
+        self.assertEqual(len(identity["files"]), 512)
+        self.assertEqual(len(identity["indexed_paths"]), 512)
+        self.assertEqual(self.file.read_bytes(), FORMATTED)
+        self.assertEqual(index, (self.repo / ".git/index").read_bytes())
+        self.assertTrue(
+            (self.directory / "creation-formatting/application.json").exists()
+        )
+
+    def test_snapshot_identity_ceiling_remains_finite(self):
+        path = self.root / "identity.json"
+        path.write_bytes(b" " * (formatting.SNAPSHOT_IDENTITY_LIMIT + 1))
+        with self.assertRaisesRegex(ValueError, "output limit"):
+            formatting.json_file(path, limit=formatting.SNAPSHOT_IDENTITY_LIMIT)
+
     def test_bad_results_preserve_all_edits_and_index(self):
         for mode in (
             "fail",

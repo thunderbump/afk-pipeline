@@ -11,12 +11,15 @@ from pathlib import Path
 from afk_runtime import run_command
 
 QUERY_TIMEOUT = 30
-JSON_LIMIT = 256 * 1024
-LOG_LIMIT = 2 * 1024**2
+JSON_LIMIT = 1536 * 1024
+# Protocol v1 allows 512 entries in each of files/deleted/indexed_paths and
+# 240-character paths. Five MiB also covers JSON's escaped Unicode expansion.
+SNAPSHOT_IDENTITY_LIMIT = 5 * 1024**2
+LOG_LIMIT = SNAPSHOT_IDENTITY_LIMIT
 
 
-def json_file(path):
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > JSON_LIMIT:
+def json_file(path, limit=JSON_LIMIT):
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > limit:
         raise ValueError(
             "Formatter JSON is missing, linked or exceeds its output limit"
         )
@@ -105,7 +108,10 @@ def normalize(directory, job, workspace, phase):
                 "Formatter identity differs from the selected trusted recipe"
             )
         arguments = ["--repo", str(workspace), "--base", job["base"]]
-        before = json_file(execute("input", [*arguments, "--snapshot-identity"]))
+        before = json_file(
+            execute("input", [*arguments, "--snapshot-identity"]),
+            limit=SNAPSHOT_IDENTITY_LIMIT,
+        )
         if (
             type(before.get("version")) is not int
             or before["version"] != 1
