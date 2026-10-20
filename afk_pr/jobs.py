@@ -110,6 +110,18 @@ def launch(directory, phase, timeout):
     publication_margin = 900
     lifetime = 2 * timeout + publication_margin
     stop_grace = 20
+    if phase in {"creation", "response"} and job.get("formatter"):
+        from afk_pr.formatting import QUERY_TIMEOUT
+
+        formatter = job["formatter"]
+        grace = formatter["termination_grace_seconds"]
+        lifetime += (
+            3 * QUERY_TIMEOUT
+            + formatter["timeout_seconds"]
+            + grace
+            + REAP_GRACE_SECONDS
+        )
+        stop_grace = grace + REAP_GRACE_SECONDS + publication_margin
     if phase == "fixtures":
         from afk_pr.workspace import MAX_ACQUISITION_COMMANDS
 

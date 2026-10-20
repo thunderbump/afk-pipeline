@@ -359,6 +359,48 @@ probes detect observed drift; endpoint equality alone cannot exclude a transient
 A-to-B-to-A change. EQEmu activation must refuse active AFK services, hold exclusive
 helper admission through the switch and preserve immutable installed releases.
 
+### Optional formatting before publication
+
+A host-selected formatter can normalize Rust edits after implementation or response
+inference returns and before AFK stages any files. Fresh clones require no Git hook.
+Projects without this setting retain their existing behavior. Repository `afk.toml`
+and candidate text cannot enable or replace this host command.
+
+```toml
+[projects.bump-eqemu.formatter]
+command = ["/absolute/immutable/client/scripts/format-worker-snapshot"]
+recipe_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+implementation_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+timeout_seconds = 1200
+termination_grace_seconds = 780
+```
+
+Select a reviewed, installed client whose `--identity` describes protocol version 1
+and the pinned offline Rust formatter. Its `--snapshot-identity` operation inspects
+source without starting Cargo or a VM. The format operation must execute inside its
+disposable VM and return bounded source changes with input, output, recipe and
+implementation identities. The client path and arguments are trusted host policy;
+do not point them at an editable candidate checkout.
+
+AFK pins the client and original snapshot, then calls its explicit `--apply-result`
+operation with those expected identities. This operation starts no VM and executes
+no candidate code. The trusted client owns canonical inventory, path/bounds checks,
+replacement verification and rollback. It verifies the unchanged current snapshot
+and the complete proposed output before writing only captured regular `.rs` files.
+Added Rust files participate, tracked deletions remain deleted and other edits
+remain intact. AFK requires a matching successful application receipt. Failed,
+stale, malformed, oversized or unconfirmed cleanup results stop the phase before
+commit or push and retain the editable clone.
+Private `<phase>-formatting/` files retain command output, process results and the
+application or failure receipt. These files contain source and are not public logs.
+
+Formatting uses no additional inference or orchestration repair. It joins the
+existing creation or response commit. Normal exact-head, check-only validation
+still follows publication, and formatting success provides no acceptance evidence.
+Formatter timeout and cooperative cleanup are included in the phase service budget.
+Changing the worker recipe requires updating the explicit host identity pins after
+review and qualification; this setting does not activate or upgrade the worker.
+
 ### Acquisition and shared fixtures
 
 Each phase gets a full independent clone, detached at the recorded candidate SHA,

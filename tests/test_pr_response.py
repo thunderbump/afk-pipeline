@@ -8,6 +8,8 @@ from unittest import mock
 
 from afk_pr import jobs, response
 from afk_pr.github import GitHub
+from tests.formatting_fixture import FORMATTED, UNFORMATTED
+from tests.formatting_fixture import policy as formatter_policy
 from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
 
 URL = "https://github.com/example/repository/pull/12"
@@ -173,6 +175,36 @@ class ResponseTests(unittest.TestCase):
 
     def edit(self):
         (self.repo / "file.txt").write_text("repaired\n")
+
+    def add_rust(self):
+        root = self.repo / "rust/actors"
+        root.mkdir(parents=True)
+        (root / "Cargo.toml").write_text("[workspace]\n")
+        (root / "lib.rs").write_bytes(UNFORMATTED)
+
+    def test_formats_response_before_single_commit_and_unchanged_fixture_handoff(self):
+        self.job["formatter"] = formatter_policy()
+        self.assertEqual(self.run_response(self.add_rust)["state"], "completed")
+        progress = jobs.read(self.directory / "response-progress.json")
+        candidate = progress["candidate"]
+        self.assertEqual(
+            self.real_git(self.bare, "show", candidate + ":rust/actors/lib.rs"),
+            FORMATTED.decode().strip(),
+        )
+        self.assertEqual(self.real_git(self.repo, "status", "--porcelain"), "")
+        self.assertEqual(self.real_git(self.repo, "rev-parse", "HEAD^"), self.head)
+        child = jobs.read(self.directory.parent / progress["fixture_job"] / "job.json")
+        self.assertEqual(child["head"], candidate)
+        self.assertEqual(child["validation"], self.job["validation"])
+        self.assertEqual([call[1] for call in self.launches], ["fixtures"])
+
+    def test_formatter_failure_blocks_response_commit_push_and_fixture(self):
+        self.job["formatter"] = formatter_policy("malformed")
+        self.assertEqual(self.run_response(self.add_rust)["state"], "failed")
+        self.assertEqual(self.real_git(self.repo, "rev-parse", "HEAD"), self.head)
+        self.assertEqual((self.repo / "rust/actors/lib.rs").read_bytes(), UNFORMATTED)
+        self.assertFalse(self.pushes)
+        self.assertFalse(self.launches)
 
     def test_response_child_inherits_policy_and_finishes_slow_cleanup(self):
         self.job["validation"].update(slow_cleanup_policy())

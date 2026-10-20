@@ -205,6 +205,11 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
             "state": "paused",
             "reason": "Model changed HEAD; inspect retained work",
         }
+    from afk_pr.formatting import normalize
+
+    formatting_failure = normalize(directory, job, workspace, "response")
+    if formatting_failure:
+        return formatting_failure
     changed = bool(jobs.git(workspace, "status", "--porcelain"))
     if changed:
         jobs.git(workspace, "add", "--all")
