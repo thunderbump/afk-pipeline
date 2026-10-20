@@ -542,6 +542,13 @@ class InferenceRuntime:
             validator,
             adapter,
         )
+        if development_check_command is not None:
+            system_instructions += (
+                f" Set the bash tool's timeout argument to {math.ceil(timeout_seconds)} seconds "
+                "for each authorized development-check call. The command still enforces the "
+                "smaller remaining inference/lease budget and two-call limit. "
+                "Wait synchronously; do not poll or background it."
+            )
         if capability not in adapter.capabilities:
             raise ValueError(
                 f"adapter {adapter.identity} does not support {capability.value}"
