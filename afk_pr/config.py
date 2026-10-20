@@ -139,13 +139,19 @@ def load_config(path=DEFAULT_CONFIG):
     for slug, project in projects.items():
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
             raise ValueError("invalid project slug")
-        keys(project, {"repository", "fixture_resource", "fixtures"}, "project")
+        keys(
+            project,
+            {"repository", "fixture_resource", "fixtures", "formatter"},
+            "project",
+        )
         identity = repository(project.get("repository"))
         if identity in seen:
             raise ValueError("duplicate registered GitHub repository")
         seen.add(identity)
         if "fixtures" in project:
             fixture_policy(project["fixtures"])
+        if "formatter" in project:
+            formatter_policy(project["formatter"])
     stacks = set()
     for name, resource in resources.items():
         keys(
@@ -250,6 +256,50 @@ def fixture_policy(value):
     }
 
 
+def formatter_policy(value):
+    """Select only a host-owned executable and pin its output recipe identities."""
+    keys(
+        value,
+        {
+            "command",
+            "recipe_sha256",
+            "implementation_sha256",
+            "timeout_seconds",
+            "termination_grace_seconds",
+        },
+        "formatter",
+    )
+    command = value.get("command")
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in command)
+        or not Path(command[0]).is_absolute()
+    ):
+        raise ValueError(
+            "formatter.command must start with an absolute trusted executable"
+        )
+    for name in ("recipe_sha256", "implementation_sha256"):
+        if not isinstance(value.get(name), str) or not re.fullmatch(
+            r"[0-9a-f]{64}", value[name]
+        ):
+            raise ValueError(f"formatter.{name} must be a SHA-256 digest")
+    timeout = value.get("timeout_seconds", 1200)
+    grace = value.get("termination_grace_seconds", 780)
+    if type(timeout) is not int or not 1 <= timeout <= 7200:
+        raise ValueError("formatter.timeout_seconds must be from 1 through 7200")
+    if type(grace) is not int or not 1 <= grace <= 3600:
+        raise ValueError(
+            "formatter.termination_grace_seconds must be from 1 through 3600"
+        )
+    return {
+        **value,
+        "command": list(command),
+        "timeout_seconds": timeout,
+        "termination_grace_seconds": grace,
+    }
+
+
 def policy(github, repo, sha, project):
     """Read policy from an exact trusted commit, never the candidate worktree."""
     tree = github.api(f"repos/{repo}/git/trees/{sha}")["tree"]
@@ -347,4 +397,15 @@ def job_settings(config, slug, project, github, base):
         else "repository:" + repo,
         "cleanup_allowed": resource is None,
         "config_source": config["config_path"],
+        **(
+            {
+                "formatter": formatter_policy(project["formatter"]),
+                "formatter_policy": {
+                    "source": "host_override",
+                    "config_source": config["config_path"],
+                },
+            }
+            if "formatter" in project
+            else {}
+        ),
     }

@@ -214,6 +214,11 @@ def implement(directory, job):
             "state": "paused",
             "reason": "Model changed HEAD; inspect retained work",
         }
+    from afk_pr.formatting import normalize
+
+    formatting_failure = normalize(directory, job, workspace, "creation")
+    if formatting_failure:
+        return formatting_failure
     if not jobs.git(workspace, "status", "--porcelain"):
         return {
             "state": "paused",

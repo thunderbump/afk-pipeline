@@ -123,6 +123,47 @@ class ConfigurationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             config.load_config(self.host)
 
+    def test_host_formatter_is_optional_pinned_and_frozen_into_job(self):
+        self.assertNotIn(
+            "formatter", jobs.read(self.submit(fixtures_only=True) / "job.json")
+        )
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[projects.example.formatter]\ncommand = ["/opt/trusted/format-worker-snapshot"]\nrecipe_sha256 = "'
+            + "a" * 64
+            + '"\nimplementation_sha256 = "'
+            + "b" * 64
+            + '"\n'
+        )
+        directory = self.submit(respond=True)
+        job = jobs.read(directory / "job.json")
+        self.assertEqual(
+            job["formatter"]["command"], ["/opt/trusted/format-worker-snapshot"]
+        )
+        self.assertEqual(job["formatter_policy"]["source"], "host_override")
+        self.host.write_text("malformed")
+        self.assertEqual(
+            jobs.read(directory / "job.json")["formatter"], job["formatter"]
+        )
+
+    def test_formatter_rejects_relative_executable_missing_identity_and_unknown_fields(
+        self,
+    ):
+        valid = {
+            "command": ["/opt/trusted/format-worker-snapshot"],
+            "recipe_sha256": "a" * 64,
+            "implementation_sha256": "b" * 64,
+        }
+        for change in (
+            {"command": ["./candidate-script"]},
+            {"recipe_sha256": ""},
+            {"extra": True},
+            {"timeout_seconds": True},
+            {"termination_grace_seconds": 0},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                config.formatter_policy({**valid, **change})
+
     def test_old_validation_section_coexists_with_explicit_fixture_override(self):
         (self.source / "afk.toml").write_text(
             'schema_version = 1\n[validation]\ncommand = ["old-runner"]\n'
