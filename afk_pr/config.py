@@ -141,7 +141,7 @@ def load_config(path=DEFAULT_CONFIG):
             raise ValueError("invalid project slug")
         keys(
             project,
-            {"repository", "fixture_resource", "fixtures", "formatter"},
+            {"repository", "fixture_resource", "fixtures", "formatter", "quickcheck"},
             "project",
         )
         identity = repository(project.get("repository"))
@@ -152,6 +152,8 @@ def load_config(path=DEFAULT_CONFIG):
             fixture_policy(project["fixtures"])
         if "formatter" in project:
             formatter_policy(project["formatter"])
+        if "quickcheck" in project:
+            quickcheck_policy(project["quickcheck"])
     stacks = set()
     for name, resource in resources.items():
         keys(
@@ -300,6 +302,28 @@ def formatter_policy(value):
     }
 
 
+def quickcheck_policy(value):
+    """Reuse trusted command selection with the fixed quick worker's time limits."""
+    keys(
+        value,
+        {"command", "recipe_sha256", "implementation_sha256", "timeout_seconds"},
+        "quickcheck",
+    )
+    policy = formatter_policy(
+        {
+            **value,
+            "timeout_seconds": value.get("timeout_seconds", 3630),
+            "termination_grace_seconds": 30,
+        }
+    )
+    if policy["timeout_seconds"] > 3630:
+        raise ValueError("quickcheck.timeout_seconds cannot exceed 3630")
+    policy.pop(
+        "termination_grace_seconds"
+    )  # The closed quick profile fixes this at 30s.
+    return policy
+
+
 def policy(github, repo, sha, project):
     """Read policy from an exact trusted commit, never the candidate worktree."""
     tree = github.api(f"repos/{repo}/git/trees/{sha}")["tree"]
@@ -406,6 +430,11 @@ def job_settings(config, slug, project, github, base):
                 },
             }
             if "formatter" in project
+            else {}
+        ),
+        **(
+            {"quickcheck": quickcheck_policy(project["quickcheck"])}
+            if "quickcheck" in project
             else {}
         ),
     }

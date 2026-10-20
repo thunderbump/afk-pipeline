@@ -401,6 +401,48 @@ Formatter timeout and cooperative cleanup are included in the phase service budg
 Changing the worker recipe requires updating the explicit host identity pins after
 review and qualification; this setting does not activate or upgrade the worker.
 
+### Development checks inside an implementation attempt
+
+Optional host policy exposes the fixed isolated quick-check client to implementation
+and response inference. It adds no permission to reviews or other purposes.
+
+```toml
+[projects.bump-eqemu.quickcheck]
+command = ["/absolute/immutable/client/scripts/quick-worker-snapshot"]
+recipe_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+implementation_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+timeout_seconds = 1200
+```
+
+The runtime authorizes exactly one absolute `afk dev-check <private-lease>` command
+through the existing bash tool. The model supplies no source, configuration, recipe,
+compiler or publication arguments. It runs synchronously and returns private,
+source-bound stage diagnostics to the same agent, which can edit and rerun before
+finishing. All compiler, Cargo and candidate execution remains inside the VM.
+Repository text cannot enable this host capability. A missing adapter leaves the
+ordinary final validation workflow available.
+
+Each inference gets at most two calls, one active call and its existing wall-time
+budget. The client limit is the smaller of the configured limit and remaining
+inference time, reserving 30 seconds for cleanup and 60 seconds for model feedback.
+The backend's one-hour ceiling is an upper bound. It does not silently extend the
+default 1800-second inference. Cold preparation may time out; the existing host
+`agent_timeout_seconds` setting can deliberately allow longer attempts.
+
+The client remains in Pi's process group. The separate validator service owns the
+VM and watches its socket for disconnection. AFK closes the private lease after
+inference and terminates any verified active frontend with a bounded grace period.
+PID start identities and pidfds prevent signalling a reused PID. A dead frontend
+requests cancellation and does not prove remote cleanup. Unfinished, malformed
+submitted or unconfirmed-cleanup calls block publication and further quick calls.
+
+Results identify the exact dirty source snapshot and selected, completed, failed,
+unavailable and skipped checks. Later edits make older feedback stale. Quick results
+are advisory and cannot replace final formatting, exact-head full validation,
+independent review or guarded merge. These calls create no additional model response
+or orchestration repair. `<phase>-quickchecks/` retains private lease, process logs
+and feedback; its diagnostics must not be copied into public summaries.
+
 ### Acquisition and shared fixtures
 
 Each phase gets a full independent clone, detached at the recorded candidate SHA,
