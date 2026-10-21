@@ -357,23 +357,23 @@ def fixtures(directory, job):
         contract_before = contract(job) if expected is not None else None
         workspace = checkout(directory, job, "fixtures")
         command = list(job["validation"]["command"])
+        environment = [
+            "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence")
+        ]
         resource = job.get("fixture_resource")
         if resource:
-            command = [
-                "env",
-                "VALIDATION_WORKER_HOME=" + resource["worker_home"],
-                "AKKSTACK_DIR=" + resource["stack_path"],
-                "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence"),
-                *command,
-            ]
+            environment.extend(
+                [
+                    "VALIDATION_WORKER_HOME=" + resource["worker_home"],
+                    "AKKSTACK_DIR=" + resource["stack_path"],
+                ]
+            )
         elif job.get("layout") != "independent-clones-v1":
-            command = [
-                "env",
+            environment.append(
                 "VALIDATION_WORKER_HOME="
-                + str(Path(job["repository"]) / ".validation-worker"),
-                "VALIDATION_AFK_EVIDENCE_DIR=" + str(directory / "fixture-evidence"),
-                *command,
-            ]
+                + str(Path(job["repository"]) / ".validation-worker")
+            )
+        command = ["env", *environment, *command]
         if job["validation"].get("github_auth"):
             # Resolve credentials in the worker child; never retain token values in job/argv.
             command = [
