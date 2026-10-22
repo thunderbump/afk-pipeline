@@ -437,6 +437,51 @@ class DriverTests(unittest.TestCase):
         self.assertEqual(self.tick()["status"], "ready_for_merge")
         self.assertEqual(len(self.world.receipts), 2)
 
+    def test_exhausted_run_can_add_repairs_without_resetting_identity(self):
+        self.world.findings = [{"message": "Still broken"}]
+        self.reach_review()
+        state = driver.read(self.path)
+        state.update(
+            status="paused",
+            reason="repair_limit_reached",
+            repairs=state["max_repairs"],
+        )
+        driver.write(self.path, state)
+        identity = (state["stage"], state["generation"], state["active_job"])
+
+        resumed = driver.resume(self.path, add_repairs=3, commands=self.world)
+
+        self.assertEqual(resumed["repairs"], 5)
+        self.assertEqual(resumed["max_repairs"], 8)
+        self.assertEqual(
+            (resumed["stage"], resumed["generation"], resumed["active_job"]),
+            identity,
+        )
+        extension = resumed["events"][-2]
+        self.assertEqual(
+            (
+                extension["event"],
+                extension["old_max_repairs"],
+                extension["new_max_repairs"],
+                extension["added_repairs"],
+            ),
+            ("repair_budget_extended", 5, 8, 3),
+        )
+        self.assertEqual(self.tick()["stage"], "response_submit")
+
+    def test_repeated_repair_extensions_are_additive(self):
+        first = driver.resume(self.path, add_repairs=2, commands=self.world)
+        second = driver.resume(self.path, add_repairs=2, commands=self.world)
+        self.assertEqual((first["max_repairs"], second["max_repairs"]), (7, 9))
+        self.assertEqual(second["repairs"], 0)
+
+    def test_invalid_repair_extensions_do_not_change_state(self):
+        original = driver.read(self.path)
+        for value in (0, -1, 6, True, 1.5, "1"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                driver.resume(self.path, add_repairs=value, commands=self.world)
+            self.assertEqual(driver.read(self.path), original)
+
     def test_existing_pr_without_creation_receipt_can_be_explicitly_adopted(self):
         result = driver.advance(
             self.path, lambda *args: {"bead_id": "central-example", "pr_url": URL}
@@ -477,6 +522,7 @@ class DriverTests(unittest.TestCase):
             for operation in (
                 lambda: self.tick(),
                 lambda: driver.resume(path, commands=self.world),
+                lambda: driver.resume(path, add_repairs=1, commands=self.world),
                 lambda: cli.worker(path),
             ):
                 with self.assertRaises(BlockingIOError):
@@ -611,6 +657,28 @@ class CLITests(unittest.TestCase):
         ):
             self.assertEqual(pr_main(["job", "../job"]), 1)
             load.assert_not_called()
+
+    def test_resume_launch_failure_preserves_added_repairs(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path, _ = driver.create(
+                root / "orchestrations", "central-example", root / "config.toml"
+            )
+            state = driver.read(path)
+            state.update(status="paused", reason="repair_limit_reached", repairs=5)
+            driver.write(path, state)
+            with (
+                mock.patch("afk_pr.config.state_root", return_value=root),
+                mock.patch.object(cli, "launch", side_effect=OSError("launch failed")),
+                mock.patch("sys.stdout", new_callable=io.StringIO),
+            ):
+                self.assertEqual(
+                    cli.main(["resume", state["id"], "--add-repairs", "2"]), 1
+                )
+            saved = driver.read(path)
+            self.assertEqual((saved["repairs"], saved["max_repairs"]), (5, 7))
+            self.assertEqual(saved["events"][-2]["event"], "repair_budget_extended")
+            self.assertEqual(saved["events"][-1]["event"], "resumed")
 
     def test_launch_failure_keeps_recoverable_state_and_duplicate_start_does_not_launch(
         self,

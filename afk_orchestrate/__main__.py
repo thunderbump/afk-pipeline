@@ -99,6 +99,16 @@ def main(argv=None):
         command.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
         if name == "resume":
             command.add_argument("--review-current-head", action="store_true")
+            command.add_argument(
+                "--add-repairs",
+                type=int,
+                choices=range(1, driver.MAX_ADDED_REPAIRS + 1),
+                metavar=f"1..{driver.MAX_ADDED_REPAIRS}",
+                help=(
+                    "add to this run's repair limit; repeating the option on a "
+                    "later resume adds another allowance"
+                ),
+            )
     start.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     background = commands.add_parser("worker", help=argparse.SUPPRESS)
     background.add_argument("path", type=Path)
@@ -124,7 +134,9 @@ def main(argv=None):
                 driver.advance(path)
             elif args.command == "resume":
                 state = driver.resume(
-                    path, review_current_head=args.review_current_head
+                    path,
+                    review_current_head=args.review_current_head,
+                    add_repairs=args.add_repairs,
                 )
                 if state["status"] == "running":
                     launch(path)
