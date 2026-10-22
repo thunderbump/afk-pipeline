@@ -78,6 +78,12 @@ select model/thinking policy by purpose in [the inference runtime](afk_inference
 Each invocation records the selected Pi adapter family `pi` and contract version
 `1`; host TOML does not override that policy.
 
+Implementation (`attempt`), review and feedback response use `gpt-6.1-sol` with
+medium reasoning. Finding assessment keeps `gpt-5.6-sol` medium; completion
+assessment, Bead evaluation, acceptance planning and parent acceptance review
+keep `gpt-5.6-luna` low. Pi must resolve the exact selected model through
+`openai-codex`; an unavailable model fails the invocation without a fallback.
+
 ## Optional retained-Run metrics
 
 Generate a read-only local report from one or more retained prepared Runs:
@@ -313,7 +319,7 @@ command = ["./scripts/validate"]
 github_auth = true
 ```
 
-`description`, `timeout_seconds`, `termination_grace_seconds` and
+`description`, `timeout_seconds`, `termination_grace_seconds`, `identity_command` and
 `repairable_exit_codes` are optional fixture settings. Grace defaults to 60 seconds
 and accepts integers from 1 through 3600. The repair set defaults to `[1]`; `[]`
 disables validation repairs. Repair codes must be unique integers from 1 through
@@ -341,6 +347,108 @@ and unpublished evidence cannot repair. A temporary `[projects.<slug>.fixtures]`
 fixture fields until repo policy reaches its trusted base. Its `host_override`
 provenance is visible; it replaces the complete fixture selection, not an opaque
 recursive merge. Remove it when the committed repo policy is available.
+
+An external validator can supply `identity_command`, a read-only argv returning
+`{"schema_version":1,"identity":"sha256:..."}`. The opaque identity must bind its
+effective release, complete profile and declared input contract. AFK retains only
+its digest. The probe starts no validation job and needs no privilege. Its stdout
+is bounded to 4096 bytes, its nonempty identity to 256 UTF-8 bytes, and execution
+to ten seconds. Failure, unknown versions or malformed output disable reuse.
+Repository-relative entrypoints such as `./scripts/validate` are bound to the exact
+candidate/base and full resolved policy. PATH/absolute validator commands and
+external fixture resources require an identity probe for reuse. A stable command
+path alone never proves an external validator release unchanged.
+
+Configuring `identity_command` requires the adapter owner to keep that sealed
+execution contract stable throughout each invocation. Deployment admission and
+quiescence, or an equivalent lease, must enforce this requirement. The before/after
+probes detect observed drift; endpoint equality alone cannot exclude a transient
+A-to-B-to-A change. EQEmu activation must refuse active AFK services, hold exclusive
+helper admission through the switch and preserve immutable installed releases.
+
+### Optional formatting before publication
+
+A host-selected formatter can normalize Rust edits after implementation or response
+inference returns and before AFK stages any files. Fresh clones require no Git hook.
+Projects without this setting retain their existing behavior. Repository `afk.toml`
+and candidate text cannot enable or replace this host command.
+
+```toml
+[projects.bump-eqemu.formatter]
+command = ["/absolute/immutable/client/scripts/format-worker-snapshot"]
+recipe_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+implementation_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+timeout_seconds = 1200
+termination_grace_seconds = 780
+```
+
+Select a reviewed, installed client whose `--identity` describes protocol version 1
+and the pinned offline Rust formatter. Its `--snapshot-identity` operation inspects
+source without starting Cargo or a VM. The format operation must execute inside its
+disposable VM and return bounded source changes with input, output, recipe and
+implementation identities. The client path and arguments are trusted host policy;
+do not point them at an editable candidate checkout.
+
+AFK pins the client and original snapshot, then calls its explicit `--apply-result`
+operation with those expected identities. This operation starts no VM and executes
+no candidate code. The trusted client owns canonical inventory, path/bounds checks,
+replacement verification and rollback. It verifies the unchanged current snapshot
+and the complete proposed output before writing only captured regular `.rs` files.
+Added Rust files participate, tracked deletions remain deleted and other edits
+remain intact. AFK requires a matching successful application receipt. Failed,
+stale, malformed, oversized or unconfirmed cleanup results stop the phase before
+commit or push and retain the editable clone.
+Private `<phase>-formatting/` files retain command output, process results and the
+application or failure receipt. These files contain source and are not public logs.
+
+Formatting uses no additional inference or orchestration repair. It joins the
+existing creation or response commit. Normal exact-head, check-only validation
+still follows publication, and formatting success provides no acceptance evidence.
+Formatter timeout and cooperative cleanup are included in the phase service budget.
+Changing the worker recipe requires updating the explicit host identity pins after
+review and qualification; this setting does not activate or upgrade the worker.
+
+### Development checks inside an implementation attempt
+
+Optional host policy exposes the fixed isolated quick-check client to implementation
+and response inference. It adds no permission to reviews or other purposes.
+
+```toml
+[projects.bump-eqemu.quickcheck]
+command = ["/absolute/immutable/client/scripts/quick-worker-snapshot"]
+recipe_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+implementation_sha256 = "<64 lowercase hexadecimal characters from --identity>"
+timeout_seconds = 1200
+```
+
+The runtime authorizes exactly one absolute `afk dev-check <private-lease>` command
+through the existing bash tool. The model supplies no source, configuration, recipe,
+compiler or publication arguments. It runs synchronously and returns private,
+source-bound stage diagnostics to the same agent, which can edit and rerun before
+finishing. All compiler, Cargo and candidate execution remains inside the VM.
+Repository text cannot enable this host capability. A missing adapter leaves the
+ordinary final validation workflow available.
+
+Each inference gets at most two calls, one active call and its existing wall-time
+budget. The client limit is the smaller of the configured limit and remaining
+inference time, reserving 30 seconds for cleanup and 60 seconds for model feedback.
+The backend's one-hour ceiling is an upper bound. It does not silently extend the
+default 1800-second inference. Cold preparation may time out; the existing host
+`agent_timeout_seconds` setting can deliberately allow longer attempts.
+
+The client remains in Pi's process group. The separate validator service owns the
+VM and watches its socket for disconnection. AFK closes the private lease after
+inference and terminates any verified active frontend with a bounded grace period.
+PID start identities and pidfds prevent signalling a reused PID. A dead frontend
+requests cancellation and does not prove remote cleanup. Unfinished, malformed
+submitted or unconfirmed-cleanup calls block publication and further quick calls.
+
+Results identify the exact dirty source snapshot and selected, completed, failed,
+unavailable and skipped checks. Later edits make older feedback stale. Quick results
+are advisory and cannot replace final formatting, exact-head full validation,
+independent review or guarded merge. These calls create no additional model response
+or orchestration repair. `<phase>-quickchecks/` retains private lease, process logs
+and feedback; its diagnostics must not be copied into public summaries.
 
 ### Acquisition and shared fixtures
 
@@ -377,8 +485,11 @@ starting another implementation. A paused job remains attached to the Bead; insp
 its explanation and workspace, or create a successor Bead for a new attempt.
 
 `review` captures the description, commits, ordinary comments, all reviewers,
-inline discussion, checks/annotations and statuses. It launches independent
-read-only inference and deterministic fixture services. `--fixtures-only` omits
+inline discussion, checks/annotations and statuses. It launches read-only
+inference, and selects matching retained AFK validation for this PR revision when
+available. A new candidate, changed base, effective policy or adapter identity
+starts fresh deterministic validation. Without matching evidence it launches
+independent fixture and inference services. `--fixtures-only` omits
 AFK inference, leaving existing reviewers to supply feedback. Review posts a
 COMMENT review and never pushes code. Multiple-reviewer expansion remains possible;
 the current default is one `afk` reviewer.
@@ -389,6 +500,28 @@ that the PR head/base and branch remain unchanged before pushing normally. Fork
 response branches remain unsupported. New pushes schedule fixtures at that exact
 commit; no-change responses post an explanation without another fixture run.
 No pass merges or automatically invokes another model pass.
+
+Creation, response and review serialize their fixture handoffs per PR. Matching
+active validation is shared and waited for. A matching published candidate failure
+is retained as failure, so the supervisor can repair it without another build.
+Reuse verifies the candidate, base, repository, resolved command/policy/resource,
+adapter identity, candidate integrity, publication and sealed job/result/logs.
+The worker seals execution before publication, including unknown-contract fresh
+execution. Status verifies that binding independently of reuse eligibility.
+Failed publication can be retried without another execution. Publication updates
+have a separate metadata seal; retry verifies and preserves the execution seal,
+and refuses edited results/logs before any GitHub write.
+Identity is checked before and after fixture execution; drift cannot pass or spend
+a candidate-repair allowance. Missing, tampered, interrupted, timed-out or stopped
+unpublished evidence is not reusable. Historical jobs without identity/seals still
+report their retained results but require new validation for reuse.
+
+A review selecting earlier validation records its original `fixture_job`. It has
+no synthetic fixture phase; `status --job` follows that job and preserves its
+logs, public link, outcome and ownership. Publication retry targets the original
+fixture owner. Each code-changing response validates its new revision once, and
+the next review reuses that evidence. There is no extra final build: readiness
+waits for the final revision's matching published validation and structured review.
 
 Fixture results have a commit status and updateable summary with bounded redacted
 log excerpts. Detailed logs, inference evidence, task snapshots and progress stay

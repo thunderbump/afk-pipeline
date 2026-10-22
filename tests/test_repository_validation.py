@@ -1,7 +1,10 @@
 """Exercise pinned repository checks through real fixture execution."""
 
+import json
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -100,6 +103,74 @@ class RepositoryValidationTests(unittest.TestCase):
         self.assertEqual(capped["reason"], "repair_limit_reached")
         self.assertEqual(capped["repairs"], 0)
         self.assertFalse(any(call[0] == "respond" for call in capped_world.calls))
+
+    def test_every_fixture_layout_retains_job_evidence_with_scoped_worker_environment(
+        self,
+    ):
+        self.candidate('value = {"a": 1}\n')
+        probe = (
+            "import json,os,pathlib; "
+            "p=pathlib.Path(os.environ['VALIDATION_AFK_EVIDENCE_DIR']); "
+            "p.mkdir(parents=True); "
+            "(p/'private.json').write_text(json.dumps(dict("
+            "worker=os.environ.get('VALIDATION_WORKER_HOME'),"
+            "stack=os.environ.get('AKKSTACK_DIR')))); "
+            "raise SystemExit(1)"
+        )
+        self.job["validation"]["command"] = [sys.executable, "-c", probe]
+        resource = {"worker_home": "/selected/worker", "stack_path": "/selected/stack"}
+        for index, (layout, selected, worker, stack) in enumerate(
+            (
+                ("independent-clones-v1", None, "inherited-worker", "inherited-stack"),
+                (
+                    "independent-clones-v1",
+                    resource,
+                    "/selected/worker",
+                    "/selected/stack",
+                ),
+                (
+                    None,
+                    None,
+                    str(self.source / ".validation-worker"),
+                    "inherited-stack",
+                ),
+            )
+        ):
+            with self.subTest(layout=layout, resource=selected):
+                self.directory = self.root / f"job-{index}"
+                self.directory.mkdir()
+                self.job.update(layout=layout, fixture_resource=selected)
+                with (
+                    mock.patch.dict(
+                        os.environ,
+                        {
+                            "VALIDATION_WORKER_HOME": "inherited-worker",
+                            "AKKSTACK_DIR": "inherited-stack",
+                            "VALIDATION_AFK_EVIDENCE_DIR": str(self.root / "wrong"),
+                        },
+                    ),
+                    mock.patch.object(
+                        jobs, "run_command", wraps=jobs.run_command
+                    ) as run,
+                ):
+                    result = self.fixture()
+                self.assertEqual(result["state"], "failed", result)
+                self.assertEqual(result["process"]["exit_code"], 1)
+                self.assertTrue(result["candidate_unchanged"])
+                evidence = self.directory / "fixture-evidence/private.json"
+                self.assertEqual(
+                    json.loads(evidence.read_text()), {"worker": worker, "stack": stack}
+                )
+                command = run.call_args.args[0]
+                self.assertEqual(command.count("env"), 1)
+                self.assertEqual(
+                    sum(
+                        item.startswith("VALIDATION_AFK_EVIDENCE_DIR=")
+                        for item in command
+                    ),
+                    1,
+                )
+                self.assertFalse((self.root / "wrong").exists())
 
     def test_formatted_candidate_passes_without_mutation(self):
         head = self.candidate('value = {"a": 1}\n')

@@ -156,7 +156,8 @@ def submit_creation(
 
 
 def implement(directory, job):
-    from afk_inference.runtime import Capability, invoke
+    from afk_inference.runtime import Capability
+    from afk_pr.quickchecks import invoke_with_checks
 
     if remote_head(job, job["branch"]):
         return {
@@ -181,7 +182,11 @@ def implement(directory, job):
             )
         return value
 
-    result = invoke(
+    result, unfinished_check = invoke_with_checks(
+        directory,
+        job,
+        workspace,
+        "creation",
         purpose="attempt",
         task_contract_version=1,
         trusted_task_instructions=(
@@ -193,6 +198,7 @@ def implement(directory, job):
             "and explain the blocker. Edit only this worktree. Do not commit, push, open PRs, "
             "post comments, change Git configuration, or run or wait for fixtures. "
             "The host commits repairs and schedules configured fixtures independently. "
+            "Only a runtime-authorized development-check command may run during editing; final fixtures remain caller-owned. "
             "Notes are private operational context. Use them for the task, but do not copy "
             "private paths, capture identifiers or credentials into the public summary. "
             "Return concise Markdown describing the implementation, acceptance coverage, "
@@ -206,6 +212,11 @@ def implement(directory, job):
         evidence_directory=directory / "inference",
         timeout_seconds=job["review_timeout"],
     )
+    if unfinished_check:
+        return {
+            "state": "failed",
+            "reason": "Development check unfinished or cleanup unconfirmed; editable work retained without commit or push",
+        }
     if result.outcome != "succeeded":
         return {"state": "failed", "inference_outcome": result.outcome}
     (directory / "creation.md").write_text(result.value)
@@ -214,6 +225,11 @@ def implement(directory, job):
             "state": "paused",
             "reason": "Model changed HEAD; inspect retained work",
         }
+    from afk_pr.formatting import normalize
+
+    formatting_failure = normalize(directory, job, workspace, "creation")
+    if formatting_failure:
+        return formatting_failure
     if not jobs.git(workspace, "status", "--porcelain"):
         return {
             "state": "paused",

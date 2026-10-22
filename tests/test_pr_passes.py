@@ -8,6 +8,7 @@ from unittest import mock
 
 from afk_pr import jobs
 from afk_pr.github import GitHub, identity
+from tests.pr_fixture_policy import seal_fixture_result
 
 URL = "https://github.com/example/repository/pull/12"
 SHA = "a" * 40
@@ -275,6 +276,7 @@ class JobTests(unittest.TestCase):
             directory / "fixtures.json",
             {"state": "passed", "process": {"exit_code": 0}},
         )
+        seal_fixture_result(directory)
         self.gh.fail_publication = True
         jobs.publish(directory, "fixtures", github=self.gh)
         self.assertEqual(
@@ -453,6 +455,7 @@ class JobTests(unittest.TestCase):
                     "publication": "pending",
                 },
             )
+            seal_fixture_result(directory)
             return SimpleNamespace(returncode=0, stdout="inactive\n")
 
         with (
@@ -495,6 +498,7 @@ class JobTests(unittest.TestCase):
             "x" * 10000
             + "\nFAILED test_zone_pressure\npassword=do-not-publish @macroscope-app <script>"
         )
+        seal_fixture_result(directory)
         jobs.publish(directory, "fixtures", github=self.gh)
         body = self.gh.comments[-1]
         self.assertIn("FAILED test_zone_pressure", body)
@@ -525,6 +529,7 @@ class JobTests(unittest.TestCase):
         )
         (directory / "fixtures.stderr.log").write_text("PRIVATE_SENTINEL captured row")
         (evidence / "nested.log").write_text("password=PRIVATE_SENTINEL")
+        seal_fixture_result(directory)
         jobs.publish(directory, "fixtures", github=self.gh)
         body = self.gh.comments[-1]
         self.assertIn("upgraded_assertions", body)

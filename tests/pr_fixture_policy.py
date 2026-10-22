@@ -6,6 +6,22 @@ from unittest import mock
 from afk_pr import jobs
 
 
+def seal_fixture_result(directory):
+    """Stand in for a trusted terminal worker in publication-only test fixtures."""
+    from afk_pr.validation import publication_seal, seal
+
+    job = jobs.read(directory / "job.json")
+    record = jobs.read(directory / "fixtures.json")
+    jobs.write(
+        directory / "fixtures-seal.json", {"sha256": seal(directory, job, record)}
+    )
+    if record.get("publication") == "published":
+        jobs.write(
+            directory / "fixtures-publication-seal.json",
+            {"sha256": publication_seal(record)},
+        )
+
+
 def slow_cleanup_policy():
     script = (
         "import signal,time; "

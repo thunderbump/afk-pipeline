@@ -57,7 +57,7 @@ def main(argv=None):
     review.add_argument(
         "--fixtures-only",
         action="store_true",
-        help="use existing PR reviewers; always run fixtures",
+        help="validate without model review; reuse matching AFK validation when available",
     )
     review.add_argument(
         "--retry-publication",
@@ -112,8 +112,18 @@ def main(argv=None):
     background = commands.add_parser("worker", help=argparse.SUPPRESS)
     background.add_argument("directory", type=Path)
     background.add_argument("phase", choices=PHASES)
+    development = commands.add_parser(
+        "dev-check", help="run the fixed check authorized by an active inference lease"
+    )
+    development.add_argument("lease", type=Path)
     args = parser.parse_args(arguments)
     try:
+        if args.command == "dev-check":
+            from afk_pr.quickchecks import run
+
+            result = run(args.lease)
+            print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+            return 0 if result.get("development_status") == "completed" else 1
         if args.command == "assess":
             from afk_pr.assessment import assess
 

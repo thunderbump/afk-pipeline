@@ -122,7 +122,8 @@ def failed_fixture_logs(directory, job, summary):
 
 
 def respond(directory, job, *, github=None, launcher=jobs.launch):
-    from afk_inference.runtime import Capability, invoke
+    from afk_inference.runtime import Capability
+    from afk_pr.quickchecks import invoke_with_checks
 
     github = github or GitHub()
     pr = jobs.read(directory / "context.json")["pull_request"]
@@ -149,7 +150,11 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
             )
         return value
 
-    result = invoke(
+    result, unfinished_check = invoke_with_checks(
+        directory,
+        job,
+        workspace,
+        "response",
         purpose="feedback_response",
         task_contract_version=3,
         trusted_task_instructions=GUIDANCE
@@ -179,6 +184,7 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
             "Edit files only in this worktree. Do not commit, push, merge, post comments, "
             "change git configuration, or run or wait for fixtures. The caller commits repairs "
             "and schedules deterministic fixtures separately after pushing. "
+            "Only a runtime-authorized development-check command may run during editing; final fixtures remain caller-owned. "
             "Return concise Markdown explaining changes, consequential feedback accepted or "
             "declined, related callers and state transitions checked, regression coverage added "
             "or missing, unresolved questions and validation limits. Never claim pending tests passed."
@@ -197,6 +203,11 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
         evidence_directory=directory / "inference",
         timeout_seconds=job["review_timeout"],
     )
+    if unfinished_check:
+        return {
+            "state": "failed",
+            "reason": "Development check unfinished or cleanup unconfirmed; editable work retained without commit or push",
+        }
     if result.outcome != "succeeded":
         return {"state": "failed", "inference_outcome": result.outcome}
     (directory / "response.md").write_text(result.value)
@@ -205,6 +216,11 @@ def respond(directory, job, *, github=None, launcher=jobs.launch):
             "state": "paused",
             "reason": "Model changed HEAD; inspect retained work",
         }
+    from afk_pr.formatting import normalize
+
+    formatting_failure = normalize(directory, job, workspace, "response")
+    if formatting_failure:
+        return formatting_failure
     changed = bool(jobs.git(workspace, "status", "--porcelain"))
     if changed:
         jobs.git(workspace, "add", "--all")

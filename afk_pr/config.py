@@ -14,6 +14,7 @@ DEFAULT_CONFIG = (
 DEFAULTS = tomllib.loads(Path(__file__).with_name("defaults.toml").read_text())
 FIXTURE_FIELDS = {
     "command",
+    "identity_command",
     "description",
     "timeout_seconds",
     "github_auth",
@@ -138,13 +139,21 @@ def load_config(path=DEFAULT_CONFIG):
     for slug, project in projects.items():
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", slug):
             raise ValueError("invalid project slug")
-        keys(project, {"repository", "fixture_resource", "fixtures"}, "project")
+        keys(
+            project,
+            {"repository", "fixture_resource", "fixtures", "formatter", "quickcheck"},
+            "project",
+        )
         identity = repository(project.get("repository"))
         if identity in seen:
             raise ValueError("duplicate registered GitHub repository")
         seen.add(identity)
         if "fixtures" in project:
             fixture_policy(project["fixtures"])
+        if "formatter" in project:
+            formatter_policy(project["formatter"])
+        if "quickcheck" in project:
+            quickcheck_policy(project["quickcheck"])
     stacks = set()
     for name, resource in resources.items():
         keys(
@@ -216,6 +225,13 @@ def fixture_policy(value):
         or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in command)
     ):
         raise ValueError("fixtures.command must be a nonempty argv array")
+    probe = value.get("identity_command")
+    if probe is not None and (
+        not isinstance(probe, list)
+        or not probe
+        or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in probe)
+    ):
+        raise ValueError("fixtures.identity_command must be a nonempty argv array")
     description = value.get("description", "Repository fixtures: " + " ".join(command))
     if (
         not isinstance(description, str)
@@ -230,6 +246,7 @@ def fixture_policy(value):
         raise ValueError("fixtures.github_auth must be boolean")
     return {
         "command": command,
+        **({"identity_command": probe} if probe is not None else {}),
         "evidence": description,
         "timeout_seconds": positive(
             value.get("timeout_seconds", DEFAULTS["fixture_timeout_seconds"]),
@@ -239,6 +256,72 @@ def fixture_policy(value):
         "termination_grace_seconds": grace,
         "repairable_exit_codes": list(codes),
     }
+
+
+def formatter_policy(value):
+    """Select only a host-owned executable and pin its output recipe identities."""
+    keys(
+        value,
+        {
+            "command",
+            "recipe_sha256",
+            "implementation_sha256",
+            "timeout_seconds",
+            "termination_grace_seconds",
+        },
+        "formatter",
+    )
+    command = value.get("command")
+    if (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(arg, str) and arg and "\0" not in arg for arg in command)
+        or not Path(command[0]).is_absolute()
+    ):
+        raise ValueError(
+            "formatter.command must start with an absolute trusted executable"
+        )
+    for name in ("recipe_sha256", "implementation_sha256"):
+        if not isinstance(value.get(name), str) or not re.fullmatch(
+            r"[0-9a-f]{64}", value[name]
+        ):
+            raise ValueError(f"formatter.{name} must be a SHA-256 digest")
+    timeout = value.get("timeout_seconds", 1200)
+    grace = value.get("termination_grace_seconds", 780)
+    if type(timeout) is not int or not 1 <= timeout <= 7200:
+        raise ValueError("formatter.timeout_seconds must be from 1 through 7200")
+    if type(grace) is not int or not 1 <= grace <= 3600:
+        raise ValueError(
+            "formatter.termination_grace_seconds must be from 1 through 3600"
+        )
+    return {
+        **value,
+        "command": list(command),
+        "timeout_seconds": timeout,
+        "termination_grace_seconds": grace,
+    }
+
+
+def quickcheck_policy(value):
+    """Reuse trusted command selection with the fixed quick worker's time limits."""
+    keys(
+        value,
+        {"command", "recipe_sha256", "implementation_sha256", "timeout_seconds"},
+        "quickcheck",
+    )
+    policy = formatter_policy(
+        {
+            **value,
+            "timeout_seconds": value.get("timeout_seconds", 3630),
+            "termination_grace_seconds": 30,
+        }
+    )
+    if policy["timeout_seconds"] > 3630:
+        raise ValueError("quickcheck.timeout_seconds cannot exceed 3630")
+    policy.pop(
+        "termination_grace_seconds"
+    )  # The closed quick profile fixes this at 30s.
+    return policy
 
 
 def policy(github, repo, sha, project):
@@ -338,4 +421,20 @@ def job_settings(config, slug, project, github, base):
         else "repository:" + repo,
         "cleanup_allowed": resource is None,
         "config_source": config["config_path"],
+        **(
+            {
+                "formatter": formatter_policy(project["formatter"]),
+                "formatter_policy": {
+                    "source": "host_override",
+                    "config_source": config["config_path"],
+                },
+            }
+            if "formatter" in project
+            else {}
+        ),
+        **(
+            {"quickcheck": quickcheck_policy(project["quickcheck"])}
+            if "quickcheck" in project
+            else {}
+        ),
     }

@@ -62,19 +62,37 @@ def decide(context, selected):
         kind = job.get("kind")
         expected = job.get("expected_phases")
         allowed = {
-            "review": ({"fixtures"}, {"fixtures", "review"}),
+            "review": ({"fixtures"}, {"fixtures", "review"}, {"review"}, set()),
             "response": ({"response"},),
             "creation": ({"creation"},),
         }
         if (
             not isinstance(kind, str)
             or not isinstance(expected, list)
-            or not expected
+            or (not expected and not job.get("fixture_job"))
             or not all(isinstance(phase, str) for phase in expected)
             or set(expected) not in allowed.get(kind, ())
         ):
             pause("phase_selection_unknown", job_id)
             continue
+        fixture_id = job.get("fixture_job")
+        if "fixtures" not in expected and kind == "review":
+            child = by_id.get(fixture_id, {}).get("job", {})
+            if (
+                not isinstance(fixture_id, str)
+                or not job.get("fixture_contract")
+                or child.get("fixture_contract") != job["fixture_contract"]
+                or child.get("head") != job.get("head")
+                or child.get("base") != job.get("base")
+                or "fixtures" not in child.get("expected_phases", [])
+            ):
+                pause("fixture_child_missing_or_mismatched", job_id)
+        if item.get("validation_evidence") == "invalid" or (
+            "fixtures" in expected
+            and ("fixture_contract" in job or "fixture_evidence_version" in job)
+            and item.get("validation_evidence") != "valid"
+        ):
+            pause("validation_contract_or_evidence_changed", job_id, "fixtures")
         action = item.get("action")
         if job.get("action_id"):
             command = (
@@ -182,12 +200,21 @@ def decide(context, selected):
                         if isinstance(child_id, str)
                         else {}
                     )
+                    reused = progress.get("fixture_reused") is True
                     if (
                         not child
-                        or child.get(f"{phase}_job") != job_id
+                        or (not reused and child.get(f"{phase}_job") != job_id)
                         or child.get("head") != revision
                         or child.get("kind") != "review"
-                        or child.get("expected_phases") != ["fixtures"]
+                        or "fixtures" not in child.get("expected_phases", [])
+                        or (
+                            reused
+                            and (
+                                not progress.get("fixture_contract")
+                                or child.get("fixture_contract")
+                                != progress["fixture_contract"]
+                            )
+                        )
                     ):
                         pause("fixture_child_missing_or_mismatched", job_id, phase)
             publication = record.get("publication")
@@ -252,6 +279,21 @@ def observe(url, run_root, job_ids, *, github=None):
             item = jobs.status_job(root / job_id)
             if item["job"]["id"] != job_id:
                 raise ValueError("job identity mismatch")
+            fixture_id = item["job"].get("fixture_job")
+            if isinstance(fixture_id, str) and re.fullmatch(
+                r"[0-9a-f]{16}", fixture_id
+            ):
+                pending.append(fixture_id)
+            if "fixtures" in item["phases"]:
+                from afk_pr.validation import owning_evidence
+
+                item["validation_evidence"] = (
+                    "valid"
+                    if owning_evidence(
+                        root / job_id, item["job"], item["phases"]["fixtures"]
+                    )
+                    else "invalid"
+                )
             for phase in ("response", "creation"):
                 child = (
                     item["phases"].get(phase, {}).get("progress", {}).get("fixture_job")

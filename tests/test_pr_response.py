@@ -1,4 +1,5 @@
 import copy
+import json
 import subprocess
 import tempfile
 import unittest
@@ -8,7 +9,10 @@ from unittest import mock
 
 from afk_pr import jobs, response
 from afk_pr.github import GitHub
+from tests.formatting_fixture import FORMATTED, UNFORMATTED
+from tests.formatting_fixture import policy as formatter_policy
 from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
+from tests.quickcheck_fixture import policy as quickcheck_policy
 
 URL = "https://github.com/example/repository/pull/12"
 
@@ -173,6 +177,93 @@ class ResponseTests(unittest.TestCase):
 
     def edit(self):
         (self.repo / "file.txt").write_text("repaired\n")
+
+    def add_rust(self):
+        root = self.repo / "rust/actors"
+        root.mkdir(parents=True)
+        (root / "Cargo.toml").write_text("[workspace]\n")
+        (root / "lib.rs").write_bytes(UNFORMATTED)
+
+    def test_formats_response_before_single_commit_and_unchanged_fixture_handoff(self):
+        self.job["formatter"] = formatter_policy()
+        self.assertEqual(self.run_response(self.add_rust)["state"], "completed")
+        progress = jobs.read(self.directory / "response-progress.json")
+        candidate = progress["candidate"]
+        self.assertEqual(
+            self.real_git(self.bare, "show", candidate + ":rust/actors/lib.rs"),
+            FORMATTED.decode().strip(),
+        )
+        self.assertEqual(self.real_git(self.repo, "status", "--porcelain"), "")
+        self.assertEqual(self.real_git(self.repo, "rev-parse", "HEAD^"), self.head)
+        child = jobs.read(self.directory.parent / progress["fixture_job"] / "job.json")
+        self.assertEqual(child["head"], candidate)
+        self.assertEqual(child["validation"], self.job["validation"])
+        self.assertEqual([call[1] for call in self.launches], ["fixtures"])
+
+    def test_formatter_failure_blocks_response_commit_push_and_fixture(self):
+        self.job["formatter"] = formatter_policy("malformed")
+        self.assertEqual(self.run_response(self.add_rust)["state"], "failed")
+        self.assertEqual(self.real_git(self.repo, "rev-parse", "HEAD"), self.head)
+        self.assertEqual((self.repo / "rust/actors/lib.rs").read_bytes(), UNFORMATTED)
+        self.assertFalse(self.pushes)
+        self.assertFalse(self.launches)
+
+    def test_same_responder_repairs_quick_failure_then_queues_normal_exact_head_fixture(
+        self,
+    ):
+        self.job.update(quickcheck=quickcheck_policy(), review_timeout=180)
+        reports = []
+
+        def edit_and_check():
+            source = self.repo / "sample.cpp"
+            source.write_text("BROKEN\n")
+            command = self.invocation["development_check_command"]
+            reports.append(
+                json.loads(
+                    subprocess.run(
+                        command, capture_output=True, text=True, check=False, timeout=10
+                    ).stdout
+                )
+            )
+            source.write_text("fixed\n")
+            reports.append(
+                json.loads(
+                    subprocess.run(
+                        command, capture_output=True, text=True, check=False, timeout=10
+                    ).stdout
+                )
+            )
+
+        self.assertEqual(self.run_response(edit_and_check)["state"], "completed")
+        self.assertEqual(
+            [r["development_status"] for r in reports], ["source_failed", "completed"]
+        )
+        progress = jobs.read(self.directory / "response-progress.json")
+        candidate = progress["candidate"]
+        self.assertEqual(
+            self.real_git(self.bare, "show", candidate + ":sample.cpp"), "fixed"
+        )
+        child = jobs.read(self.directory.parent / progress["fixture_job"] / "job.json")
+        self.assertEqual(child["head"], candidate)
+        self.assertEqual(child["validation"], self.job["validation"])
+        self.assertEqual([call[1] for call in self.launches], ["fixtures"])
+
+    def test_response_does_not_publish_after_unconfirmed_development_cleanup(self):
+        self.job.update(quickcheck=quickcheck_policy("no-cleanup"), review_timeout=180)
+
+        def check():
+            self.edit()
+            subprocess.run(
+                self.invocation["development_check_command"],
+                capture_output=True,
+                check=False,
+                timeout=10,
+            )
+
+        self.assertEqual(self.run_response(check)["state"], "failed")
+        self.assertEqual(self.real_git(self.repo, "rev-parse", "HEAD"), self.head)
+        self.assertFalse(self.pushes)
+        self.assertFalse(self.launches)
 
     def test_response_child_inherits_policy_and_finishes_slow_cleanup(self):
         self.job["validation"].update(slow_cleanup_policy())

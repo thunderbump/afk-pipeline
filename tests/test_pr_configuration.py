@@ -13,7 +13,11 @@ from unittest import mock
 
 from afk_pr import config, creation, jobs, lifecycle, workspace
 from afk_pr.__main__ import main
-from tests.pr_fixture_policy import assert_slow_cleanup, slow_cleanup_policy
+from tests.pr_fixture_policy import (
+    assert_slow_cleanup,
+    seal_fixture_result,
+    slow_cleanup_policy,
+)
 
 URL = "https://github.com/example/repository/pull/1"
 REMOTE = "https://github.com/example/repository.git"
@@ -118,6 +122,75 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.state_root(self.host), self.root / "state")
         with self.assertRaises(ValueError):
             config.load_config(self.host)
+
+    def test_host_formatter_is_optional_pinned_and_frozen_into_job(self):
+        self.assertNotIn(
+            "formatter", jobs.read(self.submit(fixtures_only=True) / "job.json")
+        )
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[projects.example.formatter]\ncommand = ["/opt/trusted/format-worker-snapshot"]\nrecipe_sha256 = "'
+            + "a" * 64
+            + '"\nimplementation_sha256 = "'
+            + "b" * 64
+            + '"\n'
+        )
+        directory = self.submit(respond=True)
+        job = jobs.read(directory / "job.json")
+        self.assertEqual(
+            job["formatter"]["command"], ["/opt/trusted/format-worker-snapshot"]
+        )
+        self.assertEqual(job["formatter_policy"]["source"], "host_override")
+        self.host.write_text("malformed")
+        self.assertEqual(
+            jobs.read(directory / "job.json")["formatter"], job["formatter"]
+        )
+
+    def test_formatter_rejects_relative_executable_missing_identity_and_unknown_fields(
+        self,
+    ):
+        valid = {
+            "command": ["/opt/trusted/format-worker-snapshot"],
+            "recipe_sha256": "a" * 64,
+            "implementation_sha256": "b" * 64,
+        }
+        for change in (
+            {"command": ["./candidate-script"]},
+            {"recipe_sha256": ""},
+            {"extra": True},
+            {"timeout_seconds": True},
+            {"termination_grace_seconds": 0},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                config.formatter_policy({**valid, **change})
+
+    def test_host_quickcheck_selection_is_pinned_optional_and_budget_bounded(self):
+        self.assertNotIn(
+            "quickcheck", jobs.read(self.submit(fixtures_only=True) / "job.json")
+        )
+        self.host.write_text(
+            self.host.read_text()
+            + '\n[projects.example.quickcheck]\ncommand = ["/opt/trusted/quick-worker-snapshot"]\nrecipe_sha256 = "'
+            + "c" * 64
+            + '"\nimplementation_sha256 = "'
+            + "d" * 64
+            + '"\n'
+        )
+        job = jobs.read(self.submit(respond=True) / "job.json")
+        self.assertEqual(
+            job["quickcheck"]["command"], ["/opt/trusted/quick-worker-snapshot"]
+        )
+        self.assertEqual(job["quickcheck"]["timeout_seconds"], 3630)
+        self.assertEqual(config.quickcheck_policy(job["quickcheck"]), job["quickcheck"])
+        for change in (
+            {"command": ["./candidate"]},
+            {"timeout_seconds": 3631},
+            {"timeout_seconds": True},
+            {"max_calls": 100},
+            {"recipe_sha256": ""},
+        ):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                config.quickcheck_policy({**job["quickcheck"], **change})
 
     def test_old_validation_section_coexists_with_explicit_fixture_override(self):
         (self.source / "afk.toml").write_text(
@@ -360,6 +433,7 @@ class ConfigurationTests(unittest.TestCase):
         jobs.write(d / "fixtures.json", {"state": "passed", "publication": "published"})
         (d / "fixtures.stdout.log").write_text("passed")
         (d / "fixtures.stderr.log").write_text("")
+        seal_fixture_result(d)
         return d, path
 
     def test_cleanup_retains_active_dirty_failed_and_external_resource(self):
