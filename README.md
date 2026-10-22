@@ -738,16 +738,24 @@ changing execution state. The repository owns safe diagnostic content; this cont
 is not an arbitrary-data secrecy guarantee. Do not write private values as codes.
 AFK's own outcome and exit code remain authoritative. No nested logs are uploaded.
 
-#### Failure evidence and observation retries
+#### Private fixture evidence and observation retries
 
 Repositories may write `fixture-evidence/diagnostic-files.json` with
 `{"schema_version":1,"head":"<40-character candidate SHA>","files":["relative/path.log"]}`.
 The manifest is private, limited to 8 KiB and twelve file paths. Responses admit
 regular files under that evidence directory only when the retained fixture job
-matches the observed failed status, PR, head and base. Absolute paths, parent
+matches the observed completed status, PR, head and base. Successful evidence
+requires an unchanged validation contract and intact execution/publication seals;
+only checksummed manifest files are exposed for successful runs. Failed runs retain their
+wrapper logs and existing path-only manifests. An optional `sha256` object maps
+each file path to its SHA-256 digest; when supplied, every entry must be valid
+and the file must match. These checksums check consistency, not outcome authority. Absolute paths, parent
 traversal, symlinks and escaped files are excluded. These paths precede the
 existing wrapper logs within the fourteen-file evidence allowance. AFK does not
-parse repository-specific diagnostics or publish their raw contents.
+parse repository-specific diagnostics or publish their raw contents. Response task
+contract 4 supplies these paths as `fixture_evidence_files`. The responder may add
+bounded source instrumentation for observations that the caller-owned next
+fixture must collect, while keeping unmeasured values explicitly pending.
 
 A failed read-only job/status command gets three total attempts, thirty seconds
 apart in the worker. Failure counts survive worker restarts, reset when that
