@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import subprocess
 import tempfile
@@ -133,18 +134,150 @@ class ResponseTests(unittest.TestCase):
         jobs.write(self.directory / "context.json", self.context)
         self.run_response()
         data = self.invocation["untrusted_task_data"]
-        self.assertEqual(data["failed_fixture_log_files"], [str(log)])
+        self.assertEqual(data["fixture_evidence_files"], [str(log)])
         self.assertIn(str(log), self.invocation["read_only_evidence"])
         for change in ({"head": "0" * 40}, {"base": "0" * 40}, {"pr_url": URL + "3"}):
             jobs.write(retained / "job.json", {**self.job, "id": identifier, **change})
             from afk_pr.execution import summarize
 
             self.assertEqual(
-                response.failed_fixture_logs(
+                response.fixture_evidence_files(
                     self.directory, self.job, summarize(self.context)
                 ),
                 [],
             )
+
+    def test_success_measurements_reach_response_only_from_unchanged_sealed_execution(
+        self,
+    ):
+        from afk_pr.execution import summarize
+        from afk_pr.validation import contract, publication_seal, seal
+
+        identifier = "e" * 16
+        retained = self.directory.parent / identifier
+        evidence = retained / "fixture-evidence"
+        evidence.mkdir(parents=True)
+        artifact = evidence / "normal-world-success.json"
+        artifact.write_text('{"head":"' + self.head + '","measurements":"bounded"}\n')
+        jobs.write(
+            evidence / "diagnostic-files.json",
+            {
+                "schema_version": 1,
+                "head": self.head,
+                "files": [artifact.name],
+                "sha256": {
+                    artifact.name: hashlib.sha256(artifact.read_bytes()).hexdigest()
+                },
+            },
+        )
+        # Exercise real response admission with a retained result and its real seals.
+        self.job["validation"]["command"] = ["./scripts/validate"]
+        fixture_job = {**self.job, "id": identifier}
+        fixture_job["fixture_contract"] = contract(fixture_job)
+        phase = {
+            "state": "passed",
+            "candidate_unchanged": True,
+            "contract_unchanged": True,
+            "publication": "published",
+            "url": URL + "#fixture",
+        }
+        jobs.write(retained / "job.json", fixture_job)
+        jobs.write(retained / "fixtures.json", phase)
+        (retained / "fixtures.stdout.log").write_text(
+            "private successful wrapper output"
+        )
+        jobs.write(
+            retained / "fixtures-seal.json",
+            {"sha256": seal(retained, fixture_job, phase)},
+        )
+        jobs.write(
+            retained / "fixtures-publication-seal.json",
+            {"sha256": publication_seal(phase)},
+        )
+        self.context["statuses"] = [
+            {"state": "success", "context": "afk/fixtures/" + identifier}
+        ]
+        jobs.write(self.directory / "context.json", self.context)
+        self.assertEqual(self.run_response()["state"], "completed")
+        self.assertEqual(
+            self.invocation["untrusted_task_data"]["fixture_evidence_files"],
+            [str(artifact)],
+        )
+        self.assertIn(str(artifact), self.invocation["read_only_evidence"])
+        self.assertNotIn(
+            str(retained / "fixtures.stdout.log"), self.invocation["read_only_evidence"]
+        )
+        summary = summarize(self.context)
+        # Advisory checksums cannot override a changed execution, contract, or revision.
+        mutations = (
+            ("head", "0" * 40),
+            ("base", "0" * 40),
+            ("pr_url", URL + "3"),
+            ("validation", {"command": ["./different"]}),
+            ("fixture_contract", None),
+        )
+        for key, value in mutations:
+            with self.subTest(key=key):
+                changed = {**fixture_job, key: value}
+                jobs.write(retained / "job.json", changed)
+                jobs.write(
+                    retained / "fixtures-seal.json",
+                    {"sha256": seal(retained, changed, phase)},
+                )
+                self.assertEqual(
+                    response.fixture_evidence_files(self.directory, self.job, summary),
+                    [],
+                )
+        jobs.write(retained / "job.json", fixture_job)
+        jobs.write(
+            retained / "fixtures-seal.json",
+            {"sha256": seal(retained, fixture_job, phase)},
+        )
+        for changed in (
+            {**phase, "contract_unchanged": False},
+            {**phase, "state": "failed"},
+        ):
+            jobs.write(retained / "fixtures.json", changed)
+            self.assertEqual(
+                response.fixture_evidence_files(self.directory, self.job, summary), []
+            )
+        jobs.write(retained / "fixtures.json", phase)
+        (retained / "fixtures.stdout.log").write_text("tampered successful execution")
+        self.assertEqual(
+            response.fixture_evidence_files(self.directory, self.job, summary), []
+        )
+        # Even a valid execution cannot admit a missing checksum, tampered artifact or linked file.
+        jobs.write(
+            retained / "fixtures-seal.json",
+            {"sha256": seal(retained, fixture_job, phase)},
+        )
+        manifest = evidence / "diagnostic-files.json"
+        original_manifest = jobs.read(manifest)
+        jobs.write(
+            manifest,
+            {key: value for key, value in original_manifest.items() if key != "sha256"},
+        )
+        self.assertEqual(
+            response.fixture_evidence_files(self.directory, self.job, summary), []
+        )
+        jobs.write(manifest, original_manifest)
+        jobs.write(
+            retained / "fixtures-seal.json",
+            {"sha256": seal(retained, fixture_job, phase)},
+        )
+        original = artifact.read_text()
+        artifact.write_text("tampered measurements")
+        self.assertEqual(
+            response.fixture_evidence_files(self.directory, self.job, summary), []
+        )
+        artifact.unlink()
+        outside = self.root / "outside-success.json"
+        outside.write_text(original)
+        artifact.symlink_to(outside)
+        self.assertEqual(
+            response.fixture_evidence_files(self.directory, self.job, summary), []
+        )
+        self.assertEqual(jobs.read(retained / "fixtures.json"), phase)
 
     def test_repository_diagnostic_manifest_admits_nested_logs_only(self):
         retained = self.root / "retained"
@@ -297,7 +430,7 @@ class ResponseTests(unittest.TestCase):
         self.assertEqual(jobs.read(summary)["statuses"][0]["state"], "failure")
         self.assertEqual(self.invocation["read_only_evidence"][0], str(summary))
         self.assertEqual(self.invocation["purpose"], "feedback_response")
-        self.assertEqual(self.invocation["task_contract_version"], 3)
+        self.assertEqual(self.invocation["task_contract_version"], 4)
         instructions = self.invocation["trusted_task_instructions"]
         for requirement in (
             "inspect its callers and sibling paths",
