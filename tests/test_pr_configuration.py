@@ -9,9 +9,10 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-from afk_pr import config, creation, jobs, lifecycle, workspace
+from afk_pr import config, creation, jobs, lifecycle, response, workspace
 from afk_pr.__main__ import main
 from tests.pr_fixture_policy import (
     assert_slow_cleanup,
@@ -122,6 +123,81 @@ class ConfigurationTests(unittest.TestCase):
         self.assertEqual(config.state_root(self.host), self.root / "state")
         with self.assertRaises(ValueError):
             config.load_config(self.host)
+
+    def test_agent_default_and_override_reach_each_phase_inference(self):
+        host = self.host.read_text()
+        self.git(self.source, "remote", "add", "origin", REMOTE)
+        for override, expected in ((None, 3600), (73, 73)):
+            for phase in ("creation", "response", "review"):
+                with self.subTest(override=override, phase=phase):
+                    self.host.write_text(
+                        (f"agent_timeout_seconds = {override}\n" if override else "")
+                        + host
+                    )
+                    launcher = mock.Mock()
+                    if phase == "creation":
+                        bead_id = f"central-timeout-{expected}"
+                        bead = {
+                            "id": bead_id,
+                            "title": "Task",
+                            "description": "Implement value",
+                            "labels": ["project:example"],
+                            "status": "open",
+                        }
+                        with (
+                            mock.patch.object(
+                                creation, "read_configured_bead", return_value=bead
+                            ),
+                            mock.patch.object(
+                                creation, "remote_head", return_value=None
+                            ),
+                        ):
+                            submitted = creation.submit_creation(
+                                bead_id, self.host, github=self.gh, launcher=launcher
+                            )
+                        directory = Path(submitted["directory"])
+                    else:
+                        submitted = jobs.submit(
+                            URL,
+                            self.host,
+                            respond=phase == "response",
+                            github=self.gh,
+                            launcher=launcher,
+                        )
+                        directory = Path(submitted["directory"])
+                    job = jobs.read(directory / "job.json")
+                    self.assertEqual(job["review_timeout"], expected)
+                    self.assertEqual(job["validation"]["timeout_seconds"], 900)
+                    self.assertEqual(job["acquisition_timeout"], 600)
+                    launcher.assert_any_call(directory, phase, expected)
+                    # Workers must keep the submitted budget after host edits.
+                    self.host.write_text("invalid TOML")
+                    with (
+                        mock.patch.object(jobs, "checkout", return_value=self.source),
+                        mock.patch.object(
+                            creation,
+                            "remote_head",
+                            side_effect=lambda job, branch: (
+                                self.base if branch == "main" else None
+                            ),
+                        ),
+                        mock.patch.object(response, "current_pr", return_value=self.pr),
+                        mock.patch(
+                            "afk_inference.runtime.invoke",
+                            return_value=SimpleNamespace(outcome="failed"),
+                        ) as invoke,
+                    ):
+                        if phase == "creation":
+                            result = creation.implement(directory, job)
+                        elif phase == "response":
+                            result = response.respond(directory, job, github=self.gh)
+                        else:
+                            result = jobs.review(directory, job)
+                    self.assertEqual(result["inference_outcome"], "failed")
+                    invoke.assert_called_once()
+                    self.assertEqual(
+                        invoke.call_args.kwargs["timeout_seconds"], expected
+                    )
 
     def test_host_formatter_is_optional_pinned_and_frozen_into_job(self):
         self.assertNotIn(
