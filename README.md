@@ -302,7 +302,7 @@ disk. Jobs live under `state_root/pr-reviews/<id>`, while independent phase clon
 live under `workspace_root/<id>/<phase>`, defaulting to `state_root/workspaces`.
 Shared fixture resources must live outside disposable workspaces.
 
-[Pipeline defaults](afk_pr/defaults.toml) set agent timeout to 1800 seconds,
+[Pipeline defaults](afk_pr/defaults.toml) set agent timeout to 3600 seconds, one hour,
 fixture timeout to 900 and acquisition timeout to 600 per Git operation. Host
 `agent_timeout_seconds` and `acquisition_timeout_seconds` can override their
 values. Model/thinking choices remain in the existing inference runtime.
@@ -432,9 +432,10 @@ ordinary final validation workflow available.
 Each inference gets at most two calls, one active call and its existing wall-time
 budget. The client limit is the smaller of the configured limit and remaining
 inference time, reserving 30 seconds for cleanup and 60 seconds for model feedback.
-The backend's one-hour ceiling is an upper bound. It does not silently extend the
-default 1800-second inference. Cold preparation may time out; the existing host
-`agent_timeout_seconds` setting can deliberately allow longer attempts.
+The backend's one-hour ceiling is an upper bound within the default 3600-second
+inference. Cold preparation may time out; the existing host
+`agent_timeout_seconds` setting can deliberately allow longer inference attempts
+without raising the backend ceiling.
 
 The client remains in Pi's process group. The separate validator service owns the
 VM and watches its socket for disconnection. AFK closes the private lease after
